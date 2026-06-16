@@ -18,6 +18,7 @@ from app.models import (
 
 from ._helpers import _item_tags
 from app.translation_service import item_translation_fields, translate_existing_items
+from app.engine import _web_translation_model
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
@@ -160,6 +161,28 @@ def list_active_runs(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/runs/{run_id}/stop")
+def stop_run(run_id: str, db: Session = Depends(get_db)):
+    run = db.query(CollectionRun).filter(CollectionRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in (JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"):
+        return {"id": run.id, "status": run.status, "message": "Run is not active"}
+
+    now = datetime.now(timezone.utc)
+    started = run.started_at
+    if started and getattr(started, "tzinfo", None) is None:
+        started = started.replace(tzinfo=timezone.utc)
+    run.status = JobStatus.FAILED
+    run.completed_at = now
+    run.duration_ms = int((now - started).total_seconds() * 1000) if started else None
+    errors = list(run.error_log or [])
+    errors.append("Stopped manually from UI; previous collection did not complete.")
+    run.error_log = errors
+    db.commit()
+    return {"id": run.id, "status": run.status, "message": "Run stopped"}
+
+
 # ── Items ───────────────────────────────────────────────────────────────
 
 @router.get("/items", response_model=ItemListOut)
@@ -245,9 +268,7 @@ async def translate_items(
         ModelConfig.is_default == True,
         ModelConfig.is_active == True,
     ).first()
-    if not model:
-        raise HTTPException(status_code=400, detail="No active default model configured")
-    return await translate_existing_items(db, model, limit=limit)
+    return await translate_existing_items(db, model or _web_translation_model(), limit=limit)
 
 
 @router.get("/items/ids")

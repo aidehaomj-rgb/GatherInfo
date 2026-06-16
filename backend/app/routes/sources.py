@@ -22,6 +22,7 @@ _CHANNELS_NO_KEY_NEEDED = frozenset({"web_scrape", "official", "rss", "manual", 
 
 def _eval_configured(channel: str, api_key: str | None) -> bool:
     """Determine if a source is configured based on channel + API key presence."""
+    channel = str(channel or "").lower()
     if channel in _CHANNELS_NO_KEY_NEEDED:
         return True
     return bool(api_key)

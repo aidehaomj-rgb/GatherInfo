@@ -79,10 +79,10 @@ class CollectionEngine:
         result = await connector.execute(run, keywords)
         # Add Chinese translations for non-Chinese items before storing.
         # The original title/content are preserved; translations live in raw_metadata.
-        if model and result.items:
+        if result.items:
             try:
                 from app.translation_service import translate_fetch_items_to_metadata
-                await translate_fetch_items_to_metadata(result.items, model)
+                await translate_fetch_items_to_metadata(result.items, model or _web_translation_model())
             except Exception as exc:
                 logger.warning("Item translation failed (non-blocking): %s", exc)
         self._persist_items(
@@ -348,6 +348,17 @@ class CollectionEngine:
 def _hash(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _web_translation_model() -> ModelConfig:
+    model = ModelConfig()
+    model.provider = "web_fallback"
+    model.model_name = "google-translate-web"
+    model.base_url = ""
+    model.api_key = ""
+    model.temperature = 0.1
+    model.max_tokens = 4096
+    return model
 
 
 def _coerce_datetime(value):

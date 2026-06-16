@@ -112,6 +112,8 @@ export const fetchBatches = (topicId?: string, limit = 20) =>
     limit: String(limit),
   } as Record<string, string>);
 export const fetchActiveRuns = () => get<import("./types").ActiveRunOut[]>("/runs/active");
+export const stopRun = (runId: string) =>
+  post<{ id: string; status: string; message: string }>(`/runs/${runId}/stop`);
 
 export const fetchRuns = (topicId?: string, limit = 20) =>
   get<CollectRun[]>("/runs", {

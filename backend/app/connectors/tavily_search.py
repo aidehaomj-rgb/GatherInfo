@@ -71,7 +71,7 @@ class TavilyCollector(BaseCollector):
         ) or keywords or self.config.default_keywords or ["global trade news"]
         items: list[FetchItem] = []
         errors: list[str] = []
-        per_query = min(20, max_items // max(1, len(queries)))
+        per_query = max(1, min(20, max_items // max(1, len(queries))))
 
         include_domains = _build_domain_filter(self.config.default_categories)
         include_domains_param = include_domains if include_domains else None
@@ -84,15 +84,17 @@ class TavilyCollector(BaseCollector):
                 if len(items) >= max_items:
                     break
                 try:
-                    resp = await client.post(self.BASE_URL, json={
+                    payload = {
                         "api_key": self.api_key,
                         "query": query,
                         "search_depth": "advanced",
                         "max_results": per_query,
                         "include_answer": False,
                         "include_raw_content": False,
-                        "include_domains": include_domains_param,
-                    })
+                    }
+                    if include_domains_param:
+                        payload["include_domains"] = include_domains_param
+                    resp = await client.post(self.BASE_URL, json=payload)
                     if resp.status_code == 429:
                         errors.append(f"Rate limited: {query}")
                         logger.warning("Tavily rate limited for query: %s", query[:60])

@@ -1,9 +1,25 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit } from "lucide-react";
-import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
+import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Square } from "lucide-react";
+import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories, fetchActiveRuns, stopRun } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import type { Topic, CollectResult, ModelConfig, Source } from "../types";
+import type { Topic, CollectResult, ModelConfig, Source, ActiveRunOut } from "../types";
 import { TopicForm } from "./TopicForm";
+
+const TOPIC_COLLECT_PENDING_KEY = "gatherinfo.topicCollect.pending";
+
+function readPendingTopicIds() {
+  try {
+    const raw = window.localStorage.getItem(TOPIC_COLLECT_PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingTopicIds(ids: string[]) {
+  window.localStorage.setItem(TOPIC_COLLECT_PENDING_KEY, JSON.stringify(Array.from(new Set(ids))));
+}
 
 /** Humanize a 5-field cron expression into a Chinese description (best-effort). */
 function humanizeCron(cron: string | null): string {
@@ -30,6 +46,9 @@ export function TopicsPage() {
   const [editing, setEditing] = useState<Topic | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [collecting, setCollecting] = useState<string | null>(null);
+  const [pendingCollectIds, setPendingCollectIds] = useState<string[]>(() => readPendingTopicIds());
+  const [activeRuns, setActiveRuns] = useState<ActiveRunOut[]>([]);
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
   const [collectMsg, setCollectMsg] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -60,6 +79,31 @@ export function TopicsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const refreshActiveRuns = useCallback(async () => {
+    try {
+      const runs = await fetchActiveRuns();
+      setActiveRuns(runs);
+      const activeTopicIds = new Set(runs.map((run) => run.topic_id).filter(Boolean) as string[]);
+      setPendingCollectIds((prev) => {
+        const next = prev.filter((id) => activeTopicIds.has(id) || collecting === id);
+        if (prev.length > 0 && next.length === 0 && prev.some((id) => !activeTopicIds.has(id))) {
+          void load();
+          setCollectMsg("采集任务已结束，可查看累计采集或采集历史。");
+        }
+        writePendingTopicIds(next);
+        return next;
+      });
+    } catch {
+      // Active-run status is best effort; the collection request itself still reports errors.
+    }
+  }, [collecting, load]);
+
+  useEffect(() => {
+    void refreshActiveRuns();
+    const timer = window.setInterval(() => { void refreshActiveRuns(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [refreshActiveRuns]);
+
   const handleDelete = (id: string) => {
     setConfirmDelete({ id, message: `删除主题 "${id}"？` });
   };
@@ -78,15 +122,32 @@ export function TopicsPage() {
 
   const handleCollect = async (id: string) => {
     setCollecting(id);
+    setPendingCollectIds((prev) => {
+      const next = Array.from(new Set([...prev, id]));
+      writePendingTopicIds(next);
+      return next;
+    });
     setCollectMsg(null);
     try {
+      setCollectMsg("采集任务已启动，页面会自动刷新运行状态。");
       const results: CollectResult[] = await collectTopic(id);
       const total = results.reduce((s, r) => s + r.items_new, 0);
       const fails = results.filter((r) => r.errors?.length).length;
       setCollectMsg(`采集完成: ${total} 条新增${fails > 0 ? `, ${fails} 源失败` : ""}`);
+      setPendingCollectIds((prev) => {
+        const next = prev.filter((topicId) => topicId !== id);
+        writePendingTopicIds(next);
+        return next;
+      });
       await load();
+      await refreshActiveRuns();
     } catch (e) {
       setCollectMsg(`采集失败: ${e instanceof Error ? e.message : "未知错误"}`);
+      setPendingCollectIds((prev) => {
+        const next = prev.filter((topicId) => topicId !== id);
+        writePendingTopicIds(next);
+        return next;
+      });
     }
     setCollecting(null);
   };
@@ -106,6 +167,30 @@ export function TopicsPage() {
     setGenerating(null);
   };
 
+  const handleStopRun = async (run: ActiveRunOut) => {
+    setStoppingRunId(run.id);
+    try {
+      await stopRun(run.id);
+      if (run.topic_id) {
+        setPendingCollectIds((prev) => {
+          const next = prev.filter((id) => id !== run.topic_id);
+          writePendingTopicIds(next);
+          return next;
+        });
+      }
+      setCollectMsg("采集任务已停止。");
+      await refreshActiveRuns();
+      await load();
+    } catch (e) {
+      setCollectMsg(`停止失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    } finally {
+      setStoppingRunId(null);
+    }
+  };
+
+  const activeTopicIds = new Set(activeRuns.map((run) => run.topic_id).filter(Boolean) as string[]);
+  const runningTopicIds = new Set([...pendingCollectIds, ...activeTopicIds]);
+
   if (loading) return <div className="loading">加载主题...</div>;
   if (error) return <div className="error-banner">{error}</div>;
 
@@ -124,6 +209,33 @@ export function TopicsPage() {
       {collectMsg && (
         <div className="toast" onClick={() => setCollectMsg(null)}>
           {collectMsg}
+        </div>
+      )}
+
+      {activeRuns.length > 0 && (
+        <div className="history-active-section" style={{ marginBottom: 16 }}>
+          <h3><span className="pulse-dot" /> 正在执行采集 ({activeRuns.length})</h3>
+          {activeRuns.map((run) => (
+            <div key={run.id} className="active-run-card">
+              <div className="run-info">
+                <h4>{run.topic_name || run.topic_id || run.source_name || run.source_id}</h4>
+                <p>{run.source_name || run.source_id} · 新增 {run.items_new} 条 · 已运行 {run.duration_seconds ?? 0} 秒</p>
+              </div>
+              <div className="run-status">
+                <span className="chip chip--blue">{run.status}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-danger"
+                  onClick={() => void handleStopRun(run)}
+                  disabled={stoppingRunId === run.id}
+                  style={{ marginLeft: 8 }}
+                >
+                  <Square size={12} />
+                  {stoppingRunId === run.id ? "停止中..." : "停止"}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -199,9 +311,9 @@ export function TopicsPage() {
             </div>
 
             <div className="card-item-footer">
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => handleCollect(t.id)} disabled={collecting === t.id}>
-                <RefreshCw size={12} className={collecting === t.id ? "spin" : ""} />
-                {collecting === t.id ? "采集中..." : "立即采集"}
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => handleCollect(t.id)} disabled={runningTopicIds.has(t.id)}>
+                <RefreshCw size={12} className={runningTopicIds.has(t.id) ? "spin" : ""} />
+                {runningTopicIds.has(t.id) ? "采集中..." : "立即采集"}
               </button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleGenerateReport(t.id, t.name)}
                 disabled={generating === t.id} title={models.length === 0 ? "请先在模型配置页面添加AI模型" : "生成智能分析报告"}>
