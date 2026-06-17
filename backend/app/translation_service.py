@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -22,7 +23,7 @@ def needs_translation(language: str | None, text: str | None = None) -> bool:
     lang = (language or "").strip().lower()
     if lang in ZH_LANGS:
         return False
-    if text and _has_cjk(text):
+    if text and _mostly_chinese(text):
         return False
     return True
 
@@ -230,15 +231,45 @@ def _normalize_translation(row: dict[str, Any]) -> dict[str, str]:
 
 async def _translate_records_with_web_fallback(records: list[dict[str, str]]) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=60, proxy=_translation_proxy()) as client:
         for record in records:
-            rows.append({
+            row = {
                 "id": str(record.get("id", "")),
-                "title_zh": await _translate_text_with_google(client, record.get("title", "")),
-                "summary_zh": await _translate_text_with_google(client, record.get("summary", "")),
-                "content_zh": await _translate_text_with_google(client, record.get("content", "")),
-            })
+                "title_zh": "",
+                "summary_zh": "",
+                "content_zh": "",
+            }
+            for source_key, target_key in (
+                ("title", "title_zh"),
+                ("summary", "summary_zh"),
+                ("content", "content_zh"),
+            ):
+                try:
+                    row[target_key] = await _translate_text_with_google(
+                        client,
+                        record.get(source_key, ""),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Web translation failed for %s/%s: %r",
+                        row["id"],
+                        source_key,
+                        exc,
+                    )
+            rows.append(row)
     return rows
+
+
+def _translation_proxy() -> str | None:
+    """Reuse the local proxy for HTTPS translation calls when only HTTP_PROXY is set."""
+    return (
+        os.getenv("HTTPS_PROXY")
+        or os.getenv("https_proxy")
+        or os.getenv("ALL_PROXY")
+        or os.getenv("all_proxy")
+        or os.getenv("HTTP_PROXY")
+        or os.getenv("http_proxy")
+    )
 
 
 async def _translate_text_with_google(client: httpx.AsyncClient, text: str | None) -> str:
@@ -289,3 +320,13 @@ def _clean(value: Any) -> str | None:
 
 def _has_cjk(text: str) -> bool:
     return bool(re.search(r"[\u3400-\u9fff]", text))
+
+
+def _mostly_chinese(text: str) -> bool:
+    letters = re.findall(r"[A-Za-z]", text)
+    cjk = re.findall(r"[\u3400-\u9fff]", text)
+    if not cjk:
+        return False
+    if not letters:
+        return True
+    return len(cjk) >= len(letters) * 0.8
