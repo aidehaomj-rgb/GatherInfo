@@ -1,6 +1,6 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X } from "lucide-react";
+import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors } from "../api";
 import type { Source, ConnectorInfo } from "../types";
 
@@ -15,6 +15,8 @@ export function SourcesPage() {
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
   const [sourceSearch, setSourceSearch] = useState("");
+  const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +58,76 @@ export function SourcesPage() {
   const visibleSources = sources
     .filter((s) => sourceTab === "configured" ? s.is_configured : !s.is_configured)
     .filter((s) => matchesSourceSearch(s, sourceSearch));
+
+  const renderSourceCard = (s: Source) => (
+    <article key={s.id} className="card-item card-item--compact">
+      <div className="card-item-header">
+        <div className="card-item-title">
+          <h4>
+            {s.name}
+            {s.homepage_url && (
+              <a href={s.homepage_url} target="_blank" rel="noreferrer" className="source-home-link" title={`打开官网 / 购买服务: ${s.homepage_url}`}>
+                <ExternalLink size={12} /> 官网
+              </a>
+            )}
+          </h4>
+          <span className="text-muted small">{s.id} · {s.channel}</span>
+        </div>
+        <div className="card-item-actions">
+          <span className={`badge ${s.is_configured ? (s.is_active ? "badge--green" : "badge--gray") : "badge--yellow"}`}>
+            {s.is_configured ? (s.is_active ? "活跃" : "停用") : "待配置"}
+          </span>
+          {!s.is_configured && s.api_key && <span className="badge badge--blue" style={{ marginLeft: 4 }}>已填Key</span>}
+        </div>
+      </div>
+      <div className="card-item-meta card-item-meta--compact">
+        <span className="meta-inline"><strong>地址:</strong> <code>{s.base_url || s.api_endpoint || "-"}</code></span>
+        <span className="meta-inline"><strong>语言:</strong> {(s.languages ?? []).join(", ") || "any"}</span>
+        <span className="meta-inline"><strong>关键词:</strong> {(s.default_keywords ?? []).join(", ") || "无"}</span>
+        <span className="meta-inline text-muted">采集 {s.items_collected} 条{s.last_error && <span className="text-red"> · 错误: {s.last_error}</span>}</span>
+      </div>
+      <div className="card-item-footer">
+        {s.is_configured ? (
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleValidate(s.id)}>
+            <CheckCircle size={12} /> 验证连接
+          </button>
+        ) : (
+          <button type="button" className="btn btn-sm btn-accent" onClick={() => setEditing(s)}>
+            <Settings size={12} /> 配置并启用
+          </button>
+        )}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(s)}>
+          <Edit3 size={12} /> 编辑
+        </button>
+        <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDelete(s.id)}>
+          <Trash2 size={12} /> 删除
+        </button>
+      </div>
+    </article>
+  );
+
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+
+  // Build hierarchical grouping: L1 (default_categories[0]) -> L2 (default_categories[1])
+  type GroupNode = { l1: string; l2: string; sources: Source[] };
+  const groupByHierarchy = (srcs: Source[]) => {
+    const tree: Record<string, Record<string, Source[]>> = {};
+    for (const s of srcs) {
+      const cats = s.default_categories ?? [];
+      const l1 = cats[0] || "未分类";
+      const l2 = cats[1] || "—";
+      if (!tree[l1]) tree[l1] = {};
+      if (!tree[l1][l2]) tree[l1][l2] = [];
+      tree[l1][l2].push(s);
+    }
+    return tree;
+  };
+  const groupedTree = groupByHierarchy(visibleSources);
 
   if (initialLoad) return <div className="loading">加载信息源...</div>;
   if (loading) return null;
@@ -125,57 +197,55 @@ export function SourcesPage() {
         </span>
       </div>
 
+      {/* View mode toggle */}
+      <div className="segmented-control" style={{ marginBottom: 12 }}>
+        <button type="button" className={`seg-btn ${groupView === "grouped" ? "seg-btn--active" : ""}`} onClick={() => setGroupView("grouped")}>
+          <FolderTree size={12} /> 分层分组
+        </button>
+        <button type="button" className={`seg-btn ${groupView === "flat" ? "seg-btn--active" : ""}`} onClick={() => setGroupView("flat")}>
+          <List size={12} /> 平铺列表
+        </button>
+      </div>
+
       <div className="card-list">
-        {visibleSources.map((s) => (
-          <article key={s.id} className="card-item card-item--compact">
-            <div className="card-item-header">
-              <div className="card-item-title">
-                <h4>
-                  {s.name}
-                  {s.homepage_url && (
-                    <a href={s.homepage_url} target="_blank" rel="noreferrer" className="source-home-link" title={`打开官网 / 购买服务: ${s.homepage_url}`}>
-                      <ExternalLink size={12} /> 官网
-                    </a>
-                  )}
-                </h4>
-                <span className="text-muted small">{s.id} · {s.channel}</span>
+        {groupView === "flat" && visibleSources.map((s) => renderSourceCard(s))}
+        {groupView === "grouped" && Object.entries(groupedTree).map(([l1, l2map]) => {
+          const l1Count = Object.values(l2map).reduce((n, arr) => n + arr.length, 0);
+          const l1Collapsed = collapsedGroups.has(`L1:${l1}`);
+          return (
+            <div key={`L1:${l1}`} className="source-group-l1" style={{ marginBottom: 16 }}>
+              <div
+                className="source-group-header"
+                onClick={() => toggleGroup(`L1:${l1}`)}
+                style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "8px 10px", background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginBottom: 8 }}
+              >
+                {l1Collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                <strong style={{ fontSize: "0.9rem" }}>{l1}</strong>
+                <span className="text-muted small">({l1Count})</span>
               </div>
-              <div className="card-item-actions">
-                <span className={`badge ${s.is_configured ? (s.is_active ? "badge--green" : "badge--gray") : "badge--yellow"}`}>
-                  {s.is_configured ? (s.is_active ? "活跃" : "停用") : "待配置"}
-                </span>
-                {!s.is_configured && s.api_key && <span className="badge badge--blue" style={{ marginLeft: 4 }}>已填Key</span>}
-              </div>
+              {!l1Collapsed && Object.entries(l2map).map(([l2, arr]) => {
+                const l2Key = `L1:${l1}|L2:${l2}`;
+                const l2Collapsed = collapsedGroups.has(l2Key);
+                return (
+                  <div key={l2Key} style={{ marginLeft: 16, marginBottom: 10 }}>
+                    <div
+                      className="source-group-header"
+                      onClick={() => toggleGroup(l2Key)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "6px 8px", borderBottom: "1px solid var(--line-light)", marginBottom: 6 }}
+                    >
+                      {l2Collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{l2}</span>
+                      <span className="text-muted small">({arr.length})</span>
+                    </div>
+                    {!l2Collapsed && arr.map((s) => renderSourceCard(s))}
+                  </div>
+                );
+              })}
             </div>
-            <div className="card-item-meta card-item-meta--compact">
-              <span className="meta-inline"><strong>地址:</strong> <code>{s.base_url || s.api_endpoint || "-"}</code></span>
-              <span className="meta-inline"><strong>语言:</strong> {(s.languages ?? []).join(", ") || "any"}</span>
-              <span className="meta-inline"><strong>关键词:</strong> {(s.default_keywords ?? []).join(", ") || "无"}</span>
-              <span className="meta-inline text-muted">采集 {s.items_collected} 条{s.last_error && <span className="text-red"> · 错误: {s.last_error}</span>}</span>
-            </div>
-            <div className="card-item-footer">
-              {s.is_configured ? (
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleValidate(s.id)}>
-                  <CheckCircle size={12} /> 验证连接
-                </button>
-              ) : (
-                <button type="button" className="btn btn-sm btn-accent" onClick={() => setEditing(s)}>
-                  <Settings size={12} /> 配置并启用
-                </button>
-              )}
-              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(s)}>
-                <Edit3 size={12} /> 编辑
-              </button>
-              <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDelete(s.id)}>
-                <Trash2 size={12} /> 删除
-              </button>
-            </div>
-          </article>
-        ))}
+          );
+        })}
         {visibleSources.length === 0 && (
-          <div className="empty-state">
-            没有找到匹配的信息源
-          </div>
+          <div className="empty-state">没有找到匹配的信息源</div>
         )}
       </div>
 

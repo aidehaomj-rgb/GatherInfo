@@ -380,3 +380,32 @@ export interface NotificationConfig {
   created_at: string | null;
   updated_at: string | null;
 }
+
+
+// ── YMG-Deep integration ───────────────────────────────────────────────
+export interface YmgEvidenceItem {
+  id: string;
+  title: string;
+  url: string | null;
+  summary: string | null;
+  source: string | null;
+  published_at: string | null;
+  language: string | null;
+}
+
+export interface YmgAnalyzeResponse {
+  analysis_topic: string;
+  evidence_count: number;
+  evidence_digest: string;
+  evidence_items: YmgEvidenceItem[];
+  ymg_session_id: string | null;
+  ymg_status: string;
+  ymg_message: string | null;
+  ymg_base_url: string;
+}
+
+export interface YmgHealthResponse {
+  reachable: boolean;
+  base_url: string;
+  message: string | null;
+}

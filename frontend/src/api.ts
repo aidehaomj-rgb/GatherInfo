@@ -322,3 +322,19 @@ export const updateNotification = (id: string, data: Partial<NotificationConfig>
 export const deleteNotification = (id: string) => del(`/notifications/${id}`);
 export const testNotification = (id: string) =>
   post<{ success: boolean; message: string }>("/notifications/test", { id });
+
+
+// ── YMG-Deep integration ───────────────────────────────────────────────
+
+export const ymgHealth = () =>
+  get<import("./types").YmgHealthResponse>("/ymg-deep/health");
+
+export const ymgAnalyze = (body: {
+  topic_id?: string;
+  item_ids?: string[];
+  collection_run_ids?: string[];
+  model_id?: string;
+  ymg_depth?: string;
+  ymg_mode?: string;
+  extra_requirements?: string;
+}) => post<import("./types").YmgAnalyzeResponse>("/ymg-deep/analyze", body);

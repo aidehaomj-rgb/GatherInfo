@@ -5,6 +5,12 @@ import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, f
 import type { Report, Topic, ModelConfig } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
+import { YmgDeepPanel } from "./YmgDeepPanel";
+
+type GenMode = "single" | "multi";
+type SingleSubMode = "merged" | "perBatch";
+
+interface BatchOption { batch_id: string; label: string; run_id: string; }
 
 export function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
@@ -13,20 +19,25 @@ export function ReportsPage() {
   const [ollamaModels, setOllamaModels] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTopic, setSelectedTopic] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
+  const [genMode, setGenMode] = useState<GenMode>("single");
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Report | null>(null);
-  const [batchOptions, setBatchOptions] = useState<{batch_id: string; label: string; run_id: string}[]>([]);
-  const [selectedBatchId, setSelectedBatchId] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{id: string; message: string} | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; message: string } | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  // single-topic state
+  const [selectedTopic, setSelectedTopic] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [singleSubMode, setSingleSubMode] = useState<SingleSubMode>("merged");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [r, t, m] = await Promise.all([
-        fetchReports(selectedTopic || undefined),
+        fetchReports(undefined),
         fetchTopics(),
         fetchModels(),
       ]);
@@ -35,14 +46,14 @@ export function ReportsPage() {
       setModels(m);
       setError(null);
       setOllamaModels({});
-      const ollamaConfigs = m.filter(mdl => mdl.provider === 'ollama' && mdl.is_active);
+      const ollamaConfigs = m.filter((mdl) => mdl.provider === "ollama" && mdl.is_active);
       if (ollamaConfigs.length > 0) {
         const results: Record<string, string[]> = {};
         await Promise.all(ollamaConfigs.map(async (mdl) => {
           try {
             const res = await listAvailableModels(mdl.id);
             if (res.success && res.models.length > 0) results[mdl.id] = res.models;
-          } catch {}
+          } catch { /* ignore */ }
         }));
         setOllamaModels(results);
       }
@@ -50,25 +61,26 @@ export function ReportsPage() {
       setError(e instanceof Error ? e.message : "失败");
     }
     setLoading(false);
-  }, [selectedTopic]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
-  const parseModelSelection = (value: string): { modelId: string | undefined; modelNameOverride: string | undefined } => {
+  const parseModel = (value: string): { modelId?: string; modelNameOverride?: string } => {
     if (!value) return { modelId: undefined, modelNameOverride: undefined };
     const idx = value.indexOf("@@");
     if (idx !== -1) return { modelId: value.slice(0, idx), modelNameOverride: value.slice(idx + 2) };
     return { modelId: value, modelNameOverride: undefined };
   };
 
+  // load batches when single-topic selection changes
   useEffect(() => {
-    setSelectedBatchId("");
+    setSelectedBatchIds([]);
     if (!selectedTopic) { setBatchOptions([]); return; }
     let active = true;
     fetchBatches(selectedTopic, 20)
       .then((bs) => {
         if (!active) return;
-        setBatchOptions(bs.map((b) => ({
+        setBatchOptions(bs.map((b): BatchOption => ({
           batch_id: b.batch_id,
           label: b.batch_label || b.topic_name || "采集",
           run_id: b.runs?.[0]?.id || "",
@@ -78,20 +90,35 @@ export function ReportsPage() {
     return () => { active = false; };
   }, [selectedTopic]);
 
-  const handleGenerate = async () => {
-    if (!selectedTopic) { alert("请先选择一个主题"); return; }
+  const toggleBatch = (id: string) =>
+    setSelectedBatchIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const runIdsOf = (ids: string[]) =>
+    ids.map((id) => batchOptions.find((b) => b.batch_id === id)?.run_id).filter(Boolean) as string[];
+
+  const handleSingleGenerate = async () => {
+    if (!selectedTopic) { setGenMsg("请先选择一个主题"); return; }
+    if (singleSubMode === "perBatch" && selectedBatchIds.length === 0) {
+      setGenMsg("按批次分别生成需至少选择一个批次"); return;
+    }
     setGenerating(true);
     setGenMsg(null);
     try {
-      const { modelId, modelNameOverride } = parseModelSelection(selectedModel);
-      const report = await generateReport(selectedTopic, {
-        modelId,
-        modelNameOverride,
-        collectionRunId: selectedBatchId
-          ? (batchOptions.find(b => b.batch_id === selectedBatchId)?.run_id || undefined)
-          : undefined,
-      });
-      setGenMsg(`报告生成${report.status === "completed" ? "完成" : report.status === "failed" ? "失败" : "中"}：${report.title}`);
+      const { modelId, modelNameOverride } = parseModel(selectedModel);
+      if (singleSubMode === "merged") {
+        const runIds = runIdsOf(selectedBatchIds);
+        const report = await generateReport(selectedTopic, {
+          modelId, modelNameOverride,
+          collectionRunIds: runIds.length ? runIds : undefined,
+        });
+        setGenMsg(`报告生成${statusText(report.status)}：${report.title}`);
+      } else {
+        const tasks = runIdsOf(selectedBatchIds).map((rid) =>
+          generateReport(selectedTopic, { modelId, modelNameOverride, collectionRunId: rid }));
+        const results = await Promise.all(tasks);
+        const ok = results.filter((r) => r.status !== "failed").length;
+        setGenMsg(`按批次分别生成完成：成功 ${ok} 份，失败 ${results.length - ok} 份`);
+      }
       await load();
     } catch (e) {
       setGenMsg(`生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
@@ -99,9 +126,7 @@ export function ReportsPage() {
     setGenerating(false);
   };
 
-  const handleDelete = (id: string) => {
-    setDeleteTarget({ id, message: "删除此报告？" });
-  };
+  const handleDelete = (id: string) => setDeleteTarget({ id, message: "删除此报告？" });
 
   const executeDelete = async () => {
     if (!deleteTarget) return;
@@ -111,7 +136,6 @@ export function ReportsPage() {
     setDeleteTarget(null);
   };
 
-  const [exportingId, setExportingId] = useState<string | null>(null);
   const handleExport = async (id: string) => {
     setExportingId(id);
     try {
@@ -127,6 +151,9 @@ export function ReportsPage() {
   if (error) return <div className="error-banner">{error}</div>;
 
   const defaultModel = models.find((m) => m.is_default);
+  const activeModels = models.filter((m) => m.is_active);
+  const singleDisabled = generating || !selectedTopic ||
+    (singleSubMode === "perBatch" && selectedBatchIds.length === 0);
 
   return (
     <div className="page">
@@ -137,68 +164,48 @@ export function ReportsPage() {
         </div>
       </div>
 
-      {/* Single report generation */}
+      {/* Mode switch */}
+      <div className="segmented-control" style={{ marginBottom: 16 }}>
+        <button type="button" className={`seg-btn${genMode === "single" ? " seg-btn--active" : ""}`} onClick={() => setGenMode("single")}>
+          单一主题
+        </button>
+        <button type="button" className={`seg-btn${genMode === "multi" ? " seg-btn--active" : ""}`} onClick={() => setGenMode("multi")}>
+          多主题批量
+        </button>
+      </div>
+
       <div className="gen-controls" style={{ background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 20, marginBottom: 16 }}>
-        <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 }}>生成新报告</h3>
-        <div className="gen-controls-row">
-          <div className="gen-field">
-            <label className="gen-label">选择主题</label>
-            <select value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} style={{ flex: 1 }}>
-              <option value="">-- 请选择 --</option>
-              {topics.map((t) => (
-                <option key={t.id} value={t.id}>{t.name} ({t.total_items_collected} 条)</option>
-              ))}
-            </select>
-          </div>
-          <div className="gen-field">
-            <label className="gen-label">AI 模型</label>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} style={{ flex: 1 }}>
-              <option value="">{defaultModel ? `默认: ${defaultModel.name}` : "-- 默认模型 --"}</option>
-              {models.filter((m) => m.is_active).flatMap((m) => {
-                const avail = ollamaModels[m.id];
-                if (m.provider === 'ollama' && avail && avail.length > 0) {
-                  return avail.map((modelName) => (
-                    <option key={`${m.id}@@${modelName}`} value={`${m.id}@@${modelName}`}>
-                      {m.name} / {modelName}{m.is_default ? " ⭐" : ""}
-                    </option>
-                  ));
-                }
-                return (
-                  <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name}){m.is_default ? " ⭐" : ""}</option>
-                );
-              })}
-            </select>
-          </div>
-          <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || !selectedTopic} style={{ alignSelf: "flex-end" }}>
-            <BrainCircuit size={14} className={generating ? "spin" : ""} />
-            {generating ? "生成中..." : "立即生成报告"}
-          </button>
-        </div>
-
-        {/* Collection period scope */}
-        <div className="gen-controls-row" style={{ marginTop: 12 }}>
-          <div className="gen-field">
-            <label className="gen-label" htmlFor="rpt-batch">采集批次</label>
-            <select id="rpt-batch" value={selectedBatchId} onChange={(e) => setSelectedBatchId(e.target.value)} disabled={!selectedTopic} style={{ flex: 1 }}>
-              <option value="">全部批次</option>
-              {batchOptions.map((b) => (
-                <option key={b.batch_id} value={b.batch_id}>{b.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Batch generation panel */}
-        <ReportBatchPanel
-          topics={topics}
-          models={models}
-          ollamaModels={ollamaModels}
-          generating={generating}
-          onGeneratingChange={setGenerating}
-          onGenerated={load}
-          genMsg={genMsg}
-          onGenMsg={setGenMsg}
-        />
+        {genMode === "single" ? (
+          <SingleTopicPanel
+            topics={topics}
+            activeModels={activeModels}
+            ollamaModels={ollamaModels}
+            defaultModelName={defaultModel?.name}
+            selectedTopic={selectedTopic}
+            onTopicChange={setSelectedTopic}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            batchOptions={batchOptions}
+            selectedBatchIds={selectedBatchIds}
+            onToggleBatch={toggleBatch}
+            subMode={singleSubMode}
+            onSubModeChange={setSingleSubMode}
+            generating={generating}
+            disabled={singleDisabled}
+            onGenerate={handleSingleGenerate}
+          />
+        ) : (
+          <ReportBatchPanel
+            topics={topics}
+            models={models}
+            ollamaModels={ollamaModels}
+            generating={generating}
+            onGeneratingChange={setGenerating}
+            onGenerated={load}
+            genMsg={genMsg}
+            onGenMsg={setGenMsg}
+          />
+        )}
 
         {models.length === 0 && (
           <div className="text-red small" style={{ marginTop: 8 }}>
@@ -206,6 +213,9 @@ export function ReportsPage() {
           </div>
         )}
       </div>
+
+      {/* YMG-Deep panel */}
+      <YmgDeepPanel topics={topics} models={models} />
 
       {/* Report list */}
       <div className="card-list">
@@ -288,5 +298,140 @@ export function ReportsPage() {
         variant="danger"
       />
     </div>
+  );
+}
+
+function statusText(status: string): string {
+  if (status === "completed") return "完成";
+  if (status === "failed") return "失败";
+  return "中";
+}
+
+interface SingleTopicPanelProps {
+  topics: Topic[];
+  activeModels: ModelConfig[];
+  ollamaModels: Record<string, string[]>;
+  defaultModelName?: string;
+  selectedTopic: string;
+  onTopicChange: (v: string) => void;
+  selectedModel: string;
+  onModelChange: (v: string) => void;
+  batchOptions: BatchOption[];
+  selectedBatchIds: string[];
+  onToggleBatch: (id: string) => void;
+  subMode: SingleSubMode;
+  onSubModeChange: (m: SingleSubMode) => void;
+  generating: boolean;
+  disabled: boolean;
+  onGenerate: () => void;
+}
+
+function SingleTopicPanel(props: SingleTopicPanelProps) {
+  const {
+    topics, activeModels, ollamaModels, defaultModelName,
+    selectedTopic, onTopicChange, selectedModel, onModelChange,
+    batchOptions, selectedBatchIds, onToggleBatch, subMode, onSubModeChange,
+    generating, disabled, onGenerate,
+  } = props;
+
+  const allBatchSelected = batchOptions.length > 0 && selectedBatchIds.length === batchOptions.length;
+  const onToggleAll = () => {
+    if (allBatchSelected) selectedBatchIds.forEach(onToggleBatch);
+    else batchOptions.forEach((b) => { if (!selectedBatchIds.includes(b.batch_id)) onToggleBatch(b.batch_id); });
+  };
+
+  return (
+    <>
+      <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 }}>单一主题生成报告</h3>
+      <div className="gen-controls-row">
+        <div className="gen-field">
+          <label className="gen-label">选择主题</label>
+          <select value={selectedTopic} onChange={(e) => onTopicChange(e.target.value)} style={{ flex: 1 }}>
+            <option value="">-- 请选择 --</option>
+            {topics.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.total_items_collected} 条)</option>
+            ))}
+          </select>
+        </div>
+        <div className="gen-field">
+          <label className="gen-label">AI 模型</label>
+          <select value={selectedModel} onChange={(e) => onModelChange(e.target.value)} style={{ flex: 1 }}>
+            <option value="">{defaultModelName ? `默认: ${defaultModelName}` : "-- 默认模型 --"}</option>
+            {activeModels.flatMap((m) => {
+              const avail = ollamaModels[m.id];
+              if (m.provider === "ollama" && avail && avail.length > 0) {
+                return avail.map((modelName) => (
+                  <option key={`${m.id}@@${modelName}`} value={`${m.id}@@${modelName}`}>
+                    {m.name} / {modelName}{m.is_default ? " ⭐" : ""}
+                  </option>
+                ));
+              }
+              return (
+                <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name}){m.is_default ? " ⭐" : ""}</option>
+              );
+            })}
+          </select>
+        </div>
+      </div>
+
+      {/* batch multi-select */}
+      <div style={{ marginTop: 12 }}>
+        <div className="gen-field">
+          <label className="gen-label">
+            采集批次（可多选{allBatchSelected ? " · 已全选" : ""}）
+          </label>
+          {!selectedTopic ? (
+            <div className="text-muted small">请先选择主题以加载批次。</div>
+          ) : batchOptions.length === 0 ? (
+            <div className="text-muted small">该主题暂无采集批次，将使用全部信息生成。</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={onToggleAll} disabled={!selectedTopic}>
+                {allBatchSelected ? "取消全选" : "全选"}
+              </button>
+              {batchOptions.map((b) => {
+                const sel = selectedBatchIds.includes(b.batch_id);
+                return (
+                  <label key={b.batch_id} style={{
+                    display: "flex", alignItems: "center", gap: 4, fontSize: "0.78rem", cursor: "pointer",
+                    padding: "3px 8px", borderRadius: 4,
+                    background: sel ? "var(--accent-bg)" : "var(--surface)",
+                    border: "1px solid var(--line)",
+                  }}>
+                    <input type="checkbox" checked={sel} onChange={() => onToggleBatch(b.batch_id)}
+                      style={{ accentColor: "var(--accent)", width: 13, height: 13 }} />
+                    {b.label}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* generation method */}
+      <div style={{ marginTop: 12, display: "flex", gap: 16, alignItems: "center", fontSize: "0.82rem", flexWrap: "wrap" }}>
+        <span className="text-muted">生成方式：</span>
+        {(["merged", "perBatch"] as const).map((m) => (
+          <label key={m} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+            <input type="radio" name="singleSubMode" checked={subMode === m}
+              onChange={() => onSubModeChange(m)} style={{ accentColor: "var(--accent)" }} />
+            {m === "merged" ? "合并为一份报告" : "按批次分别生成"}
+          </label>
+        ))}
+        <span className="text-muted small">
+          {subMode === "merged"
+            ? "合并所有选中批次信息，生成一份报告（不选批次则用全量信息）"
+            : "每个选中批次各生成一份报告"}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <button type="button" className="btn btn-primary" onClick={onGenerate} disabled={disabled}>
+          <BrainCircuit size={14} className={generating ? "spin" : ""} />
+          {generating ? "生成中..." : "立即生成报告"}
+        </button>
+      </div>
+    </>
   );
 }
