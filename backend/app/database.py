@@ -5,12 +5,18 @@ Persistence hardening:
   - Absolute DB path derived from this module location (robust against cwd changes)
   - SQLite WAL journal mode + synchronous=NORMAL for durability under concurrency
   - Pre-migration backup + startup consistency check
+  - Connection pool tuning + slow-query logging + performance counters
 """
+from __future__ import annotations
+
 import logging
 import os
 import shutil
+import time
+from collections import defaultdict
+from typing import Any
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
@@ -29,6 +35,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH}")
 
 _IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
+# ── Performance counters ──────────────────────────────────────────────────────
+_QUERY_COUNT: int = 0
+_SLOW_QUERY_COUNT: int = 0
+_SLOW_QUERY_THRESHOLD_SEC = 1.0
+_CONNECTION_COUNT: int = 0
+
 
 def _db_file_path() -> str | None:
     """Return the on-disk path for a sqlite URL, else None."""
@@ -43,12 +55,29 @@ _db_path = _db_file_path()
 if _db_path:
     os.makedirs(os.path.dirname(_db_path), exist_ok=True)
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if _IS_SQLITE else {},
-    echo=False,
-)
+# ── Engine creation with pool tuning ──────────────────────────────────────────
+_pool_kwargs: dict[str, Any] = {
+    "pool_pre_ping": True,
+}
 
+if _IS_SQLITE:
+    # SQLite does not benefit from large pools; keep it conservative.
+    _pool_kwargs["pool_size"] = 5
+    _pool_kwargs["max_overflow"] = 10
+    _pool_kwargs["pool_timeout"] = 30
+    _pool_kwargs["pool_recycle"] = 1800
+    _pool_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # PostgreSQL / MySQL defaults
+    _pool_kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "10"))
+    _pool_kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    _pool_kwargs["pool_timeout"] = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+    _pool_kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+
+engine = create_engine(DATABASE_URL, echo=False, **_pool_kwargs)
+
+
+# ── SQLite PRAGMA + connection tracking ─────────────────────────────────────
 
 if _IS_SQLITE:
     @event.listens_for(Engine, "connect")
@@ -63,6 +92,43 @@ if _IS_SQLITE:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Failed to set SQLite PRAGMA: %s", exc)
 
+
+@event.listens_for(Engine, "checkout")
+def _on_connection_checkout(dbapi_conn, connection_record, connection_proxy):
+    """Track active connections."""
+    global _CONNECTION_COUNT
+    _CONNECTION_COUNT += 1
+
+
+@event.listens_for(Engine, "checkin")
+def _on_connection_checkin(dbapi_conn, connection_record):
+    """Track connection returns."""
+    global _CONNECTION_COUNT
+    _CONNECTION_COUNT = max(0, _CONNECTION_COUNT - 1)
+
+
+# ── Slow-query logging ──────────────────────────────────────────────────────
+
+@event.listens_for(Engine, "before_cursor_execute")
+def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    context._query_start_time = time.perf_counter()
+
+
+@event.listens_for(Engine, "after_cursor_execute")
+def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    global _QUERY_COUNT, _SLOW_QUERY_COUNT
+    duration = time.perf_counter() - context._query_start_time
+    _QUERY_COUNT += 1
+    if duration > _SLOW_QUERY_THRESHOLD_SEC:
+        _SLOW_QUERY_COUNT += 1
+        logger.warning(
+            "Slow query (%.2fs): %s",
+            duration,
+            statement[:200].replace("\n", " "),
+        )
+
+
+# ── Session factory ───────────────────────────────────────────────────────────
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -113,3 +179,27 @@ def init_db():
     from app.models_additions import migrate_schema
     migrate_schema(engine)
     logger.info("Database ready at %s", _db_file_path() or DATABASE_URL)
+
+
+# ── Performance metrics helpers ───────────────────────────────────────────────
+
+def get_db_metrics() -> dict[str, Any]:
+    """Return current database performance counters."""
+    return {
+        "query_count": _QUERY_COUNT,
+        "slow_query_count": _SLOW_QUERY_COUNT,
+        "active_connections": _CONNECTION_COUNT,
+        "pool_size": _pool_kwargs.get("pool_size"),
+        "max_overflow": _pool_kwargs.get("max_overflow"),
+    }
+
+
+def check_db_connection() -> bool:
+    """Quick connectivity check."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:
+        logger.warning("DB connection check failed: %s", exc)
+        return False

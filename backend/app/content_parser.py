@@ -7,12 +7,60 @@ from typing import Any
 
 from app.connectors.base import FetchItem
 
-
+# ── Noise tokens ─────────────────────────────────────────────────────────────
 NOISE_TOKENS = {
     "首页", "登录", "注册", "版权", "菜单", "导航", "更多", "返回", "搜索",
     "home", "login", "register", "copyright", "menu", "navigation",
-    "subscribe", "cookie", "privacy", "terms",
+    "subscribe", "cookie", "privacy", "terms", "breadcrumb", "sitemap",
 }
+
+# ── Navigation keywords (expanded) ───────────────────────────────────────────
+NAV_KEYWORDS = {
+    # Chinese
+    "首页", "新闻中心", "国家媒体发布", "跳至正文内容", "跳至主要内容",
+    "统计数据和摘要", "问责制和透明度", "媒体发布", "文件库", "新闻官员",
+    "社交媒体目录", "多媒体图书馆", "法律声明", "前线数字杂志", "新闻通讯",
+    "公告", "出版物目录", "聚光灯", "关于我们", "联系我们", "网站地图",
+    "无障碍访问", "隐私政策", "使用条款", "快速链接", "常见问题",
+    "有用链接", "面包屑", "breadcrumb",
+    # English
+    "skip to main content", "skip to content", "skip navigation",
+    "contact us", "about us", "sitemap", "accessibility", "foia",
+    "privacy policy", "terms of use", "terms of service", "cookie policy",
+    "quick links", "frequently asked questions", "faq", "useful links",
+    "news center", "press releases", "media library", "social media",
+    "official statements", "publications", "spotlight", "newsletter",
+    "announcements", "breadcrumb", "search", "menu", "navigation",
+    "home", "login", "register", "subscribe", "share", "print",
+    "follow us", "connect with us", "related links", "resources",
+    "download", "pdf", "doc", "excel", "powerpoint", "slides",
+    "read more", "learn more", "click here", "view all", "see all",
+    "back to top", "top of page", "previous", "next", "page ",
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+}
+
+# ── Patterns ─────────────────────────────────────────────────────────────────
+BREADCRUMB_PATTERN = re.compile(
+    r"(?:\b(?:首页|home|主页|Home)\b)\s*[>›/→|\\-]\s*[^\n]{0,80}(?:\s*[>›/→|\\-]\s*[^\n]{0,80})*",
+    re.IGNORECASE,
+)
+
+SKIP_NAV_PATTERN = re.compile(
+    r"skip\s+to\s+(?:main\s+)?content\s*[\n\s]*",
+    re.IGNORECASE,
+)
+
+# Lines that are clearly navigation (short + contain nav words)
+NAV_LINE_PATTERN = re.compile(
+    r"^\s*(?:\d{1,2}\s+)?(?:"
+    r"home|login|register|menu|navigation|search|about|contact|"
+    r"sitemap|privacy|terms|cookie|subscribe|share|follow|"
+    r"首页|登录|注册|关于|联系|搜索|菜单|导航|更多|返回"
+    r")\s*$",
+    re.IGNORECASE,
+)
 
 COUNTRY_PATTERNS = {
     "United States": ("United States", "U.S.", "US ", "USA", "美国"),
@@ -36,8 +84,14 @@ class ParsedContent:
 def parse_fetch_item(item: FetchItem) -> ParsedContent:
     """Normalize content and extract enough structure for local persistence."""
     title = _normalize_text(item.title)
-    content = _normalize_text(item.content or item.summary or "")
-    summary = _normalize_text(item.summary or _make_summary(content or title))
+    raw_content = item.content or item.summary or ""
+    content = _normalize_text(raw_content)
+    summary = _normalize_text(item.summary or "")
+
+    # If summary is just a truncated version of content or contains nav, regenerate
+    if not summary or _is_nav_heavy(summary) or (content and summary in content[:len(summary)+10]):
+        summary = _make_summary(content or title)
+
     combined = " ".join(part for part in (title, summary, content) if part)
     substantive_tokens = _substantive_tokens(combined)
     is_meaningful = _is_meaningful(title, content, substantive_tokens)
@@ -57,13 +111,99 @@ def _normalize_text(value: str | None) -> str:
         return ""
     cleaned = re.sub(r"<[^>]+>", " ", str(value))
     cleaned = re.sub(r"[\x00-\x1f\x7f]+", " ", cleaned)
+
+    # 1. Remove skip links and breadcrumb patterns
+    cleaned = SKIP_NAV_PATTERN.sub(" ", cleaned)
+    cleaned = BREADCRUMB_PATTERN.sub(" ", cleaned)
+
+    # 2. Split into paragraphs and filter
+    paragraphs = re.split(r"\n\s*\n|\n", cleaned)
+    filtered_paragraphs: list[str] = []
+    seen_counts: dict[str, int] = {}
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        # Skip very short lines that look like navigation
+        if len(para) <= 30 and NAV_LINE_PATTERN.match(para):
+            continue
+
+        # Skip paragraphs that are mostly navigation keywords
+        para_lower = para.lower()
+        words = re.findall(r"[\w\u4e00-\u9fff]+", para_lower)
+        if words:
+            nav_hits = sum(1 for w in words if w in NAV_KEYWORDS)
+            if nav_hits / len(words) > 0.25:
+                continue
+
+        # Skip lines that are just lists of nav items (each line short)
+        lines = [line.strip() for line in para.split("\n") if line.strip()]
+        if lines and all(len(line) <= 25 for line in lines):
+            nav_line_hits = sum(
+                1 for line in lines
+                if any(kw in line.lower() for kw in NAV_KEYWORDS)
+            )
+            if nav_line_hits / len(lines) > 0.40:
+                continue
+
+        # Skip repeated content (like "News Center" appearing many times)
+        para_key = re.sub(r"\s+", " ", para_lower)
+        seen_counts[para_key] = seen_counts.get(para_key, 0) + 1
+        if seen_counts[para_key] > 2:
+            continue
+
+        # Skip paragraphs that are just date lists or month names
+        if _is_date_list(para):
+            continue
+
+        filtered_paragraphs.append(para)
+
+    cleaned = "\n\n".join(filtered_paragraphs)
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
 
 
-def _make_summary(text: str, limit: int = 220) -> str:
+def _is_date_list(text: str) -> bool:
+    """Check if text is just a list of dates/months (common in nav sidebars)."""
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if not lines or len(lines) < 2:
+        return False
+    month_pattern = re.compile(
+        r"^(?:january|february|march|april|may|june|july|august|"
+        r"september|october|november|december|"
+        r"\d{4}|\d{1,2}/\d{1,2}/\d{2,4})\s*$",
+        re.IGNORECASE,
+    )
+    date_lines = sum(1 for line in lines if month_pattern.match(line))
+    return date_lines / len(lines) > 0.5
+
+
+def _is_nav_heavy(text: str) -> bool:
+    """Check if text is dominated by navigation content."""
+    if not text:
+        return False
+    words = re.findall(r"[\w\u4e00-\u9fff]+", text.lower())
+    if not words:
+        return False
+    nav_hits = sum(1 for w in words if w in NAV_KEYWORDS)
+    return nav_hits / len(words) > 0.20
+
+
+def _make_summary(text: str, limit: int = 300) -> str:
+    """Generate a meaningful summary from content."""
+    if not text:
+        return ""
     if len(text) <= limit:
         return text
+
+    # Try to find a sentence boundary
+    sentence_end = re.search(r'[.!?。！？]\s+(?=[A-Z"\u4e00-\u9fff])', text[:limit+50])
+    if sentence_end and sentence_end.end() > limit * 0.5:
+        return text[:sentence_end.end()].strip()
+
+    # Fallback: break at last space before limit
     return text[:limit].rsplit(" ", 1)[0].strip() + "..."
 
 

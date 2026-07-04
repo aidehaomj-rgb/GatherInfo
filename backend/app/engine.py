@@ -7,6 +7,7 @@ Flow:
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
@@ -39,8 +40,8 @@ class CollectionEngine:
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
-        When window_start is provided, items with a known published_at older than
-        window_start are skipped (items without published_at are always kept).
+        When window_start is provided, items outside the window are skipped.
+        Undated items are kept only if a usable date can be extracted from text.
         """
         source = self.db.query(SourceConfig).filter(SourceConfig.id == source_id).first()
         if not source:
@@ -150,23 +151,36 @@ class CollectionEngine:
             topic.last_collection_run_id = run_id
         self.db.commit()
 
-        # Fire-and-forget notifications after collection
+        # Fire-and-forget notifications after collection (batch aggregation)
         try:
-            from app.notification_models import NotificationSender
+            from app.notification_models import NotificationSender, BatchEvent
             from app.database import SessionLocal
             sender = NotificationSender(SessionLocal)
-            total_new = sum(r.items_new or 0 for r in final)
-            sender.send(
-                "new_items" if total_new > 0 else "completion",
-                {
-                    "event": "collection_complete",
-                    "topic_id": topic_id,
-                    "topic_name": topic.name,
-                    "total_new": total_new,
-                    "source_count": len(final),
-                    "batch_id": batch_id,
-                    "timestamp": utc_now().isoformat(),
-                }
+
+            # 收集同一批次所有来源的结果，汇总为 BatchEvent 列表
+            events: list[BatchEvent] = []
+            for r in final:
+                source_name = r.source_id
+                # 尝试从 source 对象获取友好名称
+                try:
+                    src = self.db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
+                    if src and src.name:
+                        source_name = src.name
+                except Exception:
+                    pass
+                events.append(BatchEvent(
+                    source_id=r.source_id,
+                    source_name=source_name,
+                    items_new=getattr(r, "items_new", 0) or 0,
+                    status="completed" if r.status == JobStatus.COMPLETED else "failed",
+                    error=" ".join(r.error_log) if r.error_log else "",
+                ))
+
+            sender.send_batch(
+                topic_id=topic_id,
+                topic_name=topic.name,
+                batch_id=batch_id,
+                events=events,
             )
         except Exception as exc:
             logger.warning("Notification after collection failed: %s", exc)
@@ -211,7 +225,9 @@ class CollectionEngine:
         tag = self.db.query(Tag).filter(Tag.id == tag_id).first()
         if not item or not tag:
             return False
-        if tag not in item.tags:
+        # Use tag_id set comparison to avoid object identity issues
+        existing_ids = {t.id for t in item.tags}
+        if tag_id not in existing_ids:
             item.tags.append(tag)
             tag.item_count += 1
             if item.status == ItemStatus.RAW:
@@ -248,7 +264,15 @@ class CollectionEngine:
                 # Try from the raw Tavily output
                 suggested = item.tags_from_metadata()
 
+            # Deduplicate tag IDs while preserving order
+            seen: set[str] = set()
+            unique_suggested: list[str] = []
             for tag_id in suggested:
+                if tag_id and tag_id not in seen:
+                    seen.add(tag_id)
+                    unique_suggested.append(tag_id)
+
+            for tag_id in unique_suggested:
                 parts = tag_id.split(":", 1)
                 ns, val = (parts[0], parts[1]) if len(parts) == 2 else ("general", parts[0])
                 self.ensure_tag(tag_id, ns, val)
@@ -287,7 +311,15 @@ class CollectionEngine:
                 continue
 
             pub = _coerce_datetime(fi.published_at)
-            is_out_of_range = _is_out_of_range(pub, window_start, window_end)
+
+            # Strictly enforce the configured time window. If a topic has a window
+            # and the item has no usable publication date, we skip it so that old
+            # or undated content does not pollute the collection.
+            if window_start is not None:
+                if pub is None:
+                    pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
+                if pub is None or _is_out_of_range(pub, window_start, window_end):
+                    continue
 
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
@@ -333,9 +365,6 @@ class CollectionEngine:
                         status=ItemStatus.RAW,
                     ))
                 self.db.flush()
-                if is_out_of_range:
-                    self.ensure_tag("system:超限采集", "system", "超限采集")
-                    self.tag_item(item_id, "system:超限采集")
             except Exception:
                 self.db.rollback()
         self.db.commit()
@@ -360,6 +389,24 @@ def _web_translation_model() -> ModelConfig:
     model.max_tokens = 4096
     return model
 
+
+def _extract_date_from_text(text: str) -> datetime | None:
+    """Try to find a YYYY-MM-DD / YYYY/MM/DD / Chinese date inside the text."""
+    if not text:
+        return None
+    patterns = [
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            try:
+                parts = [int(x) for x in m.groups()]
+                return datetime(parts[0], parts[1], parts[2], tzinfo=timezone.utc)
+            except ValueError:
+                continue
+    return None
 
 def _coerce_datetime(value):
     if not value:

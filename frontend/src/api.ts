@@ -198,8 +198,11 @@ export const testModel = (id: string) =>
 
 // ── Reports ────────────────────────────────────────────────────────
 
-export const fetchReports = (topicId?: string) =>
-  get<import("./types").ReportList>("/reports", topicId ? { topic_id: topicId } : {});
+export const fetchReports = (topicId?: string, days?: number) =>
+  get<import("./types").ReportList>("/reports", {
+    ...(topicId ? { topic_id: topicId } : {}),
+    ...(days ? { days: String(days) } : {}),
+  });
 export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
 export const generateReport = (
   topicId: string,
@@ -322,6 +325,9 @@ export const updateNotification = (id: string, data: Partial<NotificationConfig>
 export const deleteNotification = (id: string) => del(`/notifications/${id}`);
 export const testNotification = (id: string) =>
   post<{ success: boolean; message: string }>("/notifications/test", { id });
+
+export const pruneNotifications = () =>
+  post<{ deleted: number }>("/notifications/prune");
 
 
 // ── YMG-Deep integration ───────────────────────────────────────────────

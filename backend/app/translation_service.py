@@ -48,8 +48,9 @@ def item_translation_fields(item: CollectedItem) -> dict[str, str | None]:
 async def translate_fetch_items_to_metadata(
     items: list[FetchItem],
     model: ModelConfig,
-    batch_size: int = 8,
+    batch_size: int = 4,
 ) -> int:
+    """Translate non-Chinese items and store translations in raw_metadata."""
     targets = [
         it for it in items
         if needs_translation(it.language, f"{it.title} {it.summary or ''} {it.content or ''}")
@@ -57,15 +58,17 @@ async def translate_fetch_items_to_metadata(
     translated = 0
     for offset in range(0, len(targets), batch_size):
         batch = targets[offset:offset + batch_size]
-        records = [
-            {
+        # Clean content before translation - remove nav remnants
+        records = []
+        for i, it in enumerate(batch):
+            clean_content = _clean_for_translation(it.content or "")
+            clean_summary = _clean_for_translation(it.summary or "")
+            records.append({
                 "id": str(i),
                 "title": it.title or "",
-                "summary": it.summary or "",
-                "content": (it.content or "")[:1200],
-            }
-            for i, it in enumerate(batch)
-        ]
+                "summary": clean_summary[:800],
+                "content": clean_content[:2000],
+            })
         results = await _translate_records(model, records)
         by_id = {str(row.get("id")): row for row in results}
         for i, it in enumerate(batch):
@@ -101,23 +104,25 @@ async def translate_existing_items(
         if needs_translation(item.language, f"{item.title} {item.summary or ''} {item.content or ''}"):
             candidates.append(item)
 
-    records = [
-        {
+    records = []
+    for item in candidates:
+        clean_content = _clean_for_translation(item.content or "")
+        clean_summary = _clean_for_translation(item.summary or "")
+        records.append({
             "id": item.id,
             "title": item.title or "",
-            "summary": item.summary or "",
-            "content": (item.content or "")[:1200],
-        }
-        for item in candidates
-    ]
+            "summary": clean_summary[:800],
+            "content": clean_content[:2000],
+        })
+
     if not records:
         return {"requested": limit, "translated": 0, "items": []}
 
     translated = 0
     errors: list[str] = []
-    for offset in range(0, len(records), 8):
-        batch_records = records[offset:offset + 8]
-        batch_items = candidates[offset:offset + 8]
+    for offset in range(0, len(records), 4):
+        batch_records = records[offset:offset + 4]
+        batch_items = candidates[offset:offset + 4]
         try:
             results = await _translate_records(model, batch_records)
         except Exception as exc:
@@ -145,49 +150,119 @@ async def translate_existing_items(
     }
 
 
+def _clean_for_translation(text: str) -> str:
+    """Remove navigation remnants before translation."""
+    if not text:
+        return ""
+
+    # Remove skip links and nav remnants
+    patterns = [
+        r"Skip\s+to\s+(?:main\s+)?content\s*",
+        r"跳至(?:正文|主要)?内容\s*",
+        r"Breadcrumb\s*",
+        r"面包屑\s*",
+        r"Quick\s+links\s*",
+        r"快速链接\s*",
+        r"Frequently\s+asked\s+questions\s*",
+        r"常见问题\s*",
+        r"Useful\s+links\s*",
+        r"有用链接\s*",
+        r"Search\s*",
+        r"搜索\s*",
+        r"News\s+Center\s*",
+        r"新闻中心\s*",
+        r"Press\s+Office\s*",
+        r"媒体发布\s*",
+        r"Media\s+Library\s*",
+        r"多媒体图书馆\s*",
+        r"Social\s+Media\s*",
+        r"社交媒体\s*",
+        r"Official\s+Statements\s*",
+        r"官方声明\s*",
+        r"Publications\s*",
+        r"出版物\s*",
+        r"Spotlight\s*",
+        r"聚光灯\s*",
+        r"Newsletter\s*",
+        r"新闻通讯\s*",
+        r"Announcements\s*",
+        r"公告\s*",
+        r"About\s+Us\s*",
+        r"关于我们\s*",
+        r"Contact\s+Us\s*",
+        r"联系我们\s*",
+        r"Site\s+Map\s*",
+        r"网站地图\s*",
+        r"Accessibility\s*",
+        r"无障碍\s*",
+        r"Privacy\s+Policy\s*",
+        r"隐私政策\s*",
+        r"Terms\s+of\s+Use\s*",
+        r"使用条款\s*",
+        r"Cookie\s+Policy\s*",
+        r"Cookie\s*",
+        r"Legal\s+Disclaimer\s*",
+        r"法律声明\s*",
+        r"Frontline\s+Digital\s+Magazine\s*",
+        r"前线数字杂志\s*",
+        r"Statistics\s+and\s+Summaries\s*",
+        r"统计数据和摘要\s*",
+        r"Accountability\s+and\s+Transparency\s*",
+        r"问责制和透明度\s*",
+        r"Press\s+Releases\s*",
+        r"Press\s+Officer\s*",
+        r"新闻官员\s*",
+        r"File\s+Library\s*",
+        r"文件库\s*",
+    ]
+
+    for pattern in patterns:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+
+    return text.strip()
+
+
 async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) -> list[dict[str, str]]:
     if model.provider == "web_fallback":
         return await _translate_records_with_web_fallback(records)
 
     prompt = (
         "请把下面 JSON 数组中的英文或其他非中文信息翻译成简体中文。"
-        "只返回 JSON 数组，不要解释，不要 Markdown。"
-        "每个对象必须保留 id，并返回 title_zh、summary_zh、content_zh。"
-        "如果原字段为空，对应译文字段也返回空字符串。\n\n"
-        f"{json.dumps(records, ensure_ascii=False)}"
+        "只返回 JSON 数组，不要添加任何解释。"
+        "翻译要求："
+        "1. 保留原文的段落结构"
+        "2. 标题要准确反映文章主题"
+        "3. 摘要要简洁概括文章核心内容（100-200字）"
+        "4. 正文要完整翻译，保持段落格式"
+        "5. 专有名词（如机构名、人名）保留英文并加中文注释"
+        "\n\n"
+        + json.dumps(records, ensure_ascii=False, indent=2)
+        + "\n\n"
+        "请只返回翻译后的 JSON 数组，格式为: [{\"id\":\"...\",\"title_zh\":\"...\",\"summary_zh\":\"...\",\"content_zh\":\"...\"}]"
     )
-    try:
-        output = await _call_translation_model(model, prompt)
-        parsed = _parse_json_array(output)
-        if not isinstance(parsed, list):
-            raise ValueError("Translation model did not return a JSON array")
-        rows = [row for row in parsed if isinstance(row, dict)]
-        if rows:
-            return rows
-    except Exception as exc:
-        logger.warning("Model translation failed, using web fallback: %s", exc)
-    return await _translate_records_with_web_fallback(records)
 
-
-async def _call_translation_model(model: ModelConfig, prompt: str) -> str:
-    base_url = model.base_url or "http://localhost:11434"
+    base_url = model.base_url or ""
     model_name = model.model_name or ""
 
     if model.provider == "ollama":
-        url = base_url.rstrip("/") + "/api/chat"
+        url = f"{base_url.rstrip('/')}/api/chat"
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "think": False,
-            "options": {"temperature": 0.1, "num_predict": 4096},
+            "options": {"temperature": 0.1},
         }
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             msg = data.get("message", {})
-            return msg.get("content") or msg.get("thinking") or ""
+            raw = msg.get("content") or msg.get("thinking") or ""
+            return _parse_translation_response(raw)
 
     url = openai_compatible_url(base_url, "/chat/completions")
     headers = {"Content-Type": "application/json"}
@@ -203,21 +278,44 @@ async def _call_translation_model(model: ModelConfig, prompt: str) -> str:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        raw = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return _parse_translation_response(raw)
 
 
-def _parse_json_array(text: str) -> Any:
+def _parse_translation_response(text: str) -> list[dict[str, str]]:
+    """Parse LLM translation response, handling various formats."""
+    if not text:
+        return []
+
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
         cleaned = re.sub(r"```$", "", cleaned).strip()
+
     try:
-        return json.loads(cleaned)
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            # Maybe wrapped in an object
+            for key in ["translations", "results", "data"]:
+                if key in result and isinstance(result[key], list):
+                    return result[key]
+            # Single item
+            return [result]
     except json.JSONDecodeError:
-        match = re.search(r"\[[\s\S]*\]", cleaned)
-        if match:
+        pass
+
+    # Try to find JSON array in text
+    match = re.search(r"\[\s*\{[\s\S]*\}\s*\]", cleaned)
+    if match:
+        try:
             return json.loads(match.group(0))
-        raise
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("Failed to parse translation response")
+    return []
 
 
 def _normalize_translation(row: dict[str, Any]) -> dict[str, str]:

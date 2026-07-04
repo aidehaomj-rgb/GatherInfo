@@ -1,8 +1,64 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors } from "../api";
 import type { Source, ConnectorInfo } from "../types";
+
+const GROUP_LABEL_L1: Record<string, string> = {
+  commodity: "商品",
+  customs: "海关",
+  enforcement: "执法",
+  export_control: "出口管制",
+  fta: "自贸协定",
+  general: "综合",
+  ip: "知识产权",
+  market: "市场",
+  policy: "政策",
+  price: "价格",
+  regulation: "法规",
+  risk: "风险",
+  sanction: "制裁",
+  search: "搜索",
+  tbt_sps: "技术性贸易壁垒",
+  trade: "贸易",
+  trade_remedy: "贸易救济",
+  未分类: "未分类",
+};
+
+const GROUP_LABEL_L2: Record<string, string> = {
+  trade: "贸易",
+  enforcement: "执法",
+  regulation: "法规",
+  crime: "犯罪",
+  customs: "海关",
+  fraud: "欺诈",
+  sanction: "制裁",
+  commodity: "商品",
+  policy: "政策",
+  export_control: "出口管制",
+  market: "市场",
+  tariff: "关税",
+  economy: "经济",
+  logistics: "物流",
+  compliance: "合规",
+  energy: "能源",
+  food: "食品",
+  futures: "期货",
+  metal: "金属",
+  shipping: "航运",
+  专业类网站: "专业类网站",
+  政府官网: "政府官网",
+  新闻媒体: "新闻媒体",
+  其他: "其他",
+  "—": "其他",
+};
+
+function displayGroupL1(name: string) {
+  return GROUP_LABEL_L1[name] || name;
+}
+function displayGroupL2(name: string) {
+  return GROUP_LABEL_L2[name] || name;
+}
 
 export function SourcesPage() {
   const [sources, setSources] = useState<Source[]>([]);
@@ -15,10 +71,10 @@ export function SourcesPage() {
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
   const [sourceSearch, setSourceSearch] = useState("");
-  const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
+ const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
+ const load = useCallback(async () => {
     try {
       const [srcs, cs] = await Promise.all([fetchSources(), fetchConnectors()]);
       setSources(srcs);
@@ -114,22 +170,37 @@ export function SourcesPage() {
     });
 
   // Build hierarchical grouping: L1 (default_categories[0]) -> L2 (default_categories[1])
-  type GroupNode = { l1: string; l2: string; sources: Source[] };
-  const groupByHierarchy = (srcs: Source[]) => {
-    const tree: Record<string, Record<string, Source[]>> = {};
-    for (const s of srcs) {
-      const cats = s.default_categories ?? [];
-      const l1 = cats[0] || "未分类";
-      const l2 = cats[1] || "—";
-      if (!tree[l1]) tree[l1] = {};
-      if (!tree[l1][l2]) tree[l1][l2] = [];
-      tree[l1][l2].push(s);
-    }
-    return tree;
-  };
-  const groupedTree = groupByHierarchy(visibleSources);
+ type GroupNode = { l1: string; l2: string; sources: Source[] };
+ const groupByHierarchy = (srcs: Source[]) => {
+   const tree: Record<string, Record<string, Source[]>> = {};
+   for (const s of srcs) {
+     const cats = s.default_categories ?? [];
+     const l1 = cats[0] || "未分类";
+     const l2 = cats[1] || "—";
+     if (!tree[l1]) tree[l1] = {};
+     if (!tree[l1][l2]) tree[l1][l2] = [];
+     tree[l1][l2].push(s);
+   }
+   return tree;
+ };
+ const groupedTree = groupByHierarchy(visibleSources);
 
-  if (initialLoad) return <div className="loading">加载信息源...</div>;
+  const allGroupKeys = useMemo(() => {
+    const keys = new Set<string>();
+    Object.entries(groupedTree).forEach(([l1, l2map]) => {
+      keys.add(`L1:${l1}`);
+      Object.keys(l2map).forEach((l2) => keys.add(`L1:${l1}|L2:${l2}`));
+    });
+    return keys;
+  }, [groupedTree]);
+
+  useEffect(() => {
+    if (sources.length > 0 && collapsedGroups.size === 0) {
+      setCollapsedGroups(allGroupKeys);
+    }
+  }, [allGroupKeys, sources.length, collapsedGroups.size]);
+
+ if (initialLoad) return <div className="loading">加载信息源...</div>;
   if (loading) return null;
 
   return (
@@ -219,8 +290,8 @@ export function SourcesPage() {
                 onClick={() => toggleGroup(`L1:${l1}`)}
                 style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "8px 10px", background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", marginBottom: 8 }}
               >
-                {l1Collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                <strong style={{ fontSize: "0.9rem" }}>{l1}</strong>
+               {l1Collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                <strong style={{ fontSize: "0.9rem" }}>{displayGroupL1(l1)}</strong>
                 <span className="text-muted small">({l1Count})</span>
               </div>
               {!l1Collapsed && Object.entries(l2map).map(([l2, arr]) => {
@@ -233,9 +304,9 @@ export function SourcesPage() {
                       onClick={() => toggleGroup(l2Key)}
                       style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", padding: "6px 8px", borderBottom: "1px solid var(--line-light)", marginBottom: 6 }}
                     >
-                      {l2Collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                      <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{l2}</span>
-                      <span className="text-muted small">({arr.length})</span>
+                     {l2Collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{displayGroupL2(l2)}</span>
+                     <span className="text-muted small">({arr.length})</span>
                     </div>
                     {!l2Collapsed && arr.map((s) => renderSourceCard(s))}
                   </div>

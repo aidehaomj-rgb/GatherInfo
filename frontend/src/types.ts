@@ -67,10 +67,11 @@ export interface AutoTagRule {
 }
 
 export interface CollectedItem {
-  id: string;
-  source_id: string;
-  run_id: string | null;
-  title: string;
+ id: string;
+ source_id: string;
+ run_id: string | null;
+  topic_id: string | null;
+ title: string;
   title_zh: string | null;
   content: string | null;
   content_zh: string | null;

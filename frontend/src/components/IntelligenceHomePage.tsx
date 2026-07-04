@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { ArrowRight, BookOpenText, CalendarDays, FileText, Globe2, Newspaper } from "lucide-react";
-import { fetchDashboard, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
+import { collectTopic, fetchDashboard, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
+import { useToast } from "./ToastProvider";
 import type { CollectedItem, DashboardData, Report, Source, Topic } from "../types";
 import { getDisplayTitle } from "../utils/title";
 import { ItemDetailModal } from "./ItemDetailModal";
 import { ReportViewerModal } from "./ReportViewerModal";
+import { HomeHero } from "./HomeHero";
+import { SystemStatus } from "./SystemStatus";
+import { CollectTopicsDialog, RecentReportsDialog } from "./HomeActionDialogs";
 
 const HOME_ITEMS_PER_PAGE = 5;
 const HOME_ITEM_LIMIT = 30;
@@ -22,16 +26,19 @@ export function IntelligenceHomePage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [readingItem, setReadingItem] = useState<CollectedItem | null>(null);
   const [viewingReport, setViewingReport] = useState<Report | null>(null);
-  const [featuredStart, setFeaturedStart] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { success } = useToast();
+  const [collectDialogOpen, setCollectDialogOpen] = useState(false);
+  const [viewReportsOpen, setViewReportsOpen] = useState(false);
+  const [collectionJustFinished, setCollectionJustFinished] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     Promise.all([
       fetchItems({ page: 1, page_size: 40 }),
-      fetchReports(),
+      fetchReports(undefined, 7),
       fetchSources(),
       fetchTopics(),
       fetchDashboard(),
@@ -81,115 +88,101 @@ export function IntelligenceHomePage() {
   const featuredCards = useMemo(() => assignFeatureImages(featuredItems), [featuredItems]);
   const featuredGroups = useMemo(() => chunkItems(featuredCards, 3), [featuredCards]);
   const featuredSlideCount = Math.max(1, Math.ceil(featuredCards.length / 3));
-  const featuredPage = Math.min(featuredSlideCount - 1, Math.floor(featuredStart / 3));
+  const featuredPage = Math.min(featuredSlideCount - 1, Math.floor(0 / 3));
   const completedReports = reports
     .filter((r) => r.status === "completed")
     .sort((a, b) => new Date(b.generated_at || b.created_at || 0).getTime() - new Date(a.generated_at || a.created_at || 0).getTime())
     .slice(0, 4);
 
-  useEffect(() => {
-    if (featuredCards.length <= 3) return;
-    const timer = window.setInterval(() => {
-      setFeaturedStart((value) => ((Math.floor(value / 3) + 1) % featuredSlideCount) * 3);
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [featuredCards.length, featuredSlideCount]);
+  const RECENT_DAYS = 7;
+  const recentReports = useMemo(() => {
+    const cutoff = Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000;
+    return reports
+      .filter((r) => r.status === "completed" && (r.generated_at ? new Date(r.generated_at).getTime() > cutoff : new Date(r.created_at || 0).getTime() > cutoff))
+      .sort((a, b) => new Date(b.generated_at || b.created_at || 0).getTime() - new Date(a.generated_at || a.created_at || 0).getTime())
+      .slice(0, 4);
+  }, [reports]);
 
-  if (loading) return <div className="loading">加载情报主页...</div>;
+  const handleCollect = useCallback(() => setCollectDialogOpen(true), []);
+  const handleReports = useCallback(() => setViewReportsOpen(true), []);
+
+  const runCollection = useCallback(async (topicIds: string[]) => {
+    if (!topicIds.length) return;
+    try {
+      let totalNew = 0;
+      for (const topicId of topicIds) {
+        const results = await collectTopic(topicId);
+        totalNew += results.reduce((sum, r) => sum + r.items_new, 0);
+      }
+      const [itemList, reportList, topicList, dash] = await Promise.all([
+        fetchItems({ page: 1, page_size: HOME_ITEMS_PER_PAGE }),
+        fetchReports(),
+        fetchTopics(),
+        fetchDashboard(),
+      ]);
+      setItems(itemList.items);
+      setItemTotal(Math.min(itemList.total, HOME_ITEM_LIMIT));
+      setReports(reportList.reports);
+      setTopics(topicList);
+      setDashboard(dash);
+      setCollectionJustFinished(true);
+      setCollectDialogOpen(false);
+      success(`采集完成：新增 ${totalNew} 条情报`);
+    } catch (err) {
+      success(`采集失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
+  }, [success]);
+
+  if (loading) return <div className="loading">加载今日情报概览...</div>;
   if (error) return <div className="error-banner">{error}</div>;
+  if (!dashboard) return null;
 
   return (
     <div className="home-page">
-      <section className="home-headline">
-        <div>
-          <span className="home-kicker">Global Trade Intelligence</span>
-          <h2>全球贸易风险情报主页</h2>
-          <p>聚合最新采集词条、专题进展和分析报告，像新闻流一样快速浏览，点开即可阅读全文。</p>
-        </div>
-        <div className="home-metrics">
-          <Metric label="总词条" value={dashboard?.summary.total_items ?? 0} />
-          <Metric label="今日新增" value={dashboard?.summary.items_today ?? 0} />
-          <Metric label="本周新增" value={dashboard?.summary.items_this_week ?? 0} />
-        </div>
-      </section>
+      {/* Hero 区域 — 紧凑版 */}
+      <HomeHero data={dashboard} onCollect={handleCollect} onReports={handleReports} reportsEnabled={recentReports.length > 0 || collectionJustFinished} />
 
+      {/* Featured 重点情报 — 横版卡片 */}
       {featuredCards.length > 0 && (
-        <section className="featured-intel">
-          <div className="section-title-row featured-title-row">
-            <div>
-              <h3><Newspaper size={18} /> 今日重点情报</h3>
-              <p className="text-muted">智能选取当天最有价值的信息。</p>
+        <section className="featured-section">
+          <div className="featured-section-header">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Globe2 size={18} />
+              <strong>重点情报</strong>
             </div>
-            {featuredCards.length > 3 && (
-              <div className="featured-controls">
-                <button
-                  type="button"
-                  aria-label="上一组重点情报"
-                  onClick={() => setFeaturedStart(((featuredPage - 1 + featuredSlideCount) % featuredSlideCount) * 3)}
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  aria-label="下一组重点情报"
-                  onClick={() => setFeaturedStart(((featuredPage + 1) % featuredSlideCount) * 3)}
-                >
-                  ›
-                </button>
-              </div>
-            )}
+            <span className="text-muted">高价值采集内容优先展示</span>
           </div>
-          <div className="featured-intel-grid">
-            <div className="featured-intel-track" style={{ transform: `translateX(-${featuredPage * 100}%)` }}>
-              {featuredGroups.map((group, groupIndex) => (
-                <div className="featured-intel-slide" key={groupIndex}>
-                  {group.map(({ item, imageUrl }, index) => {
-                    const source = sourceMap.get(item.source_id);
-                    const date = item.published_at || item.collected_at;
-                    const title = getDisplayTitle(item.title_zh || item.title);
-                    const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
-                    return (
-                      <article key={item.id} className={`featured-intel-card featured-intel-card--${index + 1}`}>
-                        <button type="button" className="featured-copy" onClick={() => setReadingItem(item)}>
-                          <span className="featured-date">
-                            <CalendarDays size={15} />
-                            {date ? new Date(date).toLocaleDateString("zh-CN", { month: "short", day: "numeric", year: "numeric" }) : "未知日期"}
-                          </span>
-                          <strong>{clip(title, index === 0 ? 92 : 78)}</strong>
-                          <p>{clip(summary, index === 0 ? 170 : 130)}</p>
-                          <span className="featured-source">{source?.name || item.source_id}</span>
-                          <span className="featured-read">阅读全文 <ArrowRight size={15} /></span>
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={title}
-                          className="featured-image"
-                          style={{ backgroundImage: `url(${imageUrl})` }}
-                          onClick={() => setReadingItem(item)}
-                        />
-                      </article>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+          <div className="featured-cards-row">
+            {featuredCards.slice(0, 3).map(({ item, imageUrl }, index) => {
+              const source = sourceMap.get(item.source_id);
+              const title = getDisplayTitle(item.title_zh || item.title);
+              const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
+              const date = item.published_at || item.collected_at;
+              return (
+                <article key={item.id} className="featured-card" onClick={() => setReadingItem(item)}>
+                  <div className="featured-card-image" style={{ backgroundImage: `url(${imageUrl})` }} />
+                  <div className="featured-card-body">
+                    <span className="featured-card-date">
+                      <CalendarDays size={13} />
+                      {date ? new Date(date).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "未知日期"}
+                    </span>
+                    <strong className="featured-card-title">{clip(title, 60)}</strong>
+                    <p className="featured-card-summary">{clip(summary, 100)}</p>
+                    <div className="featured-card-meta">
+                      <span>{source?.name || item.source_id}</span>
+                      <span className="featured-card-read">
+                        阅读全文 <ArrowRight size={13} />
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-          {featuredCards.length > 3 && (
-            <div className="featured-dots" aria-label="重点情报轮播页码">
-              {Array.from({ length: featuredSlideCount }, (_, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  aria-label={`切换到第 ${index + 1} 组`}
-                  className={featuredPage === index ? "is-active" : ""}
-                  onClick={() => setFeaturedStart(index * 3)}
-                />
-              ))}
-            </div>
-          )}
         </section>
       )}
 
+      {/* 左右分栏 */}
       <section className="home-grid">
         <main className="home-news">
           <div className="section-title-row">
@@ -200,23 +193,26 @@ export function IntelligenceHomePage() {
           </div>
 
           {itemsError && <div className="error-banner">{itemsError}</div>}
-          <div className={`news-feed news-feed--featured${itemsLoading ? " news-feed--loading" : ""}`}>
+          <div className={`news-feed${itemsLoading ? " news-feed--loading" : ""}`}>
             {items.map((item, index) => {
               const source = sourceMap.get(item.source_id);
               const title = getDisplayTitle(item.title_zh || item.title);
               const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
               const date = item.published_at || item.collected_at;
+              const relativeTime = date ? getRelativeTime(new Date(date)) : "未知";
               return (
                 <article key={item.id} className={`news-entry${index === 0 ? " news-entry--lead" : ""}`}>
-                  <div className="news-date-box">
-                    <strong>{date ? new Date(date).getDate().toString().padStart(2, "0") : "--"}</strong>
-                    <span>{date ? new Date(date).toLocaleDateString("zh", { month: "short" }) : "未知"}</span>
+                  <div className="news-timeline">
+                    <div className="news-timeline-line" />
+                    <div className="news-timeline-dot" />
                   </div>
                   <div className="news-entry-main">
                     <div className="news-entry-meta">
+                      <span className="news-source-icon">{source?.name?.charAt(0) || "?"}</span>
                       <span>{source?.name || item.source_id}</span>
-                      {item.category && <span>{item.category}</span>}
-                      {item.language && <span>{item.language}</span>}
+                      {item.category && <span className="news-badge">{item.category}</span>}
+                      {item.language && <span className="news-badge news-badge--lang">{item.language}</span>}
+                      <span className="news-relative-time">{relativeTime}</span>
                     </div>
                     <button type="button" className="news-title-button" onClick={() => setReadingItem(item)}>
                       {title}
@@ -234,21 +230,11 @@ export function IntelligenceHomePage() {
           </div>
           {itemTotal > HOME_ITEMS_PER_PAGE && (
             <div className="report-pager">
-              <button
-                type="button"
-                className="pager-button"
-                disabled={safeItemPage <= 1}
-                onClick={() => setItemPage(Math.max(1, safeItemPage - 1))}
-              >
+              <button type="button" className="pager-button" disabled={safeItemPage <= 1} onClick={() => setItemPage(Math.max(1, safeItemPage - 1))}>
                 上一页
               </button>
               <span>{safeItemPage} / {itemTotalPages}</span>
-              <button
-                type="button"
-                className="pager-button"
-                disabled={safeItemPage >= itemTotalPages}
-                onClick={() => setItemPage(Math.min(itemTotalPages, safeItemPage + 1))}
-              >
+              <button type="button" className="pager-button" disabled={safeItemPage >= itemTotalPages} onClick={() => setItemPage(Math.min(itemTotalPages, safeItemPage + 1))}>
                 下一页
               </button>
             </div>
@@ -256,6 +242,8 @@ export function IntelligenceHomePage() {
         </main>
 
         <aside className="home-side">
+          <SystemStatus sources={sources} />
+
           <section className="home-panel">
             <h3><FileText size={17} /> 分析报告摘要</h3>
             <div className="report-summary-list">
@@ -282,7 +270,6 @@ export function IntelligenceHomePage() {
               ))}
             </div>
           </section>
-
         </aside>
       </section>
 
@@ -292,15 +279,18 @@ export function IntelligenceHomePage() {
       {viewingReport && (
         <ReportViewerModal report={viewingReport} onClose={() => setViewingReport(null)} />
       )}
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <strong>{value.toLocaleString()}</strong>
-      <span>{label}</span>
+      <CollectTopicsDialog
+        open={collectDialogOpen}
+        topics={topics}
+        onClose={() => setCollectDialogOpen(false)}
+        onStart={runCollection}
+      />
+      <RecentReportsDialog
+        open={viewReportsOpen}
+        reports={recentReports}
+        onClose={() => setViewReportsOpen(false)}
+        onView={(report) => setViewingReport(report)}
+      />
     </div>
   );
 }
@@ -357,6 +347,30 @@ function isToday(date: Date | null) {
   return date.getFullYear() === now.getFullYear()
     && date.getMonth() === now.getMonth()
     && date.getDate() === now.getDate();
+}
+
+function getRelativeTime(date: Date): string {
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  if (hours < 24) return `${hours} 小时前`;
+  if (days < 7) return `${days} 天前`;
+  return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function extractFinding(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*#\d.\s]+/, "").trim())
+    .filter(Boolean)
+    .filter((line) => !/^(```|摘要|报告|关键发现)$/i.test(line));
+  const picked = lines.find((line) => /发现|风险|影响|措施|政策|贸易|关税|TBT|SPS|壁垒/.test(line)) || lines[0] || text;
+  return clip(picked, 170);
 }
 
 const FEATURE_IMAGE_POOL = [
@@ -420,14 +434,4 @@ function pickFeatureImageCandidates(item: CollectedItem) {
     ];
   }
   return FEATURE_IMAGE_POOL;
-}
-
-function extractFinding(text: string) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^[-*#\d.\s]+/, "").trim())
-    .filter(Boolean)
-    .filter((line) => !/^(```|摘要|报告|关键发现)$/i.test(line));
-  const picked = lines.find((line) => /发现|风险|影响|措施|政策|贸易|关税|TBT|SPS|壁垒/.test(line)) || lines[0] || text;
-  return clip(picked, 170);
 }

@@ -24,8 +24,8 @@ router = APIRouter(prefix="/api/v1", tags=["reports"])
 
 
 @router.get("/reports", response_model=ReportListOut)
-def list_reports(topic_id: str | None = None, db: Session = Depends(get_db)):
-    reports, total = _list_reports(db, topic_id=topic_id)
+def list_reports(topic_id: str | None = None, days: int | None = Query(default=None, ge=1), db: Session = Depends(get_db)):
+    reports, total = _list_reports(db, topic_id=topic_id, days=days)
     return ReportListOut(reports=reports, total=total)
 
 

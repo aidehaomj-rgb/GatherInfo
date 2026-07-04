@@ -1,12 +1,12 @@
 """
-Seed demo collected-item data into the GatherInfo database.
+Seed demo collected-item data into the TradeRadar database.
 
 This script populates the collection tables with synthetic but realistic data so
 the frontend has something meaningful to display.  It uses the existing SQLAlchemy
 models so all relationships, tags, and audit fields are correctly wired up.
 
 Usage:
-    cd /Users/m4max/VS-CODE-PROJECT/GatherInfo
+    cd /Users/m4max/VS-CODE-PROJECT/TradeRadar
     PYTHONPATH=backend backend/.venv/bin/python -m app.seed_demo_data
 """
 import hashlib

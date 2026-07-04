@@ -20,6 +20,8 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN is_configured BOOLEAN DEFAULT 0"))
                 # Auto-set: web_scrape/official/rss/manual sources are always configured
                 conn.execute(text("UPDATE source_configs SET is_configured = 1 WHERE channel IN ('WEB_SCRAPE','OFFICIAL','RSS','SOCIAL','DEEPWEB','MANUAL')"))
+            # Imported web_scrape / social sources do not need extra configuration.
+            conn.execute(text("UPDATE source_configs SET is_configured = 1 WHERE channel IN ('web_scrape','social') AND is_configured = 0"))
             conn.commit()
 
     # Add columns to `topics` table if it exists

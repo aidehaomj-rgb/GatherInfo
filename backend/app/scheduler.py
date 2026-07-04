@@ -11,7 +11,9 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.database import SessionLocal
 from app.engine import CollectionEngine
-from app.models import ScheduleConfig, Topic, JobStatus
+from app.models import ScheduleConfig, Topic
+from app.services.report_service import cleanup_old_reports
+
 
 logger = logging.getLogger(__name__)
 scheduler_instance: "CollectionScheduler | None" = None
@@ -29,6 +31,12 @@ class CollectionScheduler:
     async def start(self):
         self._scheduler.start()
         await self._load_all()
+        self._scheduler.add_job(
+            self._cleanup_reports,
+            trigger=CronTrigger(hour=3, minute=0, timezone="Asia/Shanghai"),
+            id="cleanup-reports",
+            replace_existing=True,
+        )
         logger.info("Scheduler started (%d jobs)", len(self._job_ids))
 
     async def shutdown(self):
@@ -62,26 +70,12 @@ class CollectionScheduler:
 
     # ── internal ─────────────────────────────────────────────────────────
 
-    async def _run_schedule(self, schedule_id: str):
-        db = SessionLocal()
-        try:
-            engine = CollectionEngine(db)
-            results = await engine.execute_schedule(schedule_id)
-            total_new = sum(r.items_new for r in results)
-            logger.info("Schedule %s done: %d new", schedule_id, total_new)
-        except Exception as exc:
-            logger.error("Schedule %s failed: %s", schedule_id, exc)
-        finally:
-            db.close()
-
     async def _load_all(self):
         db = SessionLocal()
         try:
-            # Load ScheduleConfig schedules
             for s in db.query(ScheduleConfig).filter(ScheduleConfig.is_active == True).all():
                 await self.add_schedule(s)
 
-            # Load Topic-based schedules
             for t in db.query(Topic).filter(Topic.is_scheduled == True, Topic.is_active == True).all():
                 jid = f"topic-{t.id}"
                 if jid in self._job_ids.values():
@@ -107,7 +101,6 @@ class CollectionScheduler:
             total_new = sum(r.items_new for r in results)
             logger.info("Topic %s done: %d new", topic_id, total_new)
 
-            # Auto-report: generate a report after collection if enabled.
             topic = db.query(Topic).filter(Topic.id == topic_id).first()
             if topic and topic.auto_report:
                 run_id = topic.last_collection_run_id
@@ -121,9 +114,30 @@ class CollectionScheduler:
                     logger.info("Auto-report for topic %s: %s (%s)",
                                 topic_id, report.id, report.status)
                 except Exception as exc:
-                    # Auto-report failure must not affect collection results.
                     logger.error("Auto-report for topic %s failed: %s", topic_id, exc)
         except Exception as exc:
             logger.error("Topic %s failed: %s", topic_id, exc)
+        finally:
+            db.close()
+
+    async def _run_schedule(self, schedule_id: str):
+        db = SessionLocal()
+        try:
+            engine = CollectionEngine(db)
+            results = await engine.execute_schedule(schedule_id)
+            total_new = sum(r.items_new for r in results)
+            logger.info("Schedule %s done: %d new", schedule_id, total_new)
+        except Exception as exc:
+            logger.error("Schedule %s failed: %s", schedule_id, exc)
+        finally:
+            db.close()
+
+    async def _cleanup_reports(self):
+        db = SessionLocal()
+        try:
+            deleted = cleanup_old_reports(db, days=7)
+            logger.info("Cleaned up %d reports older than 7 days", deleted)
+        except Exception as exc:
+            logger.error("Report cleanup failed: %s", exc)
         finally:
             db.close()

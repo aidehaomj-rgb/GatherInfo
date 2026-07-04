@@ -22,11 +22,15 @@ def get_system_config(db: Session) -> SystemConfig:
     return cfg
 
 
-def list_reports(db: Session, topic_id: Optional[str] = None, limit: int = 50):
-    """List reports, optionally filtered by topic."""
+def list_reports(db: Session, topic_id: Optional[str] = None, days: Optional[int] = None, limit: int = 50):
+    """List reports, optionally filtered by topic and recent days."""
     q = db.query(Report)
     if topic_id:
         q = q.filter(Report.topic_id == topic_id)
+    if days:
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        q = q.filter(Report.created_at >= cutoff)
     total = q.count()
     reports = q.order_by(Report.created_at.desc()).limit(limit).all()
     return reports, total
@@ -38,6 +42,25 @@ def get_report(db: Session, report_id: str) -> Report:
     if not r:
         raise HTTPException(404, f"Report not found: {report_id}")
     return r
+
+
+def cleanup_old_reports(db: Session, days: int = 7) -> int:
+    """Delete reports older than the given number of days and their exported files."""
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stale = db.query(Report).filter(Report.created_at < cutoff).all()
+    deleted = 0
+    for r in stale:
+        try:
+            for path in (r.output_files or {}).values():
+                if path and os.path.isfile(path):
+                    os.remove(path)
+        except OSError:
+            pass
+        db.delete(r)
+        deleted += 1
+    db.commit()
+    return deleted
 
 
 def delete_report(db: Session, report_id: str) -> None:

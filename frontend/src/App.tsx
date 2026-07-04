@@ -1,11 +1,14 @@
-import { useEffect, useState, Suspense, lazy } from "react";
+import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
 import type { DashboardData } from "./types";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AppLogo } from "./components/AppLogo";
+import { CommandPalette } from "./components/CommandPalette";
+import { ToastProvider, useToast } from "./components/ToastProvider";
 
 // Lazy-loaded page components (code-split per view)
 const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
@@ -65,23 +68,44 @@ function greeting(): string {
   return "晚上好";
 }
 
-function AppLogo() {
+function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  const shortcuts = [
+    { key: "Cmd / Ctrl + K", desc: "打开命令面板" },
+    { key: "Esc", desc: "关闭模态框 / 取消选择" },
+    { key: "?", desc: "显示快捷键帮助" },
+    { key: "↑ / ↓", desc: "命令面板中切换选项" },
+    { key: "Enter", desc: "执行选中命令" },
+  ];
   return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M20 4 A16 16 0 0 1 35.3 12.7" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
-      <path d="M20 9 A11 11 0 0 1 30 15" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" opacity="0.65" />
-      <path d="M20 14 A6 6 0 0 1 24.5 17.5" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
-      <circle cx="35.3" cy="12.7" r="2.5" fill="#22c55e" opacity="0.9">
-        <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2s" repeatCount="indefinite" />
-      </circle>
-      <circle cx="20" cy="20" r="2" fill="#3b82f6" opacity="0.5" />
-    </svg>
+    <div className="shortcut-help-overlay" onClick={onClose}>
+      <div className="shortcut-help" onClick={(e) => e.stopPropagation()}>
+        <div className="shortcut-help__header">
+          <h3>快捷键帮助</h3>
+          <button type="button" className="shortcut-help__close" onClick={onClose} aria-label="关闭">
+            <Keyboard size={18} />
+          </button>
+        </div>
+        <div className="shortcut-help__list">
+          {shortcuts.map((s) => (
+            <div key={s.key} className="shortcut-help__row">
+              <kbd className="shortcut-help__key">{s.key}</kbd>
+              <span className="shortcut-help__desc">{s.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
-export function App() {
+function AppInner() {
   const [view, setView] = useState<ViewId>("home");
   const [dashData, setDashData] = useState<DashboardData | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const { success } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -89,15 +113,64 @@ export function App() {
     return () => { cancelled = true; };
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (commandOpen) {
+          setCommandOpen(false);
+          return;
+        }
+        if (shortcutHelpOpen) {
+          setShortcutHelpOpen(false);
+          return;
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandOpen((prev) => !prev);
+        return;
+      }
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setShortcutHelpOpen(true);
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [commandOpen, shortcutHelpOpen]);
+
+  useEffect(() => {
+    function onResize() {
+      if (window.innerWidth < 768) {
+        setSidebarCollapsed(true);
+      } else {
+        setSidebarCollapsed(false);
+      }
+    }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const itemsToday = dashData?.summary?.items_today ?? 0;
 
   return (
     <div className="app-shell">
-      <aside className="side-rail">
+      <aside className={`side-rail${sidebarCollapsed ? " side-rail--collapsed" : ""}`}>
         <div className="brand">
-          <AppLogo />
-          <span className="brand-name">GatherInfo</span>
-          <span className="brand-sub">global trade intelligence</span>
+          <AppLogo size={sidebarCollapsed ? 32 : 44} />
+          {!sidebarCollapsed && (
+            <>
+              <span className="brand-name">RiskInfoRader</span>
+              <span className="brand-sub">全球贸易风险情报中枢</span>
+            </>
+          )}
         </div>
         <nav>
           {views.map((v) => {
@@ -111,12 +184,21 @@ export function App() {
                 onClick={() => setView(v.id)}
                 title={v.label}
               >
+                {isActive && <span className="nav-btn__indicator" />}
                 <Icon size={18} />
-                <span>{v.label}</span>
+                {!sidebarCollapsed && <span>{v.label}</span>}
               </button>
             );
           })}
         </nav>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+        >
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
       </aside>
       <main className="workspace">
         <header className="workspace-header">
@@ -124,6 +206,14 @@ export function App() {
             <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
           </div>
           <div className="header-actions">
+            <button
+              type="button"
+              className="btn-icon header-action-btn"
+              title="打开命令面板 (Cmd+K)"
+              onClick={() => setCommandOpen(true)}
+            >
+              <Keyboard size={18} />
+            </button>
             <button
               type="button"
               className="btn-icon header-action-btn"
@@ -154,6 +244,24 @@ export function App() {
           </ErrorBoundary>
         </section>
       </main>
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        onSelectView={(v) => {
+          setView(v as ViewId);
+          setCommandOpen(false);
+          success(`已切换到: ${views.find((x) => x.id === v)?.label || v}`);
+        }}
+      />
+      <ShortcutHelp open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <AppInner />
+    </ToastProvider>
   );
 }

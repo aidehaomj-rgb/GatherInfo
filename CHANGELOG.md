@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.1] - 2026-07-04
+
+### Added
+- Added release notes for the current RiskInfoRader project state.
+- Added project assets and UI components used by the refreshed intelligence cockpit.
+
+### Changed
+- Bumped project version from `0.5.0` to `0.5.1`.
+- Synced frontend package metadata and backend API/health version metadata.
+- Updated repository ignore rules to keep local runtime data and dependency folders out of Git.
+
+### Notes
+- This release captures the local TradeRadar/RiskInfoRader worktree for publication to GitHub.
+
 ## [0.5.0] — 2026-06-30
 
 ### 新增功能

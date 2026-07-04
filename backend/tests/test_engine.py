@@ -173,8 +173,8 @@ class TestPersistItems:
 class TestWindowFiltering:
     """Window-based filtering of items by publication date."""
 
-    def test_items_without_published_at_always_kept(self):
-        """Items without a published_at date should always be kept."""
+    def test_items_without_published_at_are_skipped_when_window_is_set(self):
+        """Items without a usable date should be skipped when a window is set."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -187,8 +187,7 @@ class TestWindowFiltering:
         engine._persist_items(items, "src-1", "run-1", topic_id="t1",
                               window_start=window_start)
 
-        # Should be added even though no published_at
-        assert mock_db.add.call_count >= 1
+        mock_db.add.assert_not_called()
 
     def test_items_within_window_kept(self):
         """Items published within the window should be kept."""
@@ -208,8 +207,8 @@ class TestWindowFiltering:
 
         assert mock_db.add.call_count >= 1
 
-    def test_items_before_window_kept_with_out_of_range_tag_when_relevant(self):
-        """Relevant items outside the requested window are kept but tagged."""
+    def test_items_before_window_are_skipped_even_when_relevant(self):
+        """Relevant items outside the requested window should be skipped."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -226,6 +225,6 @@ class TestWindowFiltering:
         engine._persist_items(items, "src-1", "run-1", topic_id="t1",
                               window_start=window_start, keywords=["tariff"])
 
-        assert mock_db.add.call_count >= 1
-        engine.ensure_tag.assert_called_with("system:超限采集", "system", "超限采集")
-        engine.tag_item.assert_called_once_with(items[0].item_id("src-1"), "system:超限采集")
+        mock_db.add.assert_not_called()
+        engine.ensure_tag.assert_not_called()
+        engine.tag_item.assert_not_called()

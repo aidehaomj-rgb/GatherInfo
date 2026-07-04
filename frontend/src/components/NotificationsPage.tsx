@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   fetchNotifications, createNotification, updateNotification,
-  deleteNotification, testNotification,
+  deleteNotification, testNotification, pruneNotifications,
 } from "../api";
 import type { NotificationConfig } from "../types";
 import { Modal } from "./shared/Modal";
@@ -40,6 +40,35 @@ const GROUP_ORDER: { channel: string; active: boolean; title: string }[] = [
   { channel: "email", active: false, title: "停用的 Email 通知" },
 ];
 
+function isTestNotification(n: NotificationConfig): boolean {
+  const name = n.name.toLowerCase();
+  const webhook = (n.webhook_url ?? "").toLowerCase();
+  const email = (n.email_to ?? "").toLowerCase();
+  return (
+    name.includes("test") ||
+    name.includes("测试") ||
+    webhook.includes("example.com") ||
+    webhook.includes("httpbin.org") ||
+    webhook.includes("localhost") ||
+    email.includes("test@example.com") ||
+    email.includes("localhost") ||
+    email === "" ||
+    webhook === ""
+  );
+}
+
+function deduplicateNotifications(items: NotificationConfig[]): NotificationConfig[] {
+  const seen = new Set<string>();
+  const out: NotificationConfig[] = [];
+  for (const n of items) {
+    const key = `${n.channel}|${n.name.toLowerCase()}|${(n.webhook_url ?? "").toLowerCase()}|${(n.email_to ?? "").toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(n);
+  }
+  return out;
+}
+
 export function NotificationsPage() {
   const [items, setItems] = useState<NotificationConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,9 +79,18 @@ export function NotificationsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; message: string } | null>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+ const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [showAll, setShowAll] = useState(false);
+  const [pruning, setPruning] = useState(false);
 
-  const load = useCallback(async () => {
+  const filteredItems = useMemo(() => {
+    if (showAll) return items;
+    return deduplicateNotifications(items.filter((n) => !isTestNotification(n)));
+  }, [items, showAll]);
+
+  const hiddenCount = useMemo(() => items.length - filteredItems.length, [items, filteredItems]);
+
+ const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -65,22 +103,22 @@ export function NotificationsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const groups = useMemo<NotifGroup[]>(() => {
-    return GROUP_ORDER.map(({ channel, active, title }) => ({
-      key: `${channel}-${active}` as GroupKey,
-      title,
-      channel,
-      active,
-      items: items.filter((it) => it.channel === channel && it.is_active === active),
-    })).filter((g) => g.items.length > 0);
-  }, [items]);
+ const groups = useMemo<NotifGroup[]>(() => {
+   return GROUP_ORDER.map(({ channel, active, title }) => ({
+     key: `${channel}-${active}` as GroupKey,
+     title,
+     channel,
+     active,
+      items: filteredItems.filter((it) => it.channel === channel && it.is_active === active),
+   })).filter((g) => g.items.length > 0);
+  }, [filteredItems]);
 
-  const stats = useMemo(() => ({
-    total: items.length,
-    active: items.filter((i) => i.is_active).length,
-    webhook: items.filter((i) => i.channel === "webhook").length,
-    email: items.filter((i) => i.channel === "email").length,
-  }), [items]);
+ const stats = useMemo(() => ({
+    total: filteredItems.length,
+    active: filteredItems.filter((i) => i.is_active).length,
+    webhook: filteredItems.filter((i) => i.channel === "webhook").length,
+    email: filteredItems.filter((i) => i.channel === "email").length,
+  }), [filteredItems]);
 
   const openNew = () => { setEditing({ ...NEW_NOTIF }); setModalOpen(true); };
   const openEdit = (item: NotificationConfig) => { setEditing({ ...item }); setModalOpen(true); };
@@ -140,16 +178,30 @@ export function NotificationsPage() {
     setTestingId(null);
   };
 
-  const handleToggleActive = async (item: NotificationConfig) => {
+ const handleToggleActive = async (item: NotificationConfig) => {
+   try {
+     await updateNotification(item.id, { is_active: !item.is_active });
+     await load();
+   } catch (e) {
+     alert(e instanceof Error ? e.message : "更新失败");
+   }
+ };
+
+  const handlePrune = async () => {
+    if (!confirm("清理通知将删除测试/无效/未激活的通知配置，确定继续？")) return;
+    setPruning(true);
     try {
-      await updateNotification(item.id, { is_active: !item.is_active });
+      const r = await pruneNotifications();
+      setTestResult(`✅ 已清理 ${r.deleted} 个通知配置`);
       await load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "更新失败");
+      setTestResult(`❌ 清理失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPruning(false);
     }
   };
 
-  const toggleGroup = (key: string) => {
+ const toggleGroup = (key: string) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -163,14 +215,20 @@ export function NotificationsPage() {
           <h2>通知管理</h2>
           <p className="text-muted">配置采集完成后的 Webhook 或 Email 通知，按渠道与状态分类聚合。</p>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
-            <RefreshCw size={12} />
+       <div style={{ display: "flex", gap: 6 }}>
+         <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
+           <RefreshCw size={12} />
+         </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "精简视图" : "显示全部"}
+          </button>
+          <button type="button" className="btn btn-danger btn-sm" onClick={handlePrune} disabled={pruning}>
+            <Trash2 size={12} /> {pruning ? "清理中..." : "清理测试通知"}
           </button>
           <button type="button" className="btn btn-primary btn-sm" onClick={openNew}>
             <Plus size={12} /> 新增通知
           </button>
-        </div>
+       </div>
       </div>
 
       {testResult && (
@@ -201,9 +259,16 @@ export function NotificationsPage() {
               <span className="notif-stat-num">{stats.email}</span>
               <span className="notif-stat-label">Email</span>
             </div>
-          </div>
+         </div>
 
-          <div className="notif-groups">
+          {hiddenCount > 0 && (
+            <div className="notif-hidden-tip" style={{ marginTop: 8, padding: "8px 12px", background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", fontSize: 12, color: "var(--ink-muted)" }}>
+              已隐藏 {hiddenCount} 个重复/测试/无效通知。
+              <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowAll(true)} style={{ marginLeft: 8 }}>显示全部</button>
+            </div>
+          )}
+
+         <div className="notif-groups">
             {groups.map((group) => (
               <NotifGroupSection
                 key={group.key}

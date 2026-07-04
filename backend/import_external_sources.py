@@ -81,12 +81,13 @@ def _build_web_source(row, group_l1: str, seq: int, seen: set[str]) -> dict | No
         "is_active": True,
         "base_url": str(url).strip(),
         "homepage_url": f"https://{_domain(url)}" if _domain(url) else None,
-        "default_keywords": None,
-        "default_categories": [group_l1, str(cat or "其他").strip()] if cat else [group_l1],
-        "languages": [str(lang).strip()] if lang else None,
-        "country_focus": [str(country).strip()] if country else None,
-        "rate_limit_rps": 0.5,
-        "legal_basis": "公开政府/新闻信息",
+       "default_keywords": None,
+       "default_categories": [group_l1, str(cat or "其他").strip()] if cat else [group_l1],
+       "languages": [str(lang).strip()] if lang else None,
+       "country_focus": [str(country).strip()] if country else None,
+       "rate_limit_rps": 0.5,
+        "is_configured": True,
+       "legal_basis": "公开政府/新闻信息",
     }
 
 
@@ -99,14 +100,15 @@ def _build_social_source(row, group_l1: str, seq: int, seen: set[str], kind: str
         return {
             "id": _make_id(name, seq, seen),
             "name": name[:200],
-            "description": f"微信号: {wechat_id}" if wechat_id else None,
-            "channel": "social",
-            "is_active": True,
-            "base_url": None,
-            "default_categories": [group_l1],
-            "default_keywords": None,
-            "rate_limit_rps": 0.5,
-            "legal_basis": "公开社交媒体信息",
+           "description": f"微信号: {wechat_id}" if wechat_id else None,
+           "channel": "social",
+           "is_active": True,
+           "base_url": None,
+           "default_categories": [group_l1],
+           "default_keywords": None,
+           "rate_limit_rps": 0.5,
+            "is_configured": True,
+           "legal_basis": "公开社交媒体信息",
         }
     if kind == "weibo":
         _, username, url, _ = row
@@ -116,14 +118,15 @@ def _build_social_source(row, group_l1: str, seq: int, seen: set[str], kind: str
         return {
             "id": _make_id(name, seq, seen),
             "name": name[:200],
-            "description": None,
-            "channel": "social",
-            "is_active": True,
-            "base_url": str(url).strip() if url and str(url).startswith("http") else None,
-            "default_categories": [group_l1],
-            "default_keywords": None,
-            "rate_limit_rps": 0.5,
-            "legal_basis": "公开社交媒体信息",
+           "description": None,
+           "channel": "social",
+           "is_active": True,
+           "base_url": str(url).strip() if url and str(url).startswith("http") else None,
+           "default_categories": [group_l1],
+           "default_keywords": None,
+           "rate_limit_rps": 0.5,
+            "is_configured": True,
+           "legal_basis": "公开社交媒体信息",
         }
     if kind == "toutiao":
         _, _cat, account_name = row
@@ -133,14 +136,15 @@ def _build_social_source(row, group_l1: str, seq: int, seen: set[str], kind: str
         return {
             "id": _make_id(name, seq, seen),
             "name": name[:200],
-            "description": "今日头条APP 媒体账号",
-            "channel": "social",
-            "is_active": True,
-            "base_url": None,
-            "default_categories": [group_l1],
-            "default_keywords": None,
-            "rate_limit_rps": 0.5,
-            "legal_basis": "公开社交媒体信息",
+           "description": "今日头条APP 媒体账号",
+           "channel": "social",
+           "is_active": True,
+           "base_url": None,
+           "default_categories": [group_l1],
+           "default_keywords": None,
+           "rate_limit_rps": 0.5,
+            "is_configured": True,
+           "legal_basis": "公开社交媒体信息",
         }
     return None
 

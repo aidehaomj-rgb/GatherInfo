@@ -15,6 +15,7 @@ from app.connectors.base import (
     JobStatus, SourceConfig, register_collector,
 )
 from app.connectors._helpers import detect_lang, infer_category, build_tags
+from app.web_content_extractor import extract_article_text
 
 logger = logging.getLogger(__name__)
 
@@ -97,30 +98,26 @@ class WebScrapeCollector(BaseCollector):
                             published = _parse_date(el.parent.get_text(" ", strip=True))
 
                         content = ""
+                        summary = ""
                         if href and ac.get("fetch_detail", True):
                             try:
                                 detail_resp = await client.get(href)
-                                detail_soup = BeautifulSoup(detail_resp.text, "lxml")
-                                content_sel = ac.get(
-                                    "content_selector",
-                                    "article, .content, .article-content, #content, main")
-                                content_el = detail_soup.select_one(content_sel)
-                                if content_el:
-                                    for t in content_el.select("script, style, nav, .nav"):
-                                        t.decompose()
-                                    content = content_el.get_text(
-                                        separator="\n", strip=True)[:5000]
+                                extracted = extract_article_text(detail_resp.text, href)
+                                content = extracted.get("content", "")
+                                summary = extracted.get("summary", "")
+                                if not published and extracted.get("published_at"):
+                                    published = _parse_date(extracted["published_at"])
                                 await asyncio.sleep(
                                     1.0 / cfg.rate_limit_rps if cfg.rate_limit_rps else 1.0)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.warning("Detail fetch failed for %s: %s", href[:80], exc)
 
                         if not _matches(title, content, keywords):
                             continue
 
                         items.append(FetchItem(
                             title=title, content=content, url=href,
-                            summary=(content or title)[:500],
+                            summary=summary or (content[:500] if content else title[:500]),
                             published_at=published,
                             language=detect_lang(f"{title} {content}"),
                             category=infer_category(title, content),
