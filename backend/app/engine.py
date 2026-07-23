@@ -330,7 +330,7 @@ class CollectionEngine:
                 text = f"{fi.title} {fi.content or ''} {fi.summary or ''} {metadata_text}"
                 matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
                 total_kw = len([kw for kw in keywords if kw])
-                required_matches = 2 if total_kw >= 3 else 1
+                required_matches = 1
                 if len(matched_kws) < required_matches:
                     continue
             item_id = fi.item_id(source_id)
