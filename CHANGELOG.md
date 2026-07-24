@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.2] - 2026-07-24
+
+### Added
+- Added project-level Codex hook configuration to verify the required gstack setup before AI-assisted skill usage.
+- Added portable local start/stop helper scripts for the FastAPI backend and Vite frontend.
+
+### Changed
+- Bumped project version from `0.5.1` to `0.5.2`.
+- Unified version metadata across root package metadata, frontend package metadata, frontend lockfile, backend API metadata, health output, and `VERSION`.
+- Updated development service cleanup so local dashboard stop actions clear stale PID files and release ports 8109/5178 reliably.
+- Updated `.env.example` to point frontend requests at the current `/api/v1` backend base URL.
+
+### Notes
+- `.workbuddy/` is treated as local-only workspace notes and is excluded from Git.
+
 ## [0.5.1] - 2026-07-04
 
 ### Added

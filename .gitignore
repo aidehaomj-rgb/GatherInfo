@@ -17,6 +17,7 @@ data/gather.db*
 logs/
 .dev-pids
 pptx_build/node_modules/
+.workbuddy/
 
 # Project docs
 data/backups/

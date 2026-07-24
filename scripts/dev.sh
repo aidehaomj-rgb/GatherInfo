@@ -15,16 +15,26 @@ fi
 
 # ── PID file for external cleanup (dashboard stop) ───────────────────────────
 PID_FILE="$PROJECT_DIR/.dev-pids"
-trap 'rm -f "$PID_FILE"' EXIT
+: > "$PID_FILE"   # 每次启动清空，避免堆积陈旧 PID
 
 cleanup() {
+  # 先停掉 wait 循环里记录的子进程，再删 PID 文件，避免孤儿占用端口
   if [[ -f "$PID_FILE" ]]; then
     while read -r pid; do
-      kill "$pid" 2>/dev/null || true
+      [[ -n "$pid" ]] || continue
+      kill -TERM "$pid" 2>/dev/null || true
     done < "$PID_FILE"
     wait 2>/dev/null || true
+    # 兜底强杀仍在监听的端口进程
+    for port in 8109 5178; do
+      for pid in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true); do
+        kill -KILL "$pid" 2>/dev/null || true
+      done
+    done
+    rm -f "$PID_FILE"
   fi
 }
+trap cleanup EXIT INT TERM
 
 # ── Start backend (uvicorn on port 8109) ─────────────────────────────────────
 echo "[dev] Starting backend on port 8109 ..."
