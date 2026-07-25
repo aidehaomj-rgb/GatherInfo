@@ -47,7 +47,7 @@ export function ReportsPage() {
       setModels(m);
       setError(null);
       setOllamaModels({});
-      const ollamaConfigs = m.filter((mdl) => mdl.provider === "ollama" && mdl.is_active);
+      const ollamaConfigs = m.filter((mdl) => (mdl.provider === "ollama" || mdl.provider === "ollama_cloud") && mdl.is_active);
       if (ollamaConfigs.length > 0) {
         const results: Record<string, string[]> = {};
         await Promise.all(ollamaConfigs.map(async (mdl) => {
@@ -360,7 +360,7 @@ function SingleTopicPanel(props: SingleTopicPanelProps) {
             <option value="">{defaultModelName ? `默认: ${defaultModelName}` : "-- 默认模型 --"}</option>
             {activeModels.flatMap((m) => {
               const avail = ollamaModels[m.id];
-              if (m.provider === "ollama" && avail && avail.length > 0) {
+              if ((m.provider === "ollama" || m.provider === "ollama_cloud") && avail && avail.length > 0) {
                 return avail.map((modelName) => (
                   <option key={`${m.id}@@${modelName}`} value={`${m.id}@@${modelName}`}>
                     {m.name} / {modelName}{m.is_default ? " ⭐" : ""}

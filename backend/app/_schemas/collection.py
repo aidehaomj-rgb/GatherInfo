@@ -72,6 +72,10 @@ class ItemDeleteRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class ItemTranslateRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
 class BatchRunOut(BaseModel):
     id: str
     source_id: str

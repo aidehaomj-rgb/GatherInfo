@@ -21,7 +21,7 @@ export function ModelConfigPage() {
   const [tab, setTab] = useState<"usable" | "pending">("usable");
 
   const isUsable = (m: ModelConfig) =>
-    m.is_active && (m.provider === "ollama" ? true : m.is_configured);
+    m.is_active && (typeof m.is_configured === "boolean" ? m.is_configured : Boolean(m.model_name));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,6 +94,7 @@ export function ModelConfigPage() {
 
   const providerIcons: Record<string, string> = {
     ollama: "🦙",
+    ollama_cloud: "☁️",
     openai: "🤖",
     lmstudio: "💻",
     cc_switch: "🔀",
@@ -101,6 +102,7 @@ export function ModelConfigPage() {
   };
   const providerNames: Record<string, string> = {
     ollama: "Ollama",
+    ollama_cloud: "Ollama Cloud",
     openai: "OpenAI 兼容",
     lmstudio: "LM Studio",
     cc_switch: "CC Switch",

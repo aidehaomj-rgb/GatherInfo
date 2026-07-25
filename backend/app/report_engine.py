@@ -12,6 +12,7 @@ Supports:
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Any
@@ -26,6 +27,22 @@ logger = logging.getLogger(__name__)
 
 # Re-export LLM client functions for backward compatibility
 from app.llm_client import call_llm as _call_llm, auto_summary as _auto_summary, translate_item_context as _translate_item_context  # noqa: E501
+
+
+def _effective_model(model: ModelConfig, model_name_override: str | None):
+    """Apply a UI-selected model name without mutating the saved configuration."""
+    if not model_name_override or model_name_override == model.model_name:
+        return model
+    return SimpleNamespace(
+        id=model.id,
+        provider=model.provider,
+        base_url=model.base_url,
+        api_key=model.api_key,
+        model_name=model_name_override,
+        temperature=model.temperature,
+        max_tokens=model.max_tokens,
+        top_p=model.top_p,
+    )
 
 
 async def generate_report(
@@ -58,6 +75,8 @@ async def generate_report(
             ).first()
             if not model:
                 raise ValueError("No default active model configured.")
+
+        effective_model = _effective_model(model, model_name_override)
 
         dt_from = _parse_iso(date_from)
         dt_to = _parse_iso(date_to)
@@ -93,7 +112,7 @@ async def generate_report(
                 if non_zh and len(non_zh) <= 50:
                     logger.info("Translating %d non-Chinese items for topic %s",
                                 len(non_zh), topic_id)
-                    await _translate_item_context(model, non_zh)
+                    await _translate_item_context(effective_model, non_zh)
             except Exception as exc:
                 logger.warning("Translation step failed (non-blocking): %s", exc,
                                exc_info=True)
@@ -117,7 +136,7 @@ async def generate_report(
         db.refresh(report)
 
         try:
-            llm_result = await _call_llm(model, prompt)
+            llm_result = await _call_llm(effective_model, prompt)
             report.content = llm_result["content"]
             report.summary = llm_result["summary"]
             report.tokens_used = llm_result["tokens_used"]

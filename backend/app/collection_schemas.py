@@ -20,7 +20,7 @@ from app._schemas.topic import (
 )
 from app._schemas.collection import (
     CollectRequest, RunOut, CollectResultOut,
-    ItemOut, ItemListOut, ItemDeleteRequest,
+    ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest,
     BatchRunOut, BatchOut, ActiveRunOut,
 )
 from app._schemas.tag import (
@@ -29,7 +29,7 @@ from app._schemas.tag import (
 )
 from app._schemas.model import (
     ModelConfigCreate, ModelConfigUpdate, ModelConfigOut,
-    ModelTestResult, ListModelsResult,
+    ModelTestResult, ListModelsResult, ModelListRequest,
     DiscoveredProvider, AutoDiscoverResult,
 )
 from app._schemas.report import (
@@ -59,7 +59,7 @@ __all__ = [
     "TagMergeRequest", "TagMergeResult",
     # model
     "ModelConfigCreate", "ModelConfigUpdate", "ModelConfigOut",
-    "ModelTestResult", "ListModelsResult",
+    "ModelTestResult", "ListModelsResult", "ModelListRequest",
     "DiscoveredProvider", "AutoDiscoverResult",
     # report
     "ReportOut", "ReportListOut",

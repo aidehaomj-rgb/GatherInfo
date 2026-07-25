@@ -213,7 +213,7 @@ export interface ItemList {
 export interface ModelConfig {
   id: string;
   name: string;
-  provider: string;        // ollama | openai | lmstudio | custom
+  provider: string;        // ollama | ollama_cloud | openai | lmstudio | custom
   base_url: string | null;
   api_key: string | null;
   model_name: string;

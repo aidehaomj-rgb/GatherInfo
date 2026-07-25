@@ -169,7 +169,7 @@ export function ReportBatchPanel({
               <option value="">默认模型</option>
               {activeModels.flatMap((m) => {
                 const avail = ollamaModels[m.id];
-                if (m.provider === "ollama" && avail?.length) {
+                if ((m.provider === "ollama" || m.provider === "ollama_cloud") && avail?.length) {
                   return avail.map((mn) => <option key={`${m.id}@@${mn}`} value={`${m.id}@@${mn}`}>{m.name} / {mn}</option>);
                 }
                 return <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name})</option>;

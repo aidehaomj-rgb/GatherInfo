@@ -137,7 +137,9 @@ export function TopicForm({
     setSaving(false);
   };
 
-  const activeSources = sources.filter((s) => s.is_active && s.is_configured);
+  const activeSources = sources.filter(
+    (source) => source.is_active && (source.is_configured || selectedSourceIds.includes(source.id)),
+  );
   const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
   const recs = recommendTemplates(kwList);
   const recLabels = new Set(recs.map((r) => r.label));
@@ -223,17 +225,14 @@ export function TopicForm({
               </div>
             )}
           </label>
-          <label className="span-2">
-            关联信息源{" "}
+          <div className="span-2 topic-source-field">
+            <span className="topic-source-label">关联信息源</span>
             <SourceSelector
               sources={activeSources}
               selected={selectedSourceIds}
               onChange={setSelectedSourceIds}
             />
-            <span className="text-muted small" style={{ marginTop: 4, display: "inline-block" }}>
-              已选 {selectedSourceIds.length} 个信息源
-            </span>
-          </label>
+          </div>
           <label>
             Cron 表达式
             <input

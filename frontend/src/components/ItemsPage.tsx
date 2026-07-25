@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { ExternalLink, BookOpenText, Languages } from "lucide-react";
 import {
   fetchItems, fetchTags, fetchSources, fetchTopics,
-  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems,
+  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems, translateItems,
 } from "../api";
 import type { CollectedItem, ItemList, Tag, Source, Topic } from "../types";
 import { cleanItemTitle, getDisplayTitle } from "../utils/title";
@@ -36,6 +36,7 @@ export function ItemsPage() {
   const [deleteCount, setDeleteCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const requestedTranslationIds = useRef(new Set<string>());
 
   useEffect(() => {
     fetchTags(undefined, 200).then(setTags).catch(() => {});
@@ -81,6 +82,18 @@ export function ItemsPage() {
   }, [page, query, filterTag, filterSource, filterTopic, filterCat, filterRun]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!data) return;
+    const itemIds = data.items
+      .filter(needsChineseTranslation)
+      .filter((item) => !requestedTranslationIds.current.has(item.id))
+      .map((item) => item.id);
+    if (!itemIds.length) return;
+
+    itemIds.forEach((id) => requestedTranslationIds.current.add(id));
+    void translateItems(itemIds).then(load).catch(() => undefined);
+  }, [data, load]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -311,10 +324,17 @@ export function ItemsPage() {
 
 // ── ItemCard ──────────────────────────────────────────────────────────
 
+function needsChineseTranslation(item: CollectedItem): boolean {
+  if (item.title_zh || item.summary_zh || item.content_zh) return false;
+  if (/^zh(?:-|$)|^cn$/i.test(item.language ?? "")) return false;
+  return !/[\u4e00-\u9fff]/.test(`${item.title} ${item.summary ?? ""} ${item.content ?? ""}`);
+}
+
 function ItemCard({ item }: { item: CollectedItem }) {
   const [expanded, setExpanded] = useState(false);
   const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
-  const displayTitle = getDisplayTitle(item.title_zh || item.title);
+  const awaitingTranslation = needsChineseTranslation(item);
+  const displayTitle = awaitingTranslation ? "正在生成中文译文" : getDisplayTitle(item.title_zh || item.title);
   const originalTitle = cleanItemTitle(item.title);
   const displaySummary = item.summary_zh || item.summary;
   return (
@@ -360,6 +380,8 @@ function ItemCard({ item }: { item: CollectedItem }) {
                 </div>
               )}
             </>
+          ) : awaitingTranslation ? (
+            <p className="text-muted">正在使用已配置模型生成中文译文。</p>
           ) : (
             displaySummary && <p className="text-muted">{displaySummary}</p>
           )}

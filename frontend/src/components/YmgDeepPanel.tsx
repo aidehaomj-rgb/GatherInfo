@@ -34,7 +34,7 @@ export function YmgDeepPanel({ topics, models }: Props) {
     return () => { active = false; };
   }, []);
 
-  const usableModels = models.filter((m) => m.is_active && (m.provider === "ollama" ? true : m.is_configured));
+  const usableModels = models.filter((m) => m.is_active && (typeof m.is_configured === "boolean" ? m.is_configured : Boolean(m.model_name)));
 
   const handleAnalyze = async () => {
     if (!topicId) { setError("请先选择一个主题"); return; }

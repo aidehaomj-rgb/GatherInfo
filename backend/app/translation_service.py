@@ -12,7 +12,12 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.connectors.base import FetchItem
-from app.llm_client import openai_compatible_url
+from app.llm_client import (
+    default_model_base_url,
+    is_ollama_provider,
+    ollama_api_url,
+    openai_compatible_url,
+)
 from app.models import CollectedItem, ModelConfig
 
 logger = logging.getLogger(__name__)
@@ -252,11 +257,14 @@ async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) 
         "请只返回翻译后的 JSON 数组，格式为: [{\"id\":\"...\",\"title_zh\":\"...\",\"summary_zh\":\"...\",\"content_zh\":\"...\"}]"
     )
 
-    base_url = model.base_url or ""
+    base_url = model.base_url or default_model_base_url(model.provider)
     model_name = model.model_name or ""
 
-    if model.provider == "ollama":
-        url = f"{base_url.rstrip('/')}/api/chat"
+    if is_ollama_provider(model.provider):
+        url = ollama_api_url(base_url, "/api/chat")
+        headers = {"Content-Type": "application/json"}
+        if model.api_key:
+            headers["Authorization"] = "Bearer " + model.api_key
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
@@ -267,7 +275,7 @@ async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) 
         # Keep local-model failures bounded so public-source translation can
         # promptly fall back instead of leaving new items without a rendition.
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             msg = data.get("message", {})

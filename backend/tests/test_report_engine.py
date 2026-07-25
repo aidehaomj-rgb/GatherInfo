@@ -17,9 +17,29 @@ from app.report_engine import (
     _build_item_context,
     _build_collection_summary_context,
     _build_report_prompt,
+    _effective_model,
     _auto_summary,
 )
-from app.models import CollectedItem, Topic
+from app.models import CollectedItem, ModelConfig, Topic
+
+
+def test_effective_model_uses_override_without_mutating_saved_config():
+    """A report-selected variant must reach the LLM without altering the config."""
+    model = MagicMock(spec=ModelConfig)
+    model.id = "ollama-cloud"
+    model.provider = "ollama_cloud"
+    model.base_url = "https://ollama.com"
+    model.api_key = "key"
+    model.model_name = "gpt-oss:20b"
+    model.temperature = 0.2
+    model.max_tokens = 2048
+    model.top_p = 0.9
+
+    effective = _effective_model(model, "gpt-oss:120b")
+
+    assert effective is not model
+    assert effective.model_name == "gpt-oss:120b"
+    assert model.model_name == "gpt-oss:20b"
 
 
 # ── _parse_iso ──────────────────────────────────────────────────────────────

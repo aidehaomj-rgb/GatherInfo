@@ -15,8 +15,10 @@ import httpx
 from app.collection_schemas import (
     AutoDiscoverResult, DiscoveredProvider,
     ListModelsResult, ModelConfigCreate, ModelConfigOut, ModelConfigUpdate,
+    ModelListRequest,
     ModelTestResult,
 )
+from app.llm_client import default_model_base_url, is_ollama_provider, ollama_api_url
 from app.models import ModelConfig
 
 router = APIRouter(prefix="/api/v1", tags=["models"])
@@ -29,6 +31,58 @@ def _openai_compatible_url(base_url: str, path: str) -> str:
         return f"{base}{path}"
     return f"{base}/v1{path}"
 
+
+def _model_headers(api_key: str | None) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+async def _fetch_available_models(
+    provider: str, base_url: str | None, api_key: str | None,
+) -> ListModelsResult:
+    base = (base_url or default_model_base_url(provider)).rstrip("/")
+    headers = _model_headers(api_key)
+    async with httpx.AsyncClient(timeout=5) as client:
+        if is_ollama_provider(provider):
+            r = await client.get(ollama_api_url(base, "/api/tags"), headers=headers)
+            if r.status_code != 200:
+                return ListModelsResult(
+                    success=False, message=f"API error {r.status_code}: {r.text[:200]}",
+                    models=[], provider_type=provider, current_model="",
+                )
+            models = [mod.get("name", "") for mod in r.json().get("models", [])]
+            return ListModelsResult(
+                success=True, message=f"Found {len(models)} models",
+                models=models, provider_type=provider, current_model="",
+            )
+        r = await client.get(_openai_compatible_url(base, "/models"), headers=headers)
+        if r.status_code != 200:
+            return ListModelsResult(
+                success=False, message=f"API error {r.status_code}: {r.text[:200]}",
+                models=[], provider_type=provider, current_model="",
+            )
+        raw = r.json()
+        models = [mod.get("id", "") for mod in raw.get("data", [])]
+        return ListModelsResult(
+            success=True, message=f"Found {len(models)} models",
+            models=models, provider_type=provider, current_model="",
+        )
+
+
+
+@router.post("/models/list-available", response_model=ListModelsResult)
+async def list_available_models_for_config(data: ModelListRequest):
+    """List models for an unsaved configuration in the add-model form."""
+    try:
+        result = await _fetch_available_models(data.provider, data.base_url, data.api_key)
+        return result.model_copy(update={"current_model": data.model_name or ""})
+    except Exception as exc:
+        return ListModelsResult(
+            success=False, message=str(exc), models=[],
+            provider_type=data.provider, current_model=data.model_name or "",
+        )
 
 
 @router.get("/models", response_model=list[ModelConfigOut])
@@ -95,16 +149,16 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404)
     start = time.monotonic()
     try:
-        base = (m.base_url or "http://localhost:11434").rstrip("/")
+        base = (m.base_url or default_model_base_url(m.provider)).rstrip("/")
         model_name = m.model_name or ""
 
-        if m.provider == "ollama":
+        if is_ollama_provider(m.provider):
             headers = {"Content-Type": "application/json"}
             if m.api_key:
                 headers["Authorization"] = f"Bearer {m.api_key}"
             try:
                 async with httpx.AsyncClient(timeout=5) as client:
-                    r = await client.get(f"{base}/api/tags", headers=headers)
+                    r = await client.get(ollama_api_url(base, "/api/tags"), headers=headers)
                     if r.status_code != 200:
                         return ModelTestResult(
                             success=False,
@@ -129,7 +183,7 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
 
             try:
                 async with httpx.AsyncClient(timeout=120) as client:
-                    r = await client.post(f"{base}/api/chat", json={
+                    r = await client.post(ollama_api_url(base, "/api/chat"), json={
                         "model": test_model,
                         "messages": [{"role": "user", "content": "Reply exactly: OK"}],
                         "stream": False,
@@ -194,30 +248,8 @@ async def list_available_models(model_id: str, db: Session = Depends(get_db)):
     if not m:
         raise HTTPException(404)
     try:
-        base = (m.base_url or "http://localhost:11434").rstrip("/")
-        if m.provider == "ollama":
-            async with httpx.AsyncClient(timeout=5) as client:
-                headers = {}
-                if m.api_key:
-                    headers["Authorization"] = f"Bearer {m.api_key}"
-                r = await client.get(f"{base}/api/tags", headers=headers)
-                models = [mod.get("name", "") for mod in r.json().get("models", [])]
-                return ListModelsResult(
-                    success=True, message=f"Found {len(models)} models",
-                    models=models, provider_type="ollama", current_model=m.model_name or "",
-                )
-        else:
-            async with httpx.AsyncClient(timeout=5) as client:
-                headers = {}
-                if m.api_key:
-                    headers["Authorization"] = f"Bearer {m.api_key}"
-                r = await client.get(_openai_compatible_url(base, "/models"), headers=headers)
-                raw = r.json()
-                models = [mod.get("id", "") for mod in raw.get("data", [])]
-                return ListModelsResult(
-                    success=True, message=f"Found {len(models)} models",
-                    models=models, provider_type=m.provider, current_model=m.model_name or "",
-                )
+        result = await _fetch_available_models(m.provider, m.base_url, m.api_key)
+        return result.model_copy(update={"current_model": m.model_name or ""})
     except Exception as exc:
         return ListModelsResult(
             success=False, message=str(exc), models=[],
@@ -259,5 +291,3 @@ async def auto_discover_models(db: Session = Depends(get_db)):
         pass
 
     return AutoDiscoverResult(providers=providers)
-
-

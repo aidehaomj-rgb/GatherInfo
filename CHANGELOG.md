@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.3] - 2026-07-25
+
+### Added
+- Added an Ollama Cloud preset with authenticated model discovery before a model configuration is saved.
+- Added a large, searchable, category-grouped source picker for topic editing.
+
+### Changed
+- User-selected configured models now perform collection-stage translation and Chinese summary organization before newly collected items are shown.
+- Report generation now uses the specific provider model selected in the UI, including Ollama Cloud variants.
+- Existing non-Chinese collection items are queued for translation when opened in the collection list; untranslated source text remains hidden until a Chinese rendition is available.
+
+### Fixed
+- Fixed the model discovery route order that could return `405 Method Not Allowed` for `POST /models/list-available`.
+
 ## [0.5.2] - 2026-07-24
 
 ### Added

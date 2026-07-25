@@ -28,8 +28,8 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _translate_persisted_items(item_ids: list[str], model_id: str) -> None:
-    """Translate after persistence so collection never waits on a large model job."""
+async def _translate_persisted_items(item_ids: list[str], model_id: str | None) -> None:
+    """Translate persisted items before collection results are exposed to the UI."""
     from app.database import SessionLocal
     from app.translation_service import translate_existing_items
 
@@ -38,7 +38,10 @@ async def _translate_persisted_items(item_ids: list[str], model_id: str) -> None
     async with _translation_lock:
         db = SessionLocal()
         try:
-            model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+            model = (
+                db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+                if model_id else _web_translation_model()
+            )
             if model:
                 await translate_existing_items(db, model, limit=len(item_ids), item_ids=item_ids)
         except Exception as exc:
@@ -120,8 +123,7 @@ class CollectionEngine:
         self.db.commit()
         if result.items:
             item_ids = [item.item_id(source.id) for item in result.items]
-            model_id = (model or _web_translation_model()).id
-            asyncio.create_task(_translate_persisted_items(item_ids, model_id))
+            await _translate_persisted_items(item_ids, model.id if model else None)
         return result
 
     # ── Topic-driven collection ─────────────────────────────────────────

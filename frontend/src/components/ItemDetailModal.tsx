@@ -15,7 +15,8 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
   const sourceName =
     sources.find((s) => s.id === item.source_id)?.name || item.source_id;
   const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
-  const displayTitle = getDisplayTitle(item.title_zh || item.title);
+  const awaitingTranslation = needsChineseTranslation(item, hasTranslation);
+  const displayTitle = awaitingTranslation ? "正在生成中文译文" : getDisplayTitle(item.title_zh || item.title);
   const originalTitle = cleanItemTitle(item.title);
 
   // 清洗内容：过滤导航菜单噪音
@@ -25,11 +26,11 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
   const originalContent = cleanContent(item.content) || "";
 
   // 如果摘要为空或仍然是导航内容，从正文中提取
-  const displaySummary = hasTranslation
+  const displaySummary = awaitingTranslation ? "" : hasTranslation
     ? (translatedSummary && !isNavOnly(translatedSummary) ? translatedSummary : extractSummary(translatedContent, 300))
     : (originalSummary && !isNavOnly(originalSummary) ? originalSummary : extractSummary(originalContent, 300));
 
-  const displayContent = hasTranslation ? translatedContent : originalContent;
+  const displayContent = awaitingTranslation ? "" : hasTranslation ? translatedContent : originalContent;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -89,7 +90,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
             </div>
           ) : (
             <p className="text-muted" style={{ fontStyle: "italic", padding: 20, textAlign: "center" }}>
-              暂无详细内容，当前仅显示摘要信息。
+              {awaitingTranslation ? "正在使用已配置模型生成中文译文。" : "暂无详细内容，当前仅显示摘要信息。"}
             </p>
           )}
 
@@ -124,6 +125,11 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
       </div>
     </div>
   );
+}
+
+function needsChineseTranslation(item: CollectedItem, hasTranslation: boolean): boolean {
+  if (hasTranslation || /^zh(?:-|$)|^cn$/i.test(item.language ?? "")) return false;
+  return !/[\u4e00-\u9fff]/.test(`${item.title} ${item.summary ?? ""} ${item.content ?? ""}`);
 }
 
 /** 判断文本是否仅为导航内容 */

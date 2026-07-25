@@ -156,6 +156,11 @@ export const fetchItems = (filters: ItemFilters = {}) =>
     page_size: String(filters.page_size ?? 50),
   } as Record<string, string>);
 export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
+export const translateItems = (itemIds: string[]) =>
+  post<{ requested: number; translated: number; items: string[]; errors?: string[] }>(
+    "/items/translate",
+    { item_ids: itemIds },
+  );
 export const fetchItemIds = (filters: ItemFilters) =>
   get<{ids: string[]; total: number; matching: number}>("/items/ids", {
     ...(filters.topic_id ? { topic_id: filters.topic_id } : {}),
@@ -278,6 +283,14 @@ export const mergeTags = (sourceTagId: string, targetTagId: string) =>
 
 export const listAvailableModels = (id: string) =>
   post<import("./types").ListModelsResult>(`/models/${id}/list-models`);
+
+export const listAvailableModelsFromConfig = (data: {
+  provider: string;
+  base_url: string | null;
+  api_key: string | null;
+  model_name?: string;
+}) =>
+  post<import("./types").ListModelsResult>("/models/list-available", data);
 
 export const autoDiscoverModels = () =>
   post<import("./types").AutoDiscoverResult>("/models/auto-discover");

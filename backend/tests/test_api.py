@@ -243,6 +243,49 @@ def test_auto_discover_models() -> None:
     assert isinstance(data["providers"], list)
 
 
+def test_list_ollama_cloud_models_uses_cloud_api(monkeypatch) -> None:
+    """Ollama Cloud model discovery should use the native cloud API with auth."""
+    requests: list[dict[str, object]] = []
+
+    class _Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"models": [{"name": "gpt-oss:20b"}, {"name": "llama3.3"}]}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None):
+            requests.append({"url": url, "headers": headers or {}})
+            return _Response()
+
+    monkeypatch.setattr("app.routes.models.httpx.AsyncClient", _Client)
+
+    resp = client.post("/api/v1/models/list-available", json={
+        "provider": "ollama_cloud",
+        "base_url": "https://ollama.com",
+        "api_key": "test-cloud-key",
+    })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["models"] == ["gpt-oss:20b", "llama3.3"]
+    assert requests == [{
+        "url": "https://ollama.com/api/tags",
+        "headers": {"Authorization": "Bearer test-cloud-key"},
+    }]
+
+
 # ── Tag merge ───────────────────────────────────────────────────────
 
 def test_tag_merge_same_tag_rejected() -> None:

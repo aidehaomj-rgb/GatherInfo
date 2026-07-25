@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
     ActiveRunOut, BatchOut, BatchRunOut,
-    ItemDeleteRequest, ItemListOut, ItemOut,
+    ItemDeleteRequest, ItemListOut, ItemOut, ItemTranslateRequest,
     RunOut,
 )
 from app.database import get_db
@@ -264,6 +264,7 @@ def _matches_item_query(item: CollectedItem, needle: str) -> bool:
 
 @router.post("/items/translate")
 async def translate_items(
+    data: ItemTranslateRequest | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
@@ -271,7 +272,13 @@ async def translate_items(
         ModelConfig.is_default == True,
         ModelConfig.is_active == True,
     ).first()
-    return await translate_existing_items(db, model or _web_translation_model(), limit=limit)
+    item_ids = data.item_ids if data and data.item_ids else None
+    return await translate_existing_items(
+        db,
+        model or _web_translation_model(),
+        limit=len(item_ids) if item_ids else limit,
+        item_ids=item_ids,
+    )
 
 
 @router.get("/items/ids")
