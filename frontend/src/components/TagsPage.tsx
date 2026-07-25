@@ -4,6 +4,7 @@ import type { Tag, TagStats, CollectedItem } from "../types";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { EChart } from "./EChart";
 import { Trash2, Edit3, GitMerge, List } from "lucide-react";
+import { formatBeijingDateTime, formatBeijingDate } from "../utils/date";
 
 /** Namespace → 中文显示名 (回退到原始 namespace)。 */
 const NS_LABELS: Record<string, string> = {
@@ -222,7 +223,7 @@ export function TagsPage() {
                     ) : <span className="text-muted">-</span>}
                   </td>
                   <td className="text-muted small">
-                    {t.last_seen_at ? new Date(t.last_seen_at).toLocaleString("zh") : "-"}
+                    {t.last_seen_at ? formatBeijingDateTime(t.last_seen_at) : "-"}
                   </td>
                   <td>
                     <div className="tag-table-actions">
@@ -300,7 +301,7 @@ function TagDetailModal({ tag, onClose }: { tag: Tag; onClose: () => void }) {
                 )}
                 <span className="text-muted small">
                   {it.source_id}
-                  {it.collected_at && ` · ${new Date(it.collected_at).toLocaleDateString("zh")}`}
+                    {it.collected_at && ` · ${formatBeijingDate(it.collected_at)}`}
                 </span>
               </li>
             ))}

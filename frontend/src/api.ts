@@ -99,8 +99,15 @@ export const runScheduleNow = (id: string) =>
 
 // ── Collection ──────────────────────────────────────────────────────────
 
-export const collectTopic = (topicId: string) =>
-  post<CollectResult[]>("/collect", { topic_id: topicId });
+export const collectTopic = (
+  topicId: string,
+  opts: { researchPrompt?: string; researchModelId?: string } = {},
+) =>
+  post<CollectResult[]>("/collect", {
+    topic_id: topicId,
+    ...(opts.researchPrompt ? { research_prompt: opts.researchPrompt } : {}),
+    ...(opts.researchModelId ? { research_model_id: opts.researchModelId } : {}),
+  });
 export const collectSource = (sourceId: string, keywords?: string[]) =>
   post<CollectResult[]>("/collect", { source_id: sourceId, keywords });
 
@@ -112,6 +119,8 @@ export const fetchBatches = (topicId?: string, limit = 20) =>
     limit: String(limit),
   } as Record<string, string>);
 export const fetchActiveRuns = () => get<import("./types").ActiveRunOut[]>("/runs/active");
+export const stopRun = (runId: string) =>
+  post<{ id: string; status: string; message: string }>(`/runs/${runId}/stop`);
 
 export const fetchRuns = (topicId?: string, limit = 20) =>
   get<CollectRun[]>("/runs", {
@@ -196,8 +205,11 @@ export const testModel = (id: string) =>
 
 // ── Reports ────────────────────────────────────────────────────────
 
-export const fetchReports = (topicId?: string) =>
-  get<import("./types").ReportList>("/reports", topicId ? { topic_id: topicId } : {});
+export const fetchReports = (topicId?: string, days?: number) =>
+  get<import("./types").ReportList>("/reports", {
+    ...(topicId ? { topic_id: topicId } : {}),
+    ...(days ? { days: String(days) } : {}),
+  });
 export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
 export const generateReport = (
   topicId: string,
@@ -320,3 +332,22 @@ export const updateNotification = (id: string, data: Partial<NotificationConfig>
 export const deleteNotification = (id: string) => del(`/notifications/${id}`);
 export const testNotification = (id: string) =>
   post<{ success: boolean; message: string }>("/notifications/test", { id });
+
+export const pruneNotifications = () =>
+  post<{ deleted: number }>("/notifications/prune");
+
+
+// ── YMG-Deep integration ───────────────────────────────────────────────
+
+export const ymgHealth = () =>
+  get<import("./types").YmgHealthResponse>("/ymg-deep/health");
+
+export const ymgAnalyze = (body: {
+  topic_id?: string;
+  item_ids?: string[];
+  collection_run_ids?: string[];
+  model_id?: string;
+  ymg_depth?: string;
+  ymg_mode?: string;
+  extra_requirements?: string;
+}) => post<import("./types").YmgAnalyzeResponse>("/ymg-deep/analyze", body);

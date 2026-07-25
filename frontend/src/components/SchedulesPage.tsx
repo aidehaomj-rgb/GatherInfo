@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, Play, Clock } from "lucide-react";
 import { fetchSchedules, createSchedule, deleteSchedule, runScheduleNow, fetchTopics, fetchSources } from "../api";
 import type { Schedule, Topic, Source } from "../types";
+import { formatBeijingDateTime } from "../utils/date";
 
 // ── Cron utilities ──────────────────────────────────────────────────────────
 
@@ -158,8 +159,8 @@ export function SchedulesPage() {
               ) : null}
               <div className="text-muted small">
                 已运行: {s.run_count} 次
-                {s.last_run_at && <> · 最后: {new Date(s.last_run_at).toLocaleString("zh")}</>}
-                {s.next_run_at && <> · 下次: {new Date(s.next_run_at).toLocaleString("zh")}</>}
+                {s.last_run_at && <> · 最后: {formatBeijingDateTime(s.last_run_at)}</>}
+                {s.next_run_at && <> · 下次: {formatBeijingDateTime(s.next_run_at)}</>}
                 {s.last_status && <> · 状态: {s.last_status}</>}
               </div>
             </div>

@@ -6,20 +6,45 @@ Flow:
     → dedup → persist (with topic_id) → auto-tag → return stats
 """
 import asyncio
+import logging
+import re
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
+from app.content_parser import parse_fetch_item
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     JobStatus, ModelConfig, SourceConfig, Tag, Topic,
 )
 
+logger = logging.getLogger(__name__)
+_translation_lock = asyncio.Lock()
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _translate_persisted_items(item_ids: list[str], model_id: str) -> None:
+    """Translate after persistence so collection never waits on a large model job."""
+    from app.database import SessionLocal
+    from app.translation_service import translate_existing_items
+
+    # A local model cannot reliably serve several long translation batches at once.
+    # Serialize post-collection translations so later sources wait instead of failing.
+    async with _translation_lock:
+        db = SessionLocal()
+        try:
+            model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+            if model:
+                await translate_existing_items(db, model, limit=len(item_ids), item_ids=item_ids)
+        except Exception as exc:
+            logger.warning("Background item translation failed: %s", exc)
+        finally:
+            db.close()
 
 
 class CollectionEngine:
@@ -35,8 +60,8 @@ class CollectionEngine:
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
-        When window_start is provided, items with a known published_at older than
-        window_start are skipped (items without published_at are always kept).
+        When window_start is provided, items outside the window are skipped.
+        Undated items are kept only if a usable date can be extracted from text.
         """
         source = self.db.query(SourceConfig).filter(SourceConfig.id == source_id).first()
         if not source:
@@ -73,29 +98,50 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
-        # Translate non-Chinese items to Chinese before storing
-        if model and result.items:
-            try:
-                from app.llm_client import call_llm as _call_llm
-                translated = await self._translate_fetch_items(result.items, model)
-                if translated:
-                    result.items = translated
-            except Exception as exc:
-                logger.warning("Item translation failed (non-blocking): %s", exc)
-        self._persist_items(result.items, source.id, run.id, topic_id, window_start, keywords)
-        self._update_source(source, len(result.items))
+        if topic_id == "weekly-enforcement-intelligence":
+            from app.enforcement_review import review_enforcement_candidates
+            # Keep manual/topic source runs on the same review path. Some
+            # callers do not pass a model explicitly, so resolve the active
+            # default here instead of silently queueing everything pending.
+            if model is None or not model.is_active or not model.api_key:
+                model = self.db.query(ModelConfig).filter(
+                    ModelConfig.is_default == True,
+                    ModelConfig.is_active == True,
+                ).first()
+            result.items = await review_enforcement_candidates(result.items, model)
+            result.items_new = len(result.items)
+            run.items_new = result.items_new
+        persisted_count = self._persist_items(
+            result.items, source.id, run.id, topic_id, window_start, window_end, keywords
+        )
+        result.items_new = persisted_count
+        run.items_new = persisted_count
+        self._update_source(source, persisted_count)
         self.db.commit()
+        if result.items:
+            item_ids = [item.item_id(source.id) for item in result.items]
+            model_id = (model or _web_translation_model()).id
+            asyncio.create_task(_translate_persisted_items(item_ids, model_id))
         return result
 
     # ── Topic-driven collection ─────────────────────────────────────────
 
-    async def collect_topic(self, topic_id: str) -> list[CollectResult]:
+    async def collect_topic(
+        self,
+        topic_id: str,
+        research_prompt: str | None = None,
+        research_model_id: str | None = None,
+        only_source_ids: list[str] | None = None,
+    ) -> list[CollectResult]:
         """Collect from all sources relevant to a topic."""
         topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
         if not topic:
             raise ValueError(f"Topic not found: {topic_id}")
 
         sources = self._resolve_sources(topic)
+        if only_source_ids:
+            allowed = set(only_source_ids)
+            sources = [source for source in sources if source.id in allowed]
         source_ids = [s.id for s in sources]
         keywords = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
 
@@ -103,21 +149,57 @@ class CollectionEngine:
         # window_days <= 0 disables filtering (collect everything).
         window_days = getattr(topic, "collect_window_days", None) or 0
         window_end = utc_now()
-        window_start = window_end - timedelta(days=window_days) if window_days > 0 else None
+        if window_days > 0:
+            # Weekly reports are date-based. Start at UTC midnight for the
+            # boundary date so a valid article published early that day is not
+            # lost merely because the job ran later in the day.
+            window_start = (window_end - timedelta(days=window_days)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        else:
+            window_start = None
 
         # Generate a shared batch_id for all runs in this topic collection
         from uuid import uuid4
         batch_id = f"batch-{uuid4().hex[:12]}"
 
-        # Load default model for item translation
+        # Load default model for item translation and optional AI research planning.
         default_model = self.db.query(ModelConfig).filter(
             ModelConfig.is_default == True, ModelConfig.is_active == True
         ).first()
+        research_model = default_model
+        if research_model_id:
+            research_model = self.db.query(ModelConfig).filter(
+                ModelConfig.id == research_model_id, ModelConfig.is_active == True
+            ).first() or default_model
+
+        ai_research_queries: list[str] = []
+        if research_prompt and any(getattr(s.channel, "value", s.channel) == "ai_research" for s in sources):
+            try:
+                from app.research_planner import build_research_queries
+                ai_research_queries = await build_research_queries(
+                    topic, research_prompt, research_model, max_queries=12
+                )
+                if ai_research_queries:
+                    logger.info(
+                        "AI research prompt generated %d queries for topic %s",
+                        len(ai_research_queries), topic.id,
+                    )
+            except Exception as exc:
+                logger.warning("AI research prompt planning failed for %s: %s", topic.id, exc)
 
         # Parallel collection — topic_id flows through into runs and items
         tasks = [
-            self.collect_from_source(sid, keywords, topic.id, window_start, window_end, batch_id, default_model)
-            for sid in source_ids
+            self.collect_from_source(
+                source.id,
+                ai_research_queries if getattr(source.channel, "value", source.channel) == "ai_research" and ai_research_queries else keywords,
+                topic.id,
+                window_start,
+                window_end,
+                batch_id,
+                default_model,
+            )
+            for source in sources
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -145,23 +227,36 @@ class CollectionEngine:
             topic.last_collection_run_id = run_id
         self.db.commit()
 
-        # Fire-and-forget notifications after collection
+        # Fire-and-forget notifications after collection (batch aggregation)
         try:
-            from app.notification_models import NotificationSender
+            from app.notification_models import NotificationSender, BatchEvent
             from app.database import SessionLocal
             sender = NotificationSender(SessionLocal)
-            total_new = sum(r.items_new or 0 for r in final)
-            sender.send(
-                "new_items" if total_new > 0 else "completion",
-                {
-                    "event": "collection_complete",
-                    "topic_id": topic_id,
-                    "topic_name": topic.name,
-                    "total_new": total_new,
-                    "source_count": len(final),
-                    "batch_id": batch_id,
-                    "timestamp": utc_now().isoformat(),
-                }
+
+            # 收集同一批次所有来源的结果，汇总为 BatchEvent 列表
+            events: list[BatchEvent] = []
+            for r in final:
+                source_name = r.source_id
+                # 尝试从 source 对象获取友好名称
+                try:
+                    src = self.db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
+                    if src and src.name:
+                        source_name = src.name
+                except Exception:
+                    pass
+                events.append(BatchEvent(
+                    source_id=r.source_id,
+                    source_name=source_name,
+                    items_new=getattr(r, "items_new", 0) or 0,
+                    status="completed" if r.status == JobStatus.COMPLETED else "failed",
+                    error=" ".join(r.error_log) if r.error_log else "",
+                ))
+
+            sender.send_batch(
+                topic_id=topic_id,
+                topic_name=topic.name,
+                batch_id=batch_id,
+                events=events,
             )
         except Exception as exc:
             logger.warning("Notification after collection failed: %s", exc)
@@ -206,7 +301,9 @@ class CollectionEngine:
         tag = self.db.query(Tag).filter(Tag.id == tag_id).first()
         if not item or not tag:
             return False
-        if tag not in item.tags:
+        # Use tag_id set comparison to avoid object identity issues
+        existing_ids = {t.id for t in item.tags}
+        if tag_id not in existing_ids:
             item.tags.append(tag)
             tag.item_count += 1
             if item.status == ItemStatus.RAW:
@@ -243,7 +340,15 @@ class CollectionEngine:
                 # Try from the raw Tavily output
                 suggested = item.tags_from_metadata()
 
+            # Deduplicate tag IDs while preserving order
+            seen: set[str] = set()
+            unique_suggested: list[str] = []
             for tag_id in suggested:
+                if tag_id and tag_id not in seen:
+                    seen.add(tag_id)
+                    unique_suggested.append(tag_id)
+
+            for tag_id in unique_suggested:
                 parts = tag_id.split(":", 1)
                 ns, val = (parts[0], parts[1]) if len(parts) == 2 else ("general", parts[0])
                 self.ensure_tag(tag_id, ns, val)
@@ -267,127 +372,96 @@ class CollectionEngine:
         return self.db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
 
     async def _translate_fetch_items(self, items: list[FetchItem], model: ModelConfig) -> list[FetchItem] | None:
-        """Translate non-Chinese FetchItem titles and content to Chinese in-place."""
-        non_zh = [it for it in items if it.language and it.language not in ('zh', 'zh-CN', 'cn')]
-        if not non_zh or len(non_zh) > 30:
-            return None
-
-        lines = []
-        for it in non_zh:
-            lines.append("[ID:" + str(id(it)) + "] TITLE: " + (it.title or ""))
-            if it.summary:
-                lines.append("SUMMARY: " + it.summary)
-            if it.content:
-                lines.append("CONTENT: " + it.content[:800])
-            lines.append("---")
-        text = "\n".join(lines)
-        prompt = (
-            "Translate each item below into Chinese.\n"
-            + "Keep [ID:xxx] markers unchanged.\n"
-            + "Each item is separated by ---.\n\n"
-            + "Original:\n" + text + "\n\n"
-            + "Translations:"
-        )
-
-        import httpx
-        base_url = model.base_url or "http://localhost:11434"
-        model_name = model.model_name or ""
-
-        if model.provider == "ollama":
-            url = base_url.rstrip("/") + "/api/chat"
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "options": {"temperature": 0.3, "num_predict": 4096},
-            }
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                output = data.get("message", {}).get("content", "")
-        else:
-            base = base_url.rstrip("/")
-            url = base + "/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
-            if model.api_key:
-                headers["Authorization"] = "Bearer " + model.api_key
-            payload = {
-                "model": model_name, "temperature": 0.3, "max_tokens": 4096,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                output = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        blocks = output.split("---")
-        for i, fi in enumerate(non_zh):
-            block = blocks[i] if i < len(blocks) else ""
-            for line in block.split("\n"):
-                line = line.strip()
-                if line.startswith("TITLE:"):
-                    fi.title = line[6:].strip()
-                elif line.startswith("SUMMARY:"):
-                    fi.summary = line[8:].strip()
-                elif line.startswith("CONTENT:"):
-                    fi.content = line[8:].strip()
-            fi.language = "zh"
-
+        """Backward-compatible wrapper: attach translations without replacing originals."""
+        from app.translation_service import translate_fetch_items_to_metadata
+        await translate_fetch_items_to_metadata(items, model)
         return items
 
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
                        topic_id: str | None = None, window_start: "datetime | None" = None,
+                       window_end: "datetime | None" = None,
                        keywords: list[str] | None = None):
+        persisted_count = 0
         for fi in items:
-            # Skip items whose known publication date is older than the window.
-            # Items without a published_at are always kept (date unknown).
-            if window_start is not None and fi.published_at is not None:
-                pub = fi.published_at
-                if pub.tzinfo is None:
-                    pub = pub.replace(tzinfo=timezone.utc)
-                if pub < window_start:
+            parsed = parse_fetch_item(fi)
+            if not parsed.is_meaningful:
+                continue
+
+            pub = _coerce_datetime(fi.published_at)
+
+            # Strictly enforce the configured time window. Search connectors may
+            # explicitly retain undated results for later source verification.
+            if window_start is not None:
+                if pub is None:
+                    pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
+                allow_undated = bool(
+                    isinstance(fi.raw_metadata, dict)
+                    and fi.raw_metadata.get("allow_undated_results")
+                )
+                if (pub is None and not allow_undated) or (
+                    pub is not None and _is_out_of_range(pub, window_start, window_end)
+                ):
                     continue
 
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
-            if keywords:
-                text = f"{fi.title} {fi.content or ''} {fi.summary or ''}"
+            allow_unfiltered = bool(
+                isinstance(fi.raw_metadata, dict)
+                and fi.raw_metadata.get("allow_unfiltered_results")
+            )
+            # Enforcement candidates have already passed the dedicated
+            # semantic review. Requiring two literal topic keywords here can
+            # discard valid cases such as "检获受管制活龟" whose evidence is
+            # expressed with different wording.
+            if topic_id == "weekly-enforcement-intelligence":
+                allow_unfiltered = True
+            if keywords and not allow_unfiltered:
+                metadata_text = ""
+                if isinstance(fi.raw_metadata, dict):
+                    metadata_text = " ".join(str(v) for v in fi.raw_metadata.values() if v)
+                text = f"{fi.title} {fi.content or ''} {fi.summary or ''} {metadata_text}"
                 matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
                 total_kw = len([kw for kw in keywords if kw])
-                required = max(1, 2 if total_kw >= 3 else total_kw)
-                if len(matched_kws) < required:
+                required_matches = 2 if total_kw >= 3 else 1
+                if len(matched_kws) < required_matches:
                     continue
             item_id = fi.item_id(source_id)
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
                 if existing:
-                    if fi.content and fi.content != existing.content:
-                        existing.content = fi.content
+                    if parsed.content and parsed.content != existing.content:
+                        existing.content = parsed.content
+                    if parsed.summary and parsed.summary != existing.summary:
+                        existing.summary = parsed.summary
+                    if pub and not existing.published_at:
+                        existing.published_at = pub
                     if topic_id and not existing.topic_id:
                         existing.topic_id = topic_id
+                    existing.entities = _merge_json(existing.entities, parsed.entities)
+                    existing.raw_metadata = _merge_json(existing.raw_metadata, parsed.metadata)
                     existing.updated_at = utc_now()
                 else:
                     self.db.add(CollectedItem(
                         id=item_id, source_id=source_id, run_id=run_id,
                         topic_id=topic_id,
-                        title=fi.title, content=fi.content,
-                        content_hash=_hash(fi.content or fi.title),
-                        summary=fi.summary, url=fi.url,
+                        title=fi.title.strip(), content=parsed.content,
+                        content_hash=_hash(parsed.content or fi.title),
+                        summary=parsed.summary, url=fi.url,
                         language=fi.language, category=fi.category,
-                        entities=fi.entities,
+                        entities=parsed.entities,
                         quality_score=fi.quality_score,
                         relevance_score=fi.relevance_score,
-                        published_at=fi.published_at,
+                        published_at=pub,
                         collected_at=utc_now(),
-                        raw_metadata=fi.raw_metadata,
+                        raw_metadata=parsed.metadata,
                         status=ItemStatus.RAW,
                     ))
+                    persisted_count += 1
                 self.db.flush()
             except Exception:
                 self.db.rollback()
         self.db.commit()
+        return persisted_count
 
     def _update_source(self, source: SourceConfig, items_found: int):
         source.last_sync_at = utc_now()
@@ -397,3 +471,74 @@ class CollectionEngine:
 def _hash(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _web_translation_model() -> ModelConfig:
+    model = ModelConfig()
+    model.provider = "web_fallback"
+    model.model_name = "google-translate-web"
+    model.base_url = ""
+    model.api_key = ""
+    model.temperature = 0.1
+    model.max_tokens = 4096
+    return model
+
+
+def _extract_date_from_text(text: str) -> datetime | None:
+    """Try to find a YYYY-MM-DD / YYYY/MM/DD / Chinese date inside the text."""
+    if not text:
+        return None
+    patterns = [
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            try:
+                parts = [int(x) for x in m.groups()]
+                return datetime(parts[0], parts[1], parts[2], tzinfo=timezone.utc)
+            except ValueError:
+                continue
+    return None
+
+def _coerce_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _is_out_of_range(
+    published_at: datetime | None,
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> bool:
+    if published_at is None:
+        return False
+    pub = _as_aware_utc(published_at)
+    start = _as_aware_utc(window_start)
+    end = _as_aware_utc(window_end)
+    if start is not None and pub < start:
+        return True
+    if end is not None and pub > end:
+        return True
+    return False
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _merge_json(existing: dict | None, incoming: dict | None) -> dict:
+    base = existing if isinstance(existing, dict) else {}
+    extra = incoming if isinstance(incoming, dict) else {}
+    return {**base, **extra}

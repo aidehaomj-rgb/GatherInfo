@@ -1,56 +1,114 @@
-"""Start backend and frontend servers."""
-import subprocess, os, time
+"""Start backend and frontend development servers."""
 
-os.chdir("/Users/m4max/VS-CODE-PROJECT/GatherInfo")
+from __future__ import annotations
 
-# Start backend
-bl = open("logs/backend.log", "w")
-bp = subprocess.Popen(
-    ["backend/.venv/bin/python", "-m", "uvicorn", "app.main:create_app",
-     "--factory", "--host", "127.0.0.1", "--port", "8109", "--app-dir", "backend"],
-    stdout=bl, stderr=subprocess.STDOUT,
-    start_new_session=True
-)
-print(f"Backend PID={bp.pid} on port 8109", flush=True)
-time.sleep(2)
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-# Verify backend
-h = subprocess.run(["curl", "-s", "--max-time", "3", "http://127.0.0.1:8109/health"],
-                    capture_output=True, text=True)
-print(f"Backend health: {h.stdout.strip() or h.stderr[:60]}", flush=True)
 
-# Start frontend
-fl = open("logs/frontend.log", "w")
-fp = subprocess.Popen(
-    ["/opt/homebrew/bin/npm", "--prefix", "frontend", "run", "dev",
-     "--", "--host", "127.0.0.1", "--port", "5178"],
-    stdout=fl, stderr=subprocess.STDOUT,
-    start_new_session=True
-)
-print(f"Frontend PID={fp.pid} on port 5178", flush=True)
-time.sleep(3)
+ROOT = Path(__file__).resolve().parent
+LOG_DIR = ROOT / "logs"
+BACKEND_PORT = "8109"
+FRONTEND_PORT = "5178"
 
-# Verify frontend
-h2 = subprocess.run(["curl", "-s", "--max-time", "3", "http://127.0.0.1:5178/"],
-                     capture_output=True, text=True)
-has_root = "root" in h2.stdout
-print(f"Frontend HTML: {'OK' if has_root else 'issue'}", flush=True)
 
-# Keep alive
-print("\n--- Both servers running. Press Ctrl+C to stop ---", flush=True)
-try:
-    while True:
-        time.sleep(10)
-        # Check both are alive
-        if not subprocess.run(["kill", "-0", str(bp.pid)],
-                               capture_output=True).returncode == 0:
-            print("BACKEND DIED!", flush=True)
-            break
-        if not subprocess.run(["kill", "-0", str(fp.pid)],
-                               capture_output=True).returncode == 0:
-            print("FRONTEND DIED!", flush=True)
-            break
-except KeyboardInterrupt:
-    bp.kill()
-    fp.kill()
-    print("Servers stopped", flush=True)
+def backend_python() -> str:
+    candidates = [
+        ROOT / "backend" / ".venv" / "Scripts" / "python.exe",
+        ROOT / "backend" / ".venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
+def npm_command() -> str:
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    if not npm and sys.platform == "win32":
+        program_files = Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+        candidate = program_files / "nodejs" / "npm.cmd"
+        if candidate.exists():
+            npm = str(candidate)
+    if not npm:
+        raise RuntimeError("npm was not found in PATH. Install Node.js/npm before starting the frontend.")
+    return npm
+
+
+def start_process(name: str, args: list[str], log_file: Path) -> subprocess.Popen:
+    log = log_file.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        args,
+        cwd=ROOT,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+    print(f"{name} PID={process.pid}", flush=True)
+    return process
+
+
+def main() -> int:
+    LOG_DIR.mkdir(exist_ok=True)
+
+    backend = start_process(
+        "Backend",
+        [
+            backend_python(),
+            "-m",
+            "uvicorn",
+            "app.main:create_app",
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            BACKEND_PORT,
+            "--app-dir",
+            "backend",
+        ],
+        LOG_DIR / "backend.log",
+    )
+    time.sleep(2)
+
+    frontend = start_process(
+        "Frontend",
+        [
+            npm_command(),
+            "--prefix",
+            "frontend",
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            FRONTEND_PORT,
+        ],
+        LOG_DIR / "frontend.log",
+    )
+
+    print(f"Backend:  http://127.0.0.1:{BACKEND_PORT}", flush=True)
+    print(f"Frontend: http://127.0.0.1:{FRONTEND_PORT}", flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
+
+    try:
+        while True:
+            time.sleep(2)
+            if backend.poll() is not None:
+                print("Backend exited. See logs/backend.log.", flush=True)
+                return backend.returncode or 1
+            if frontend.poll() is not None:
+                print("Frontend exited. See logs/frontend.log.", flush=True)
+                return frontend.returncode or 1
+    except KeyboardInterrupt:
+        backend.terminate()
+        frontend.terminate()
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

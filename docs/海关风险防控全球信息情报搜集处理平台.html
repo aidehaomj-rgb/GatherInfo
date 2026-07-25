@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>海关风险防控全球信息情报搜集处理平台</title>
+  <style>
+    :root {
+      --ink: #e8edf1;
+      --ink-soft: #aeb9c3;
+      --ink-muted: #7f8b96;
+      --paper: #f3efe4;
+      --coal: #11161b;
+      --coal-2: #171e25;
+      --coal-3: #202a33;
+      --line: rgba(232, 237, 241, 0.13);
+      --line-strong: rgba(232, 237, 241, 0.24);
+      --customs: #2aa876;
+      --amber: #d8a441;
+      --red: #b85a4d;
+      --cyan: #4da8c8;
+      --blue: #5279d8;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      --radius: 8px;
+      --slide-pad-x: clamp(28px, 5vw, 76px);
+      --slide-pad-y: clamp(28px, 5vh, 64px);
+      --serif: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+      --sans: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", system-ui, sans-serif;
+      --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-snap-type: y mandatory;
+      background: var(--coal);
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(216, 164, 65, 0.06) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(216, 164, 65, 0.04) 1px, transparent 1px),
+        radial-gradient(circle at 20% 20%, rgba(42, 168, 118, 0.13), transparent 32%),
+        linear-gradient(135deg, #0e1318 0%, #151b22 38%, #0f151b 100%);
+      background-size: 48px 48px, 48px 48px, auto, auto;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.22;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 9px 9px;
+      mix-blend-mode: overlay;
+      z-index: 0;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .deck {
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide {
+      min-height: 100vh;
+      scroll-snap-align: start;
+      display: grid;
+      align-items: center;
+      padding: var(--slide-pad-y) var(--slide-pad-x);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slide::after {
+      content: attr(data-page);
+      position: absolute;
+      right: clamp(20px, 4vw, 52px);
+      bottom: clamp(16px, 3vh, 36px);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      color: rgba(232, 237, 241, 0.36);
+    }
+
+    .slide--paper {
+      background:
+        linear-gradient(135deg, rgba(243, 239, 228, 0.96), rgba(232, 224, 203, 0.92)),
+        linear-gradient(90deg, rgba(17,22,27,0.05) 1px, transparent 1px);
+      background-size: auto, 32px 32px;
+      color: #172027;
+    }
+
+    .slide--paper .eyebrow,
+    .slide--paper .muted,
+    .slide--paper .slide-num {
+      color: #53606b;
+    }
+
+    .slide--paper .metric,
+    .slide--paper .panel,
+    .slide--paper .text-card,
+    .slide--paper .screen-frame,
+    .slide--paper .matrix-cell {
+      background: rgba(255,255,255,0.58);
+      border-color: rgba(23, 32, 39, 0.16);
+      color: #172027;
+      box-shadow: 0 12px 32px rgba(23, 32, 39, 0.12);
+    }
+
+    .slide__inner {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .kicker {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 18px;
+    }
+
+    .kicker::before {
+      content: "";
+      width: 40px;
+      height: 1px;
+      background: var(--amber);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-size: clamp(42px, 7vw, 88px);
+      line-height: 0.98;
+      max-width: 900px;
+    }
+
+    h2 {
+      font-family: var(--serif);
+      font-size: clamp(30px, 4.8vw, 58px);
+      line-height: 1.05;
+      max-width: 920px;
+    }
+
+    h3 {
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.78;
+      color: var(--ink-soft);
+      font-size: 15px;
+    }
+
+    .slide--paper p {
+      color: #4d5963;
+    }
+
+    .lead {
+      margin-top: 24px;
+      max-width: 780px;
+      font-size: clamp(17px, 2vw, 22px);
+      line-height: 1.75;
+      color: #d2d9df;
+    }
+
+    .slide--paper .lead {
+      color: #33404b;
+    }
+
+    .muted {
+      color: var(--ink-muted);
+    }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+    }
+
+    .grid--2 {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .grid--3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid--4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .section-head {
+      display: grid;
+      gap: 18px;
+      margin-bottom: 32px;
+    }
+
+    .section-head--split {
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      align-items: end;
+    }
+
+    .panel,
+    .text-card,
+    .metric,
+    .matrix-cell {
+      border: 1px solid var(--line);
+      background: rgba(24, 32, 40, 0.78);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .panel {
+      padding: 24px;
+    }
+
+    .text-card {
+      padding: 22px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .metric {
+      min-height: 130px;
+      padding: 20px;
+      display: grid;
+      align-content: space-between;
+      gap: 18px;
+    }
+
+    .metric b {
+      font-family: var(--mono);
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1;
+      color: var(--paper);
+    }
+
+    .slide--paper .metric b {
+      color: #172027;
+    }
+
+    .metric span {
+      font-size: 13px;
+      color: var(--ink-muted);
+    }
+
+    .metric small {
+      font-family: var(--mono);
+      color: var(--customs);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+    }
+
+    .screen-frame {
+      background: rgba(6, 10, 14, 0.78);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 26px 80px rgba(0,0,0,0.45);
+    }
+
+    .screen-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .screen-caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+      background: rgba(0,0,0,0.25);
+    }
+
+    .cover-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(420px, 1.05fr);
+      gap: 42px;
+      align-items: center;
+    }
+
+    .seal {
+      width: 124px;
+      height: 124px;
+      border: 1px solid rgba(216,164,65,0.55);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      margin-bottom: 28px;
+      position: relative;
+      color: var(--amber);
+      font-family: var(--serif);
+      font-size: 30px;
+    }
+
+    .seal::before,
+    .seal::after {
+      content: "";
+      position: absolute;
+      inset: 14px;
+      border: 1px solid rgba(42,168,118,0.48);
+      border-radius: 50%;
+    }
+
+    .seal::after {
+      inset: 32px;
+      border-color: rgba(77,168,200,0.4);
+    }
+
+    .cover-meta {
+      margin-top: 36px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      max-width: 760px;
+    }
+
+    .cover-meta div {
+      border-top: 1px solid rgba(216,164,65,0.5);
+      padding-top: 10px;
+      font-family: var(--mono);
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .ribbon {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid rgba(216,164,65,0.42);
+      border-radius: 999px;
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      width: fit-content;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .flow-step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 14px;
+      min-height: 170px;
+      background: rgba(24, 32, 40, 0.82);
+      position: relative;
+    }
+
+    .flow-step::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      width: 14px;
+      height: 1px;
+      background: var(--amber);
+    }
+
+    .flow-step:last-child::after {
+      display: none;
+    }
+
+    .flow-step b {
+      display: block;
+      font-family: var(--mono);
+      color: var(--amber);
+      margin-bottom: 14px;
+      font-size: 12px;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 17px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      border: 1px solid rgba(232,237,241,0.18);
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .matrix-cell {
+      padding: 18px;
+      min-height: 138px;
+    }
+
+    .matrix-cell b {
+      display: block;
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+
+    .system-map {
+      display: grid;
+      grid-template-columns: 1fr 1.1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .system-col {
+      display: grid;
+      gap: 12px;
+    }
+
+    .system-node {
+      border: 1px solid var(--line);
+      background: rgba(24,32,40,0.78);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .system-node strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .system-node small {
+      color: var(--ink-muted);
+      line-height: 1.6;
+    }
+
+    .spine {
+      border: 1px solid rgba(216,164,65,0.5);
+      background: rgba(216,164,65,0.08);
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 24px;
+      min-height: 360px;
+      border-radius: var(--radius);
+    }
+
+    .spine b {
+      font-size: 24px;
+      font-family: var(--serif);
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+      position: relative;
+      margin-top: 24px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 9px;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: rgba(216,164,65,0.35);
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .dot {
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--amber);
+      border-radius: 50%;
+      background: var(--coal);
+      margin-top: 2px;
+      z-index: 1;
+    }
+
+    .quote {
+      font-family: var(--serif);
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: 1.35;
+      color: var(--paper);
+      max-width: 980px;
+    }
+
+    .toc {
+      position: fixed;
+      right: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 8;
+      display: grid;
+      gap: 8px;
+    }
+
+    .toc a {
+      width: 8px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(232,237,241,0.22);
+      border: 1px solid rgba(255,255,255,0.14);
+      transition: all 180ms ease-out;
+      text-decoration: none;
+    }
+
+    .toc a:hover,
+    .toc a:focus {
+      background: var(--amber);
+      outline: none;
+    }
+
+    .deck-controls {
+      position: fixed;
+      left: 18px;
+      bottom: 18px;
+      z-index: 9;
+      display: flex;
+      gap: 8px;
+    }
+
+    .deck-controls button,
+    .print-btn {
+      border: 1px solid rgba(232,237,241,0.18);
+      background: rgba(17,22,27,0.84);
+      color: var(--ink);
+      border-radius: var(--radius);
+      height: 38px;
+      padding: 0 12px;
+      font: 12px var(--mono);
+      cursor: pointer;
+      transition: background 180ms ease-out, border-color 180ms ease-out;
+    }
+
+    .deck-controls button:hover,
+    .print-btn:hover {
+      background: rgba(216,164,65,0.16);
+      border-color: rgba(216,164,65,0.52);
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      z-index: 10;
+      background: rgba(255,255,255,0.06);
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--customs), var(--amber));
+    }
+
+    .print-btn {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 9;
+    }
+
+    .two-pane {
+      display: grid;
+      grid-template-columns: minmax(0, 0.82fr) minmax(420px, 1.18fr);
+      gap: 30px;
+      align-items: center;
+    }
+
+    .two-pane--reverse {
+      grid-template-columns: minmax(460px, 1.14fr) minmax(0, 0.86fr);
+    }
+
+    .callout {
+      border-left: 3px solid var(--amber);
+      padding: 16px 0 16px 18px;
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.85;
+    }
+
+    .number-list {
+      counter-reset: item;
+      display: grid;
+      gap: 14px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .number-list li {
+      counter-increment: item;
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      align-items: start;
+      color: var(--ink-soft);
+      line-height: 1.7;
+    }
+
+    .number-list li::before {
+      content: counter(item, decimal-leading-zero);
+      font-family: var(--mono);
+      color: var(--amber);
+      border-top: 1px solid rgba(216,164,65,0.55);
+      padding-top: 6px;
+    }
+
+    @media (max-width: 980px) {
+      html {
+        scroll-snap-type: none;
+      }
+
+      .slide {
+        min-height: auto;
+      }
+
+      .cover-layout,
+      .section-head--split,
+      .grid--2,
+      .grid--3,
+      .grid--4,
+      .two-pane,
+      .two-pane--reverse,
+      .system-map,
+      .flow,
+      .matrix {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-step::after {
+        display: none;
+      }
+
+      .toc,
+      .deck-controls,
+      .print-btn {
+        display: none;
+      }
+    }
+
+    @media print {
+      html,
+      body {
+        background: #fff;
+        color: #111;
+      }
+
+      .slide {
+        min-height: 100vh;
+        page-break-after: always;
+        border: 0;
+      }
+
+      .toc,
+      .deck-controls,
+      .progress,
+      .print-btn {
+        display: none;
+      }
+
+      .panel,
+      .text-card,
+      .metric,
+      .screen-frame,
+      .matrix-cell {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+  <button class="print-btn" type="button" onclick="window.print()">导出 PDF</button>
+  <nav class="toc" aria-label="页面目录">
+    <a href="#s1" title="封面"></a>
+    <a href="#s2" title="一句话定位"></a>
+    <a href="#s3" title="关键指标"></a>
+    <a href="#s4" title="业务痛点"></a>
+    <a href="#s5" title="运行总览"></a>
+    <a href="#s6" title="采集网络"></a>
+    <a href="#s7" title="主题驱动"></a>
+    <a href="#s8" title="采集链路"></a>
+    <a href="#s9" title="信息条目"></a>
+    <a href="#s10" title="标签体系"></a>
+    <a href="#s11" title="智能报告"></a>
+    <a href="#s12" title="调度闭环"></a>
+    <a href="#s13" title="通知"></a>
+    <a href="#s14" title="架构"></a>
+    <a href="#s15" title="数据模型"></a>
+    <a href="#s16" title="稳健性"></a>
+    <a href="#s17" title="应用场景"></a>
+    <a href="#s18" title="路线图"></a>
+    <a href="#s19" title="结尾"></a>
+  </nav>
+  <div class="deck-controls" aria-label="翻页控制">
+    <button type="button" id="prevBtn">上一页</button>
+    <button type="button" id="nextBtn">下一页</button>
+  </div>
+
+  <main class="deck">
+    <section class="slide" id="s1" data-page="01 / 19">
+      <div class="slide__inner cover-layout">
+        <div>
+          <div class="seal">关</div>
+          <div class="kicker">GLOBAL CUSTOMS RISK INTELLIGENCE</div>
+          <h1>海关风险防控全球信息情报搜集处理平台</h1>
+          <p class="lead">面向跨境贸易风险研判、海关合规监测与政策情报分析的本地化智能平台。系统以主题为牵引，从全球公开信息源持续采集、清洗、结构化、打标、入库，并生成有观点、有层次、有论据的智能报告。</p>
+          <div class="cover-meta">
+            <div>产品形态<br />React + FastAPI 本地系统</div>
+            <div>数据底座<br />SQLite WAL + FTS5</div>
+            <div>展示日期<br />2026-07-04</div>
+          </div>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/01-home.png" alt="平台情报主页截图" />
+          <figcaption class="screen-caption"><span>系统首页</span><span>风险雷达式情报入口</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s2" data-page="02 / 19">
+      <div class="slide__inner">
+        <div class="section-head">
+          <div class="kicker">POSITIONING</div>
+          <h2>把全球贸易与监管变化，转换为可筛选、可追踪、可引用的风险情报资产。</h2>
+          <p class="lead">平台不是普通新闻聚合器，而是一条从“信息源”到“研判报告”的处理流水线：采集有范围，入库有结构，标签有体系，报告有证据链。</p>
+        </div>
+        <div class="grid grid--4">
+          <div class="metric"><small>DATA SOURCES</small><b>342</b><span>当前已配置的信息源规模</span></div>
+          <div class="metric"><small>ACTIVE SOURCES</small><b>329</b><span>活跃可用采集源</span></div>
+          <div class="metric"><small>WEEKLY ITEMS</small><b>53</b><span>近一周新增情报条目</span></div>
+          <div class="metric"><small>TAGS</small><b>33</b><span>风险主题与结构化标签</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s3" data-page="03 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">CURRENT SIGNALS</div>
+          <h2>实时统计面板把采集量、分类、语种、来源健康汇成一个总览。</h2>
+          <p>仪表盘用于回答三个问题：现在有多少情报？风险集中在哪些分类？哪些采集器正在稳定产出？数据直接来自后端 `/api/v1/stats/dashboard`。</p>
+          <div class="tag-row">
+            <span class="tag">trade 33 条</span>
+            <span class="tag">regulation 24 条</span>
+            <span class="tag">technology 20 条</span>
+            <span class="tag">tariff 15 条</span>
+            <span class="tag">中英双语条目</span>
+          </div>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/02-dashboard.png" alt="仪表盘截图" />
+          <figcaption class="screen-caption"><span>Dashboard</span><span>统计、趋势、来源健康</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s4" data-page="04 / 19">
+      <div class="slide__inner">
+        <div class="section-head section-head--split">
+          <div>
+            <div class="kicker">PROBLEM SPACE</div>
+            <h2>海关风险防控面对的不是“缺信息”，而是信息过载、来源分散与证据难复用。</h2>
+          </div>
+          <p>平台围绕公开源采集、主题化过滤、结构化入库、自动报告四个环节，降低人工盯源、复制粘贴和重复整理成本。</p>
+        </div>
+        <div class="grid grid--3">
+          <div class="text-card">
+            <h3>来源分散</h3>
+            <p>官方公告、RSS、搜索引擎、网页抓取、通用 JSON API、国际组织与海外媒体分散在不同站点和语言环境中。</p>
+          </div>
+          <div class="text-card">
+            <h3>噪声密集</h3>
+            <p>网页导航、版权、站内推荐、重复新闻、无发布日期条目容易污染检索结果和后续报告。</p>
+          </div>
+          <div class="text-card">
+            <h3>研判链条断裂</h3>
+            <p>如果情报没有批次、来源、标签、时间窗口和原文链接，后续报告很难追溯，也难以形成可复核证据链。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s5" data-page="05 / 19">
+      <div class="slide__inner two-pane--reverse">
+        <figure class="screen-frame">
+          <img src="project-intro-assets/01-home.png" alt="首页情报流截图" />
+          <figcaption class="screen-caption"><span>Home</span><span>重点情报、最新条目、采集器健康</span></figcaption>
+        </figure>
+        <div class="stack">
+          <div class="kicker">ENTRY POINT</div>
+          <h2>首页就是情报值班台。</h2>
+          <p>用户进入系统即可看到今日采集、本周新增、活跃源数量、重点情报卡片、最新采集信息、采集器健康状态和活跃主题。</p>
+          <div class="callout">设计意图：减少“先去哪看”的认知负担，把手动采集、报告查看和风险摘要放在第一屏。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s6" data-page="06 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">SOURCE NETWORK</div>
+          <h2>多频道信息源管理：官方、RSS、网页、搜索、JSON API 统一配置。</h2>
+          <p>信息源页面支持已配置与备用未配置分组、渠道筛选、层级折叠、搜索与连接验证。当前可用连接器包括 `api_search`、`rss`、`web_scrape`、`official`、`targeted_scrape`、`json_api`。</p>
+          <ol class="number-list">
+            <li>官方 API 与公开公告页用于政策和监管权威信号。</li>
+            <li>RSS 和新闻源用于监测突发事件、查发案例与国际动态。</li>
+            <li>搜索与定向抓取用于补齐主题关键词覆盖面。</li>
+          </ol>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/04-sources.png" alt="信息源管理截图" />
+          <figcaption class="screen-caption"><span>Sources</span><span>342 个信息源，329 个活跃源</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s7" data-page="07 / 19">
+      <div class="slide__inner two-pane--reverse">
+        <figure class="screen-frame">
+          <img src="project-intro-assets/03-topics.png" alt="主题管理截图" />
+          <figcaption class="screen-caption"><span>Topics</span><span>主题、关键词、来源、时间窗口、自动报告</span></figcaption>
+        </figure>
+        <div class="stack">
+          <div class="kicker">TOPIC DRIVEN</div>
+          <h2>以主题组织采集，而不是以网站组织工作。</h2>
+          <p>主题配置包含关键词、绑定来源、Cron 表达式、采集时间范围、自动报告、自动标签规则、关键词权重和描述提示词。</p>
+          <div class="matrix">
+            <div class="matrix-cell"><b>关键词</b><p>定义采集意图与过滤条件。</p></div>
+            <div class="matrix-cell"><b>来源集合</b><p>为不同主题绑定不同信息源。</p></div>
+            <div class="matrix-cell"><b>时间窗口</b><p>限制采集发布日期范围。</p></div>
+            <div class="matrix-cell"><b>自动报告</b><p>采集完成后触发智能分析。</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s8" data-page="08 / 19">
+      <div class="slide__inner">
+        <div class="section-head">
+          <div class="kicker">PIPELINE</div>
+          <h2>从采集到报告：一条可追溯的数据流水线。</h2>
+          <p>每一次采集都会产生 `CollectionRun`，同一主题多来源采集共享 `batch_id`，条目入库后继续打标签、全文索引和报告生成。</p>
+        </div>
+        <div class="flow">
+          <div class="flow-step"><b>01</b><strong>主题解析</strong><p>读取关键词、来源 ID、时间窗口和自动报告设置。</p></div>
+          <div class="flow-step"><b>02</b><strong>连接器采集</strong><p>按 source channel 选择 RSS、网页抓取、官方 API 或搜索连接器。</p></div>
+          <div class="flow-step"><b>03</b><strong>内容解析</strong><p>清理正文、剔除空白噪声、抽取实体和内容统计。</p></div>
+          <div class="flow-step"><b>04</b><strong>结构化入库</strong><p>按 URL/标题去重，保存来源、批次、时间、语言、分类、质量分。</p></div>
+          <div class="flow-step"><b>05</b><strong>智能报告</strong><p>先摘要信息集合，再综合生成观点化报告。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s9" data-page="09 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">ITEM WORKBENCH</div>
+          <h2>采集条目页面是风险情报的检索与复核台。</h2>
+          <p>条目支持按主题、来源、标签、语言、批次、关键词检索；保留标题、正文、摘要、URL、发布时间、采集时间、实体、质量评分和标签关系。</p>
+          <div class="callout">关键价值：分析人员可以从“报告结论”反查到具体条目和原文链接，减少凭空判断。</div>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/05-items.png" alt="采集条目页面截图" />
+          <figcaption class="screen-caption"><span>Items</span><span>搜索、过滤、分页、全文查看</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s10" data-page="10 / 19">
+      <div class="slide__inner two-pane--reverse">
+        <figure class="screen-frame">
+          <img src="project-intro-assets/06-tags.png" alt="标签系统截图" />
+          <figcaption class="screen-caption"><span>Tags</span><span>命名空间标签与合并治理</span></figcaption>
+        </figure>
+        <div class="stack">
+          <div class="kicker">TAG GOVERNANCE</div>
+          <h2>标签把散乱文本变成可聚合的风险维度。</h2>
+          <p>标签采用 `namespace:value` 模式，可覆盖类别、产品、区域、事件、制度、系统标记等维度。系统已支持自动标签规则、连接器建议标签、分类标签和“超限采集”标签。</p>
+          <div class="tag-row">
+            <span class="tag">category:tariff</span>
+            <span class="tag">category:regulation</span>
+            <span class="tag">product:battery</span>
+            <span class="tag">event:tariff</span>
+            <span class="tag">system:超限采集</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s11" data-page="11 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">ANALYTIC REPORT</div>
+          <h2>智能报告先做信息集合摘要，再写综合研判。</h2>
+          <p>报告引擎读取主题下的条目集合，构造包含来源、分类、标签、时间范围、关键证据的上下文，调用本地或 OpenAI-compatible 模型生成 Markdown 报告，并支持导出 MD/HTML/DOCX/PDF。</p>
+          <ol class="number-list">
+            <li>按单主题、指定批次或多主题批量生成。</li>
+            <li>可选择默认模型、本地 Ollama、LM Studio 或自定义兼容接口。</li>
+            <li>YMG-Deep 面板可将信息摘要转发到深度分析系统。</li>
+          </ol>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/07-reports.png" alt="智能报告页面截图" />
+          <figcaption class="screen-caption"><span>Reports</span><span>报告生成、批次范围、YMG-Deep 深度分析</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide" id="s12" data-page="12 / 19">
+      <div class="slide__inner">
+        <div class="section-head section-head--split">
+          <div>
+            <div class="kicker">SCHEDULE & HISTORY</div>
+            <h2>自动调度让监测从“临时查询”变成“持续值守”。</h2>
+          </div>
+          <p>周期调度绑定主题和来源，按 Cron 执行；采集历史按批次呈现，便于复盘一次任务从哪些来源拿到了哪些结果。</p>
+        </div>
+        <div class="grid grid--2">
+          <figure class="screen-frame">
+            <img src="project-intro-assets/08-schedules.png" alt="周期调度页面截图" />
+            <figcaption class="screen-caption"><span>Schedules</span><span>Cron、主题绑定、立即运行</span></figcaption>
+          </figure>
+          <figure class="screen-frame">
+            <img src="project-intro-assets/09-history.png" alt="采集历史页面截图" />
+            <figcaption class="screen-caption"><span>History</span><span>活跃任务与批次记录</span></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s13" data-page="13 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">ALERTING</div>
+          <h2>通知系统把采集完成、失败和新增信息推到外部工作流。</h2>
+          <p>通知配置支持 webhook 与 email，采集完成后 fire-and-forget，不阻塞主流程。系统还支持测试通知清理、重复/测试项隐藏，让通知列表保持可读。</p>
+          <div class="grid grid--2">
+            <div class="text-card"><h3>Webhook</h3><p>对接飞书、企业微信、Slack、内部告警系统。</p></div>
+            <div class="text-card"><h3>Email</h3><p>通过 SMTP 环境变量配置，缺失时降级为日志记录。</p></div>
+          </div>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/10-notifications.png" alt="通知管理页面截图" />
+          <figcaption class="screen-caption"><span>Notifications</span><span>测试、清理、启停、触发条件</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide" id="s14" data-page="14 / 19">
+      <div class="slide__inner">
+        <div class="section-head">
+          <div class="kicker">SYSTEM ARCHITECTURE</div>
+          <h2>前端轻路由，后端模块化，采集连接器可扩展。</h2>
+          <p>系统以 FastAPI 应用工厂为核心，路由、服务、连接器、引擎、调度器、报告引擎分层组织。前端由 App.tsx 中 ViewId 控制视图切换，无额外路由库。</p>
+        </div>
+        <div class="system-map">
+          <div class="system-col">
+            <div class="system-node"><strong>React + TypeScript</strong><small>仪表盘、主题、来源、条目、标签、报告、调度、设置。</small></div>
+            <div class="system-node"><strong>Vite Proxy</strong><small>/api 与 /health 代理到后端 8109。</small></div>
+            <div class="system-node"><strong>ECharts / Lucide</strong><small>图表与操作图标体系。</small></div>
+          </div>
+          <div class="spine"><div><b>TradeRadar / RiskInfoRader</b><p>主题驱动的全球贸易风险情报中枢</p></div></div>
+          <div class="system-col">
+            <div class="system-node"><strong>FastAPI + SQLAlchemy</strong><small>应用工厂、限流、CORS、健康检查、路由注册。</small></div>
+            <div class="system-node"><strong>CollectionEngine</strong><small>采集编排、去重、结构化入库、自动打标签。</small></div>
+            <div class="system-node"><strong>ReportEngine + Scheduler</strong><small>智能报告、自动报告、APScheduler 周期任务。</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s15" data-page="15 / 19">
+      <div class="slide__inner">
+        <div class="section-head section-head--split">
+          <div>
+            <div class="kicker">DATA MODEL</div>
+            <h2>核心数据模型围绕来源、主题、批次、条目、标签、报告展开。</h2>
+          </div>
+          <p>SQLite WAL 足以支撑本地单机工作流；`models_additions.py` 在 `init_db()` 时做运行时迁移，降低开发和演示环境升级成本。</p>
+        </div>
+        <div class="matrix">
+          <div class="matrix-cell"><b>SourceConfig</b><p>信息源配置，记录 channel、URL、认证、采集限制、活跃状态。</p></div>
+          <div class="matrix-cell"><b>Topic</b><p>采集主题，记录关键词、来源集合、时间窗口、自动报告配置。</p></div>
+          <div class="matrix-cell"><b>CollectionRun</b><p>每次采集执行记录，包含状态、批次、窗口、错误日志。</p></div>
+          <div class="matrix-cell"><b>CollectedItem</b><p>核心情报条目，保存标题、正文、摘要、URL、语言、分类、实体。</p></div>
+          <div class="matrix-cell"><b>Tag</b><p>命名空间标签，和条目多对多关联，支持统计与合并。</p></div>
+          <div class="matrix-cell"><b>Report</b><p>智能报告，保存内容、摘要、模型、条目 ID、导出文件。</p></div>
+          <div class="matrix-cell"><b>ModelConfig</b><p>AI 模型配置，支持本地和 OpenAI-compatible 服务。</p></div>
+          <div class="matrix-cell"><b>SystemConfig</b><p>报告标题格式、输出目录、导出格式等全局设置。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s16" data-page="16 / 19">
+      <div class="slide__inner two-pane">
+        <div class="stack">
+          <div class="kicker">RELIABILITY</div>
+          <h2>更稳健可靠：从启动检查到内容质量控制都有防线。</h2>
+          <p>近期修复了后端启动期缩进错误导致前端全站 Bad Gateway 的问题，并新增启动完整性测试，提前捕获语法和导入错误。</p>
+          <div class="timeline">
+            <div class="timeline-item"><span class="dot"></span><div><h3>启动完整性</h3><p>编译 `backend/app` 并确认 `create_app()` 能构建，防止后端起不来。</p></div></div>
+            <div class="timeline-item"><span class="dot"></span><div><h3>健康检查</h3><p>`/health` 返回数据库、调度器和系统指标状态。</p></div></div>
+            <div class="timeline-item"><span class="dot"></span><div><h3>内容清洗</h3><p>入库前剔除空白或模板噪声，保留结构化实体和内容统计。</p></div></div>
+            <div class="timeline-item"><span class="dot"></span><div><h3>时间窗口</h3><p>采集遵循主题时间范围，必要超窗条目标记为“超限采集”。</p></div></div>
+          </div>
+        </div>
+        <figure class="screen-frame">
+          <img src="project-intro-assets/11-settings.png" alt="系统配置页面截图" />
+          <figcaption class="screen-caption"><span>Settings</span><span>配置导入导出、报告输出设置</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="slide slide--paper" id="s17" data-page="17 / 19">
+      <div class="slide__inner">
+        <div class="section-head">
+          <div class="kicker">SCENARIOS</div>
+          <h2>面向海关风险防控的典型使用场景。</h2>
+        </div>
+        <div class="grid grid--3">
+          <div class="text-card">
+            <h3>监管政策变化监测</h3>
+            <p>持续跟踪 USTR、WTO、EU、MOFCOM、海关总署等来源，识别关税、贸易救济、技术性贸易措施和出口管制变化。</p>
+          </div>
+          <div class="text-card">
+            <h3>重点商品风险研判</h3>
+            <p>围绕电池、光伏、稀土、半导体、食品安全等商品维度建立标签，形成跨来源证据池。</p>
+          </div>
+          <div class="text-card">
+            <h3>境外查发案例跟踪</h3>
+            <p>监测海外海关、执法机构、司法部门与媒体发布，沉淀走私违规、制裁规避、虚假申报等案例线索。</p>
+          </div>
+          <div class="text-card">
+            <h3>贸易壁垒预警</h3>
+            <p>对技术法规、标准、合格评定程序、碳足迹、绿色贸易规则进行专题采集与趋势分析。</p>
+          </div>
+          <div class="text-card">
+            <h3>合规报告自动化</h3>
+            <p>自动汇总采集批次，生成执行摘要、关键发现、数据概览、趋势研判和建议行动。</p>
+          </div>
+          <div class="text-card">
+            <h3>情报资产复用</h3>
+            <p>通过标签、批次、全文搜索和导出，把一次采集结果转化为可反复检索和引用的内部知识资产。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s18" data-page="18 / 19">
+      <div class="slide__inner">
+        <div class="section-head section-head--split">
+          <div>
+            <div class="kicker">ROADMAP</div>
+            <h2>下一阶段可继续强化：更准、更自动、更可解释。</h2>
+          </div>
+          <p>平台已经具备从采集到报告的闭环，后续重点是提升采集质量、模型研判稳定性、风险知识图谱和团队协作能力。</p>
+        </div>
+        <div class="timeline">
+          <div class="timeline-item"><span class="dot"></span><div><h3>高质量正文抽取</h3><p>继续优化网页正文识别、反模板噪声、发布日期抽取和多语言清洗。</p></div></div>
+          <div class="timeline-item"><span class="dot"></span><div><h3>风险评分模型</h3><p>结合来源可信度、主题相关性、政策影响范围和历史案例形成风险分。</p></div></div>
+          <div class="timeline-item"><span class="dot"></span><div><h3>知识图谱</h3><p>将国家、商品、企业、法规、案例、标签之间的关系可视化。</p></div></div>
+          <div class="timeline-item"><span class="dot"></span><div><h3>报告工作流</h3><p>增加人工审阅、版本比较、批注、审批和导出模板。</p></div></div>
+          <div class="timeline-item"><span class="dot"></span><div><h3>部署运维</h3><p>完善 Docker、Nginx、健康监测、备份恢复、访问控制和审计日志。</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="s19" data-page="19 / 19">
+      <div class="slide__inner">
+        <div class="kicker">CLOSING</div>
+        <p class="quote">从“到处找信息”，到“持续形成证据链”；从“新闻摘录”，到“可复核的风险研判”。</p>
+        <p class="lead">海关风险防控全球信息情报搜集处理平台，将全球公开源信息转化为可治理、可检索、可分析、可报告的本地情报资产。</p>
+        <div class="cover-meta">
+          <div>核心能力<br />采集、清洗、标签、报告</div>
+          <div>适用对象<br />海关合规与跨境贸易风险团队</div>
+          <div>交付形式<br />本地 Web 系统 + 静态介绍文件</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const progressBar = document.getElementById("progressBar");
+
+    function currentIndex() {
+      const y = window.scrollY + window.innerHeight * 0.35;
+      return Math.max(0, slides.findIndex((slide, index) => {
+        const next = slides[index + 1];
+        return y >= slide.offsetTop && (!next || y < next.offsetTop);
+      }));
+    }
+
+    function go(delta) {
+      const index = currentIndex();
+      const target = slides[Math.min(slides.length - 1, Math.max(0, index + delta))];
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function updateProgress() {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = max <= 0 ? 0 : (window.scrollY / max) * 100;
+      progressBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    }
+
+    document.getElementById("prevBtn").addEventListener("click", () => go(-1));
+    document.getElementById("nextBtn").addEventListener("click", () => go(1));
+    window.addEventListener("scroll", updateProgress, { passive: true });
+    window.addEventListener("resize", updateProgress);
+    window.addEventListener("keydown", (event) => {
+      const keysNext = ["ArrowDown", "ArrowRight", "PageDown", " "];
+      const keysPrev = ["ArrowUp", "ArrowLeft", "PageUp"];
+      if (keysNext.includes(event.key)) {
+        event.preventDefault();
+        go(1);
+      }
+      if (keysPrev.includes(event.key)) {
+        event.preventDefault();
+        go(-1);
+      }
+    });
+    updateProgress();
+  </script>
+</body>
+</html>

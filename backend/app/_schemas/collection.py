@@ -6,6 +6,10 @@ from .common import IsoDT
 class CollectRequest(BaseModel):
     topic_id: str | None = None
     source_id: str | None = None
+    source_ids: list[str] | None = None
+    keywords: list[str] | None = None
+    research_prompt: str | None = None
+    research_model_id: str | None = None
 
 
 class RunOut(BaseModel):
@@ -36,10 +40,15 @@ class ItemOut(BaseModel):
     run_id: str | None = None
     topic_id: str | None = None
     title: str
+    title_zh: str | None = None
     content: str | None = None
+    content_zh: str | None = None
     summary: str | None = None
+    summary_zh: str | None = None
     url: str | None = None
     language: str | None = None
+    translation_status: str | None = None
+    enforcement_review: dict | None = None
     category: str | None = None
     tags: list[dict] = []
     entities: dict | None = None

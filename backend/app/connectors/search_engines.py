@@ -275,9 +275,9 @@ class Search360Delegate(BaseCollector):
                              status=JobStatus.FAILED, items=[], error_log=[msg])
 
 
-# ── Targeted Web Scrape Collector (registered as web_scrape for URL-based scraping) ──
+# ── Targeted Web Scrape Collector for explicit URL lists ──
 
-@register_collector("web_scrape")
+@register_collector("targeted_scrape")
 class TargetedScrapeCollector(BaseCollector):
     """Targeted URL-based web scraping collector.
 

@@ -9,7 +9,7 @@ from app.database import get_db
 
 logger = logging.getLogger(__name__)
 from app.collection_schemas import (
-    RunOut, ScheduleCreate, ScheduleOut,
+    CollectResultOut, RunOut, ScheduleCreate, ScheduleOut,
 )
 from app.models import (
     CollectionRun, ScheduleConfig, SourceConfig, Topic,
@@ -52,9 +52,8 @@ async def delete_schedule(schedule_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/schedules/{schedule_id}/run-now", response_model=list["CollectResultOut"])
+@router.post("/schedules/{schedule_id}/run-now", response_model=list[CollectResultOut])
 async def run_schedule_now(schedule_id: str, db: Session = Depends(get_db)):
-    from app.collection_schemas import CollectResultOut, RunOut
     from app.engine import CollectionEngine
 
     engine = CollectionEngine(db)

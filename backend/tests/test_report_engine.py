@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.report_engine import (
     _parse_iso,
     _build_item_context,
+    _build_collection_summary_context,
     _build_report_prompt,
     _auto_summary,
 )
@@ -297,6 +298,55 @@ class TestBuildReportPrompt:
         topic = self._make_topic(description=None)
         prompt = _build_report_prompt(topic, self._make_item_ctx(1))
         assert "(无)" in prompt
+
+    def test_collection_summary_context_groups_evidence_before_report(self):
+        items = [
+            {
+                "id": "item-1",
+                "index": 1,
+                "title": "US tariff exclusion update",
+                "summary": "USTR extended tariff exclusions for selected products.",
+                "content": "Long body",
+                "url": "http://example.com/1",
+                "source": "ustr",
+                "language": "en",
+                "category": "tariff",
+                "tags": [{"namespace": "system", "value": "超限采集"}],
+                "published_at": "2024-01-01T00:00:00+00:00",
+                "relevance_score": 0.9,
+            },
+            {
+                "id": "item-2",
+                "index": 2,
+                "title": "EU customs guidance",
+                "summary": "EU issued new customs compliance guidance.",
+                "content": "Long body",
+                "url": "http://example.com/2",
+                "source": "eu",
+                "language": "en",
+                "category": "customs",
+                "tags": [],
+                "published_at": "2024-01-02T00:00:00+00:00",
+                "relevance_score": 0.8,
+            },
+        ]
+
+        result = _build_collection_summary_context(items)
+
+        assert "信息集合摘要" in result
+        assert "tariff 1 条" in result
+        assert "customs 1 条" in result
+        assert "超限采集" in result
+        assert "[条目1]" in result
+
+    def test_prompt_requires_summary_then_synthesis(self):
+        topic = self._make_topic()
+        prompt = _build_report_prompt(topic, self._make_item_ctx(2))
+
+        summary_pos = prompt.index("【信息集合摘要】")
+        detail_pos = prompt.index("【详细条目】")
+        assert summary_pos < detail_pos
+        assert "先基于信息集合摘要形成判断" in prompt
 
 
 # ── _auto_summary ───────────────────────────────────────────────────────────

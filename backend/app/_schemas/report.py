@@ -36,7 +36,11 @@ class ReportGenerateRequest(BaseModel):
     topic_id: str
     model_id: str | None = None
     model_name_override: str | None = None
+    title: str | None = None
     collection_run_id: str | None = None
+    collection_run_ids: list[str] | None = None
+    date_from: str | None = None
+    date_to: str | None = None
     include_content: bool = True
     language: str = "zh"
 

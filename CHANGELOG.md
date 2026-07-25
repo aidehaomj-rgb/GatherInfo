@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.5.2] - 2026-07-24
+
+### Added
+- Added project-level Codex hook configuration to verify the required gstack setup before AI-assisted skill usage.
+- Added portable local start/stop helper scripts for the FastAPI backend and Vite frontend.
+
+### Changed
+- Bumped project version from `0.5.1` to `0.5.2`.
+- Unified version metadata across root package metadata, frontend package metadata, frontend lockfile, backend API metadata, health output, and `VERSION`.
+- Updated development service cleanup so local dashboard stop actions clear stale PID files and release ports 8109/5178 reliably.
+- Updated `.env.example` to point frontend requests at the current `/api/v1` backend base URL.
+
+### Notes
+- `.workbuddy/` is treated as local-only workspace notes and is excluded from Git.
+
+## [0.5.1] - 2026-07-04
+
+### Added
+- Added release notes for the current RiskInfoRader project state.
+- Added project assets and UI components used by the refreshed intelligence cockpit.
+
+### Changed
+- Bumped project version from `0.5.0` to `0.5.1`.
+- Synced frontend package metadata and backend API/health version metadata.
+- Updated repository ignore rules to keep local runtime data and dependency folders out of Git.
+
+### Notes
+- This release captures the local TradeRadar/RiskInfoRader worktree for publication to GitHub.
+
+## [0.5.0] — 2026-06-30
+
+### 新增功能
+- **外部信息源批量导入**：从 Excel 总表导入 250 个外部信息源，按两级分层分组入库（平台级 L1 / 类别级 L2，存入 `default_categories`），覆盖网页执法/热点信息、微信公众号、微博、今日头条
+- **信息源分层分组展示**：SourcesPage 新增「分层分组 / 平铺列表」视图切换，L1/L2 分组均可折叠展开，便于管理和查找
+- **YMG-Deep 深度分析集成**：智能报告页新增 YMG-Deep 面板，用户选择信息集后系统生成分析主题（≤200字）并连同信息摘要转发到本地 YMG-Deep 项目启动深度分析；新增后端端点 `GET /api/v1/ymg-deep/health`、`POST /api/v1/ymg-deep/analyze`
+- **智能报告模式分离**：明确区分「单一主题生成报告」与「多主题批量处理」两类，单一主题支持批次复选 + 合并为一份/按批次分别生成两种方式
+
+### 改进
+- **模型配置区分可用/未配置**：ModelConfigPage 分「可用模型 / 未配置模型」两个 tab，带统计与状态标记；报告功能仅展示可用模型供选择
+- **通知管理分类聚合**：NotificationsPage 按 channel×is_active 分组聚合展示，顶部统计概览，每组可折叠
+- **输出目录选择器**：SettingsPage 输出目录改为只读 + 「选择目录」按钮，弹窗含预设目录与自定义路径输入
+
+## [0.4.3] — 2026-06-17
+
+### 新增功能
+- **主题采集增强**：`TopicsPage` 支持采集过程实时状态反馈、采集窗口提示与更友好的触发体验
+- **译文展示完善**：非中文信息条目翻译结果展示更完整，翻译服务错误处理更健壮
+- **条目列表增强**：新增来源详情字段展示，条目筛选与查询接口返回更丰富的元数据
+- **信息源路由补齐**：`sources.py` 新增缺失接口点，保持与前端信息源管理页一致
+
+### 维护
+- 生成多份贸易政策/出口管制/技术性贸易措施情报报告（DOCX/PDF）
+- 新增文档：`docs/api-budget-request-2026.md`、`docs/source-audit-2026-06-13.md`
+
 ## [0.4.2] — 2026-06-09
 
 ### Bug 修复

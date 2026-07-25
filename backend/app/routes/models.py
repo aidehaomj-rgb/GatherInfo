@@ -22,6 +22,14 @@ from app.models import ModelConfig
 router = APIRouter(prefix="/api/v1", tags=["models"])
 
 
+def _openai_compatible_url(base_url: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    path = path if path.startswith("/") else f"/{path}"
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
 
 @router.get("/models", response_model=list[ModelConfigOut])
 def list_models(db: Session = Depends(get_db)):
@@ -91,9 +99,12 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
         model_name = m.model_name or ""
 
         if m.provider == "ollama":
+            headers = {"Content-Type": "application/json"}
+            if m.api_key:
+                headers["Authorization"] = f"Bearer {m.api_key}"
             try:
                 async with httpx.AsyncClient(timeout=5) as client:
-                    r = await client.get(f"{base}/api/tags")
+                    r = await client.get(f"{base}/api/tags", headers=headers)
                     if r.status_code != 200:
                         return ModelTestResult(
                             success=False,
@@ -117,12 +128,12 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
                 message = f"Ollama OK. Found {len(avail)} models."
 
             try:
-                async with httpx.AsyncClient(timeout=15) as client:
+                async with httpx.AsyncClient(timeout=120) as client:
                     r = await client.post(f"{base}/api/chat", json={
                         "model": test_model,
                         "messages": [{"role": "user", "content": "Reply exactly: OK"}],
                         "stream": False,
-                    })
+                    }, headers=headers)
                     if r.status_code == 200:
                         data = r.json()
                         reply = data.get("message", {}).get("content", "")[:100]
@@ -142,11 +153,11 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
                 )
         else:
             # OpenAI-compatible test
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 headers = {"Content-Type": "application/json"}
                 if m.api_key:
                     headers["Authorization"] = f"Bearer {m.api_key}"
-                url = f"{base}/chat/completions"
+                url = _openai_compatible_url(base, "/chat/completions")
                 r = await client.post(url, json={
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Reply exactly: OK"}],
@@ -186,7 +197,10 @@ async def list_available_models(model_id: str, db: Session = Depends(get_db)):
         base = (m.base_url or "http://localhost:11434").rstrip("/")
         if m.provider == "ollama":
             async with httpx.AsyncClient(timeout=5) as client:
-                r = await client.get(f"{base}/api/tags")
+                headers = {}
+                if m.api_key:
+                    headers["Authorization"] = f"Bearer {m.api_key}"
+                r = await client.get(f"{base}/api/tags", headers=headers)
                 models = [mod.get("name", "") for mod in r.json().get("models", [])]
                 return ListModelsResult(
                     success=True, message=f"Found {len(models)} models",
@@ -197,7 +211,7 @@ async def list_available_models(model_id: str, db: Session = Depends(get_db)):
                 headers = {}
                 if m.api_key:
                     headers["Authorization"] = f"Bearer {m.api_key}"
-                r = await client.get(f"{base}/models", headers=headers)
+                r = await client.get(_openai_compatible_url(base, "/models"), headers=headers)
                 raw = r.json()
                 models = [mod.get("id", "") for mod in raw.get("data", [])]
                 return ListModelsResult(

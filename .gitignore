@@ -8,12 +8,16 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+*.backup
 backend/.venv/
 frontend/node_modules/
 frontend/dist/
+backend/data/
 data/gather.db*
 logs/
 .dev-pids
+pptx_build/node_modules/
+.workbuddy/
 
 # Project docs
 data/backups/

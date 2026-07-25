@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
+from app.models import Category, ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,12 @@ from ._seed_sources import (
 
 @router.post("/seed-defaults")
 def seed_defaults(db: Session = Depends(get_db)):
+    created_categories = 0
+    for cfg in _DEFAULT_CATEGORIES:
+        if not db.query(Category).filter(Category.id == cfg["id"]).first():
+            db.add(Category(**cfg))
+            created_categories += 1
+
     created_sources = 0
     for cfg in _default_sources():
         if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
@@ -64,6 +70,7 @@ def seed_defaults(db: Session = Depends(get_db)):
     return {
         "sources_created": created_sources,
         "topics_created": created_topics,
+        "categories_created": created_categories,
         "models_created": created_models,
         "search_tools_created": created_tools,
         "tags_created": created_tags,

@@ -63,7 +63,7 @@ def get_topic(topic_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/topics/{topic_id}", response_model=TopicOut)
-def update_topic(topic_id: str, data: TopicUpdate, db: Session = Depends(get_db)):
+async def update_topic(topic_id: str, data: TopicUpdate, db: Session = Depends(get_db)):
     t = db.query(Topic).filter(Topic.id == topic_id).first()
     if not t:
         raise HTTPException(404)
@@ -72,6 +72,12 @@ def update_topic(topic_id: str, data: TopicUpdate, db: Session = Depends(get_db)
             setattr(t, k, v)
         db.commit()
         db.refresh(t)
+        # Keep the in-memory APScheduler jobs in sync with topic edits.  This
+        # is especially important when a user disables periodic collection
+        # from the topic management page.
+        from app.scheduler import scheduler_instance
+        if scheduler_instance:
+            await scheduler_instance.reload()
     except Exception as exc:
         db.rollback()
         logger.error("update_topic failed: %s", exc)
@@ -138,7 +144,12 @@ async def run_collection(data: CollectRequest, db: Session = Depends(get_db)):
 
     if data.topic_id:
         try:
-            results = await engine.collect_topic(data.topic_id)
+            results = await engine.collect_topic(
+                data.topic_id,
+                research_prompt=data.research_prompt,
+                research_model_id=data.research_model_id,
+                only_source_ids=data.source_ids,
+            )
         except ValueError as e:
             raise HTTPException(400, str(e))
         try:
@@ -146,10 +157,11 @@ async def run_collection(data: CollectRequest, db: Session = Depends(get_db)):
             if topic and topic.auto_report:
                 from app.report_engine import generate_report as auto_gen
                 logger.info("Auto-report triggered for topic %s after manual collection", data.topic_id)
+                run_ids = [result.run_id for result in results if getattr(result, "run_id", None)]
                 asyncio.ensure_future(auto_gen(
                     topic_id=data.topic_id,
                     model_id=topic.auto_report_model_id,
-                    collection_run_id=topic.last_collection_run_id,
+                    collection_run_ids=run_ids,
                 ))
         except Exception as exc:
             logger.warning("Auto-report trigger failed for %s: %s", data.topic_id, exc)

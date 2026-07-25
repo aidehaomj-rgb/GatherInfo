@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
-import { ExternalLink, BookOpenText } from "lucide-react";
+import { ExternalLink, BookOpenText, Languages } from "lucide-react";
 import {
   fetchItems, fetchTags, fetchSources, fetchTopics,
   fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems,
 } from "../api";
 import type { CollectedItem, ItemList, Tag, Source, Topic } from "../types";
+import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { ItemFilterBar } from "./ItemFilterBar";
 import { ItemDetailModal } from "./ItemDetailModal";
+import { formatBeijingDateTime } from "../utils/date";
 
 const PAGE_SIZE = 40;
 
@@ -239,7 +241,7 @@ export function ItemsPage() {
                     </span>
                     <span>{items.length} 条</span>
                     {items[0].collected_at && (
-                      <span>{new Date(items[0].collected_at).toLocaleString("zh", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span>{formatBeijingDateTime(items[0].collected_at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                     )}
                   </div>
                   {items.map((item) => (
@@ -268,8 +270,16 @@ export function ItemsPage() {
             <button type="button" className="btn btn-sm btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               上一页
             </button>
-            <span className="text-muted">{data.page} / {Math.ceil(data.total / PAGE_SIZE) || 1}</span>
-            <button type="button" className="btn btn-sm btn-ghost" disabled={data.items.length < PAGE_SIZE} onClick={() => setPage(page + 1)}>
+            <label className="pagination-select">
+              <span className="sr-only">选择页码</span>
+              <select value={page} onChange={(event) => setPage(Number(event.target.value))}>
+                {Array.from({ length: Math.max(1, Math.ceil(data.total / PAGE_SIZE)) }, (_, index) => index + 1).map((pageNumber) => (
+                  <option key={pageNumber} value={pageNumber}>第 {pageNumber} 页</option>
+                ))}
+              </select>
+            </label>
+            <span className="text-muted">/ {Math.max(1, Math.ceil(data.total / PAGE_SIZE))}</span>
+            <button type="button" className="btn btn-sm btn-ghost" disabled={page >= Math.max(1, Math.ceil(data.total / PAGE_SIZE))} onClick={() => setPage(page + 1)}>
               下一页
             </button>
           </div>
@@ -303,11 +313,15 @@ export function ItemsPage() {
 
 function ItemCard({ item }: { item: CollectedItem }) {
   const [expanded, setExpanded] = useState(false);
+  const hasTranslation = Boolean(item.title_zh || item.summary_zh || item.content_zh);
+  const displayTitle = getDisplayTitle(item.title_zh || item.title);
+  const originalTitle = cleanItemTitle(item.title);
+  const displaySummary = item.summary_zh || item.summary;
   return (
     <article className="item-card">
       <div className="item-card-header">
         <h4 className="item-title" onClick={() => setExpanded(!expanded)}>
-          {item.title}
+          {displayTitle}
         </h4>
         <div className="item-card-meta">
           {item.url && (
@@ -315,6 +329,8 @@ function ItemCard({ item }: { item: CollectedItem }) {
               <ExternalLink size={12} />
             </a>
           )}
+          {hasTranslation && <span className="chip chip--green"><Languages size={12} /> 译文</span>}
+          {item.enforcement_review && <span className="chip chip--green">AI审核</span>}
           <span className="chip">{item.language ?? "?"}</span>
           {item.category && <span className="chip chip--blue">{item.category}</span>}
           {item.tags?.map((t) => (
@@ -324,12 +340,34 @@ function ItemCard({ item }: { item: CollectedItem }) {
       </div>
       {expanded && (
         <div className="item-card-body" id={`item-content-${item.id}`}>
-          {item.summary && <p className="text-muted">{item.summary}</p>}
-          {!item.summary && item.url && <p className="text-muted">URL: {item.url}</p>}
+          {hasTranslation ? (
+            <>
+              {(item.summary_zh || item.content_zh) && (
+                <div className="item-translation-preview">
+                  <strong>中文译文</strong>
+                  <p className="text-muted">{item.summary_zh || item.content_zh}</p>
+                </div>
+              )}
+              {(originalTitle || item.summary || item.content) && (
+                <div className="item-original-preview">
+                  <strong>源文件内容</strong>
+                  {originalTitle && originalTitle !== displayTitle && (
+                    <p className="item-original-line">原文标题：{originalTitle}</p>
+                  )}
+                  {(item.summary || item.content) && (
+                    <p className="text-muted">{item.summary || item.content}</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            displaySummary && <p className="text-muted">{displaySummary}</p>
+          )}
+          {!displaySummary && item.url && <p className="text-muted">URL: {item.url}</p>}
           <div className="item-card-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="text-muted small">
-              {item.collected_at && `采集: ${new Date(item.collected_at).toLocaleString("zh")}`}
-              {item.published_at && ` · 发布: ${new Date(item.published_at).toLocaleString("zh")}`}
+              {item.collected_at && `采集: ${formatBeijingDateTime(item.collected_at)}`}
+              {item.published_at && ` · 发布: ${formatBeijingDateTime(item.published_at)}`}
               {` · 来源: ${item.source_id}`}
               {` · 质量: ${item.quality_score.toFixed(2)}`}
             </span>

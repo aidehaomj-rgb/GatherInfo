@@ -107,6 +107,47 @@ class TestPersistItems:
         # Should NOT add because only 1 keyword matches (need >=2)
         mock_db.add.assert_not_called()
 
+    def test_discards_blank_or_noisy_items(self):
+        """Blank or template-like noisy items should be discarded before insert."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        items = [
+            FetchItem(title="   ", content="首页 | 登录 | 版权 © --", url="http://a.com"),
+        ]
+
+        engine._persist_items(items, "src-1", "run-1", topic_id="t1")
+
+        mock_db.add.assert_not_called()
+
+    def test_persists_structured_content_analysis(self):
+        """Meaningful items should persist normalized text plus structured metadata."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        items = [
+            FetchItem(
+                title="USTR updates China tariff exclusions",
+                content=(
+                    "The United States Trade Representative announced China tariff "
+                    "exclusion updates affecting lithium battery imports in 2026."
+                ),
+                url="http://a.com",
+                raw_metadata={"engine": "test"},
+            ),
+        ]
+
+        engine._persist_items(items, "src-1", "run-1", topic_id="t1")
+
+        added = mock_db.add.call_args.args[0]
+        assert added.content == items[0].content
+        assert added.summary
+        assert added.raw_metadata["engine"] == "test"
+        assert added.raw_metadata["content_analysis"]["word_count"] >= 10
+        assert added.entities["countries"]
+
     def test_dedup_skips_existing_items(self):
         """Existing items should be updated, not duplicated."""
         mock_db = MagicMock()
@@ -132,8 +173,8 @@ class TestPersistItems:
 class TestWindowFiltering:
     """Window-based filtering of items by publication date."""
 
-    def test_items_without_published_at_always_kept(self):
-        """Items without a published_at date should always be kept."""
+    def test_items_without_published_at_are_skipped_when_window_is_set(self):
+        """Items without a usable date should be skipped when a window is set."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -146,8 +187,7 @@ class TestWindowFiltering:
         engine._persist_items(items, "src-1", "run-1", topic_id="t1",
                               window_start=window_start)
 
-        # Should be added even though no published_at
-        assert mock_db.add.call_count >= 1
+        mock_db.add.assert_not_called()
 
     def test_items_within_window_kept(self):
         """Items published within the window should be kept."""
@@ -167,21 +207,60 @@ class TestWindowFiltering:
 
         assert mock_db.add.call_count >= 1
 
-    def test_items_before_window_skipped(self):
-        """Items published before the window should be skipped."""
+    def test_undated_search_result_kept_when_source_allows_review(self):
+        """Trusted search results may be retained when their date is unavailable."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
 
+        item = FetchItem(
+            title="Undated search result", content="critical minerals update",
+            url="https://example.com/article",
+            raw_metadata={"engine": "tavily", "allow_undated_results": True},
+        )
+        engine._persist_items(
+            [item], "tavily-search", "run-1", topic_id="t1",
+            window_start=utc_now() - timedelta(days=7),
+        )
+
+        assert mock_db.add.call_count >= 1
+
+    def test_search_result_kept_when_source_allows_topic_review(self):
+        """A search result selected by the topic query may bypass generic matching."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        item = FetchItem(
+            title="Result selected by search query", content="source excerpt",
+            url="https://example.com/article",
+            raw_metadata={"engine": "tavily", "allow_unfiltered_results": True},
+        )
+        engine._persist_items(
+            [item], "tavily-search", "run-1", topic_id="t1",
+            keywords=["critical minerals", "export control", "rare earth"],
+        )
+
+        assert mock_db.add.call_count >= 1
+
+    def test_items_before_window_are_skipped_even_when_relevant(self):
+        """Relevant items outside the requested window should be skipped."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        engine.ensure_tag = MagicMock()
+        engine.tag_item = MagicMock(return_value=True)
+
         old_date = utc_now() - timedelta(days=30)
         items = [
-            FetchItem(title="Old news", content="body", url="http://a.com",
+            FetchItem(title="Old tariff news", content="trade tariff policy update", url="http://a.com",
                       published_at=old_date),
         ]
 
         window_start = utc_now() - timedelta(days=7)
         engine._persist_items(items, "src-1", "run-1", topic_id="t1",
-                              window_start=window_start)
+                              window_start=window_start, keywords=["tariff"])
 
-        # Should NOT be added
         mock_db.add.assert_not_called()
+        engine.ensure_tag.assert_not_called()
+        engine.tag_item.assert_not_called()

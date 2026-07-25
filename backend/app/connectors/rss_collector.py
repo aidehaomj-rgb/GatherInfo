@@ -6,6 +6,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 from datetime import timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
 
 import httpx
 
@@ -22,7 +23,8 @@ class RSSCollector(BaseCollector):
     channel = "rss"
 
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
-        if not self.config.base_url:
+        feed_url = _feed_url(self.config)
+        if not feed_url:
             return self._error("base_url not configured")
 
         errors: list[str] = []
@@ -33,7 +35,7 @@ class RSSCollector(BaseCollector):
             follow_redirects=True,
         ) as client:
             try:
-                resp = await client.get(self.config.base_url)
+                resp = await client.get(feed_url)
                 resp.raise_for_status()
                 raw = resp.text
             except Exception as exc:
@@ -68,6 +70,16 @@ def _headers() -> dict:
         "User-Agent": "GatherInfo/0.3 (Global Monitor; contact@example.com)",
         "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
     }
+
+
+def _feed_url(config: SourceConfig) -> str:
+    base = (config.base_url or "").strip()
+    endpoint = (config.api_endpoint or "").strip()
+    if endpoint.startswith("http"):
+        return endpoint
+    if base and endpoint:
+        return urljoin(base if base.endswith("/") else base + "/", endpoint.lstrip("/"))
+    return base or endpoint
 
 
 def _parse_feed(root: ET.Element) -> list[FetchItem]:

@@ -1,5 +1,6 @@
 import { RefreshCw, Trash2, Edit3, BrainCircuit, Target } from "lucide-react";
 import type { Topic } from "../types";
+import { formatBeijingDateTime } from "../utils/date";
 
 interface Props {
   topic: Topic;
@@ -96,7 +97,7 @@ export function TopicCard({ topic, onCollect, onGenerateReport, onEdit, onDelete
         </div>
         <div className="text-muted small">
           累计采集: {topic.total_items_collected} 条
-          {topic.last_run_at && <> · 最后运行: {new Date(topic.last_run_at).toLocaleString("zh")}</>}
+          {topic.last_run_at && <> · 最后运行: {formatBeijingDateTime(topic.last_run_at)}</>}
         </div>
       </div>
 

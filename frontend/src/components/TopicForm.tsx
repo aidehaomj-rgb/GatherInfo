@@ -4,7 +4,7 @@ import {
   DESCRIPTION_PROMPT_TEMPLATES,
   KEYWORD_WEIGHT_TEMPLATES,
 } from "../templates";
-import { MultiSelect } from "./shared/MultiSelect";
+import { SourceSelector } from "./SourceSelector";
 
 /** Score templates against current keywords; return top-3 recommendations (for ★ marking). */
 function recommendTemplates(keywords: string[]): { label: string; value: string; score: number }[] {
@@ -225,15 +225,14 @@ export function TopicForm({
           </label>
           <label className="span-2">
             关联信息源{" "}
-            <MultiSelect
-              options={activeSources.map((s) => ({
-                value: s.id,
-                label: `${s.name} (${s.channel})`,
-              }))}
+            <SourceSelector
+              sources={activeSources}
               selected={selectedSourceIds}
               onChange={setSelectedSourceIds}
-              placeholder={`已选 ${selectedSourceIds.length} 个信息源`}
             />
+            <span className="text-muted small" style={{ marginTop: 4, display: "inline-block" }}>
+              已选 {selectedSourceIds.length} 个信息源
+            </span>
           </label>
           <label>
             Cron 表达式

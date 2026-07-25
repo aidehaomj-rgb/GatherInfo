@@ -1,6 +1,7 @@
 import { FileText, Trash2, Eye, Download } from "lucide-react";
 import type { Report } from "../types";
 import { StatusBadge } from "./shared/StatusBadge";
+import { formatBeijingDateTime } from "../utils/date";
 
 interface ReportCardProps {
   report: Report;
@@ -42,7 +43,7 @@ export function ReportCard({
         </span>
         <span>基于 {r.item_count} 条信息</span>
         {r.generated_at && (
-          <span>{new Date(r.generated_at).toLocaleString("zh")}</span>
+          <span>{formatBeijingDateTime(r.generated_at)}</span>
         )}
         {r.tokens_used > 0 && (
           <span className="text-muted">{r.tokens_used} tokens</span>

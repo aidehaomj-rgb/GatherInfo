@@ -117,6 +117,9 @@ class BaseCollector(ABC):
         run.duration_ms = int((time.monotonic() - start) * 1000)
         run.error_log = result.error_log
         run.status = result.status
+        result.run_id = run.id
+        result.source_id = run.source_id
+        result.duration_ms = run.duration_ms
         return result
 
 

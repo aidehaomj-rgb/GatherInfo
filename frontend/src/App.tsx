@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState, Suspense, lazy } from "react";
+import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
 import type { DashboardData } from "./types";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AppLogo } from "./components/AppLogo";
+import { CommandPalette } from "./components/CommandPalette";
+import { ToastProvider, useToast } from "./components/ToastProvider";
+import { getBeijingHour } from "./utils/date";
 
-// ── Lazy-loaded page components (code-split per view) ──────────────────
-
+// Lazy-loaded page components (code-split per view)
 const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
+const IntelligenceHomePage = lazy(() => import("./components/IntelligenceHomePage").then(m => ({ default: m.IntelligenceHomePage })));
 const TopicsPage = lazy(() => import("./components/TopicsPage").then(m => ({ default: m.TopicsPage })));
 const SourcesPage = lazy(() => import("./components/SourcesPage").then(m => ({ default: m.SourcesPage })));
 const ItemsPage = lazy(() => import("./components/ItemsPage").then(m => ({ default: m.ItemsPage })));
@@ -22,8 +26,6 @@ const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m =
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 
-// ── Loading fallback ───────────────────────────────────────────────────
-
 function PageLoader() {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0" }}>
@@ -35,7 +37,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -44,6 +46,7 @@ interface ViewDef {
 }
 
 const views: ViewDef[] = [
+  { id: "home", label: "情报主页", icon: Newspaper },
   { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
   { id: "categories", label: "采集类别", icon: FolderTree },
   { id: "topics", label: "主题管理", icon: BarChart3 },
@@ -58,55 +61,117 @@ const views: ViewDef[] = [
   { id: "settings", label: "系统配置", icon: Settings },
 ];
 
-/** Time-of-day greeting in Chinese */
 function greeting(): string {
-  const h = new Date().getHours();
+  const h = getBeijingHour();
   if (h < 6) return "夜深了";
   if (h < 12) return "上午好";
   if (h < 18) return "下午好";
   return "晚上好";
 }
 
-/** Radar-scan logo — 3 concentric arcs + a pulse dot, clean line-art style */
-function AppLogo() {
+function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  const shortcuts = [
+    { key: "Cmd / Ctrl + K", desc: "打开命令面板" },
+    { key: "Esc", desc: "关闭模态框 / 取消选择" },
+    { key: "?", desc: "显示快捷键帮助" },
+    { key: "↑ / ↓", desc: "命令面板中切换选项" },
+    { key: "Enter", desc: "执行选中命令" },
+  ];
   return (
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Radar arcs — opening toward top-right */}
-      <path d="M20 4 A16 16 0 0 1 35.3 12.7" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
-      <path d="M20 9 A11 11 0 0 1 30 15" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" opacity="0.65" />
-      <path d="M20 14 A6 6 0 0 1 24.5 17.5" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
-      {/* Pulse dot at leading edge */}
-      <circle cx="35.3" cy="12.7" r="2.5" fill="#22c55e" opacity="0.9">
-        <animate attributeName="opacity" values="0.9;0.3;0.9" dur="2s" repeatCount="indefinite" />
-      </circle>
-      {/* Subtle center dot */}
-      <circle cx="20" cy="20" r="2" fill="#3b82f6" opacity="0.5" />
-    </svg>
+    <div className="shortcut-help-overlay" onClick={onClose}>
+      <div className="shortcut-help" onClick={(e) => e.stopPropagation()}>
+        <div className="shortcut-help__header">
+          <h3>快捷键帮助</h3>
+          <button type="button" className="shortcut-help__close" onClick={onClose} aria-label="关闭">
+            <Keyboard size={18} />
+          </button>
+        </div>
+        <div className="shortcut-help__list">
+          {shortcuts.map((s) => (
+            <div key={s.key} className="shortcut-help__row">
+              <kbd className="shortcut-help__key">{s.key}</kbd>
+              <span className="shortcut-help__desc">{s.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
-export function App() {
-  const [view, setView] = useState<ViewId>("dashboard");
+function AppInner() {
+  const [view, setView] = useState<ViewId>("home");
   const [dashData, setDashData] = useState<DashboardData | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const { success } = useToast();
 
-  const activeDef = useMemo(() => views.find((v) => v.id === view) ?? views[0], [view]);
-
-  // Fetch dashboard summary for the dynamic greeting
   useEffect(() => {
     let cancelled = false;
     fetchDashboard().then((d) => { if (!cancelled) setDashData(d); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (commandOpen) {
+          setCommandOpen(false);
+          return;
+        }
+        if (shortcutHelpOpen) {
+          setShortcutHelpOpen(false);
+          return;
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandOpen((prev) => !prev);
+        return;
+      }
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setShortcutHelpOpen(true);
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [commandOpen, shortcutHelpOpen]);
+
+  useEffect(() => {
+    function onResize() {
+      if (window.innerWidth < 768) {
+        setSidebarCollapsed(true);
+      } else {
+        setSidebarCollapsed(false);
+      }
+    }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const itemsToday = dashData?.summary?.items_today ?? 0;
 
   return (
     <div className="app-shell">
-      <aside className="side-rail">
+      <aside className={`side-rail${sidebarCollapsed ? " side-rail--collapsed" : ""}`}>
         <div className="brand">
-          <AppLogo />
-          <span className="brand-name">GatherInfo</span>
-          <span className="brand-sub">global trade intelligence</span>
+          <AppLogo size={sidebarCollapsed ? 32 : 44} />
+          {!sidebarCollapsed && (
+            <>
+              <span className="brand-name">RiskInfoRader</span>
+              <span className="brand-sub">全球贸易风险情报中枢</span>
+            </>
+          )}
         </div>
         <nav>
           {views.map((v) => {
@@ -120,12 +185,21 @@ export function App() {
                 onClick={() => setView(v.id)}
                 title={v.label}
               >
+                {isActive && <span className="nav-btn__indicator" />}
                 <Icon size={18} />
-                <span>{v.label}</span>
+                {!sidebarCollapsed && <span>{v.label}</span>}
               </button>
             );
           })}
         </nav>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+        >
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
       </aside>
       <main className="workspace">
         <header className="workspace-header">
@@ -133,6 +207,14 @@ export function App() {
             <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
           </div>
           <div className="header-actions">
+            <button
+              type="button"
+              className="btn-icon header-action-btn"
+              title="打开命令面板 (Cmd+K)"
+              onClick={() => setCommandOpen(true)}
+            >
+              <Keyboard size={18} />
+            </button>
             <button
               type="button"
               className="btn-icon header-action-btn"
@@ -144,24 +226,43 @@ export function App() {
           </div>
         </header>
         <section className="view-frame">
-           <ErrorBoundary key={view}>
-             <Suspense fallback={<PageLoader />}>
-               {view === "dashboard" && <DashboardPage />}
-               {view === "categories" && <CategoriesPage />}
-               {view === "topics" && <TopicsPage />}
-               {view === "sources" && <SourcesPage />}
-               {view === "items" && <ItemsPage />}
-               {view === "tags" && <TagsPage />}
-               {view === "reports" && <ReportsPage />}
-               {view === "models" && <ModelConfigPage />}
-               {view === "history" && <HistoryPage />}
-               {view === "notifications" && <NotificationsPage />}
-               {view === "settings" && <SettingsPage />}
-               {view === "schedules" && <SchedulesPage />}
-             </Suspense>
-           </ErrorBoundary>
+          <ErrorBoundary key={view}>
+            <Suspense fallback={<PageLoader />}>
+              {view === "home" && <IntelligenceHomePage />}
+              {view === "dashboard" && <DashboardPage />}
+              {view === "categories" && <CategoriesPage />}
+              {view === "topics" && <TopicsPage />}
+              {view === "sources" && <SourcesPage />}
+              {view === "items" && <ItemsPage />}
+              {view === "tags" && <TagsPage />}
+              {view === "reports" && <ReportsPage />}
+              {view === "models" && <ModelConfigPage />}
+              {view === "history" && <HistoryPage />}
+              {view === "notifications" && <NotificationsPage />}
+              {view === "settings" && <SettingsPage />}
+              {view === "schedules" && <SchedulesPage />}
+            </Suspense>
+          </ErrorBoundary>
         </section>
       </main>
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        onSelectView={(v) => {
+          setView(v as ViewId);
+          setCommandOpen(false);
+          success(`已切换到: ${views.find((x) => x.id === v)?.label || v}`);
+        }}
+      />
+      <ShortcutHelp open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <AppInner />
+    </ToastProvider>
   );
 }

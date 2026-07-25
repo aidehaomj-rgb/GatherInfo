@@ -15,6 +15,7 @@ export function DashboardPage() {
     [],
   );
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [collectMsg, setCollectMsg] = useState<string | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
 
   useEffect(() => {
@@ -23,11 +24,16 @@ export function DashboardPage() {
 
   const triggerCollect = useCallback(async (topicId: string) => {
     setRefreshing(topicId);
+    setCollectMsg(null);
     try {
       const results = await collectTopic(topicId);
       const total = results.reduce((s, r) => s + r.items_new, 0);
-      if (total > 0) await refresh();
-    } catch { /* ignore */ }
+      const failed = results.filter((r) => r.errors?.length).length;
+      setCollectMsg(`采集完成：新增 ${total} 条${failed > 0 ? `，${failed} 个来源失败` : ""}`);
+      await refresh();
+    } catch (err) {
+      setCollectMsg(`采集失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
     setRefreshing(null);
   }, [refresh]);
 
@@ -40,6 +46,7 @@ export function DashboardPage() {
       xAxis: { type: "value", axisLabel: { fontSize: 10, color: "#7e93b0" }, splitLine: { lineStyle: { color: "#1e3a5f", type: "dashed" } } },
       yAxis: {
         type: "category",
+        inverse: true,
         data: sorted.map((s) => s.name),
         axisLabel: { fontSize: 11, color: "#cbd5e1", width: 110, overflow: "truncate" },
         axisLine: { show: false },
@@ -197,6 +204,11 @@ export function DashboardPage() {
       {/* Quick collect — card-style */}
       <div className="panel">
         <h3>快速采集</h3>
+        {collectMsg && (
+          <div className="toast" onClick={() => setCollectMsg(null)}>
+            {collectMsg}
+          </div>
+        )}
         <div className="card-list" style={{ marginTop: 8 }}>
           {topics.filter((t) => t.is_active !== false).map((t) => {
             const lastRun = t.last_run_at ? new Date(t.last_run_at) : null;
