@@ -29,6 +29,9 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
 
     if model.provider == "ollama":
         url = f"{base_url.rstrip('/')}/api/chat"
+        headers = {"Content-Type": "application/json"}
+        if model.api_key:
+            headers["Authorization"] = f"Bearer {model.api_key}"
         payload = {
             "model": model_name,
             "messages": [
@@ -43,7 +46,7 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
             },
         }
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             msg = data.get("message", {})
@@ -123,6 +126,9 @@ async def translate_item_context(
 
     if model.provider == "ollama":
         url = base_url.rstrip("/") + "/api/chat"
+        headers = {"Content-Type": "application/json"}
+        if model.api_key:
+            headers["Authorization"] = "Bearer " + model.api_key
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
@@ -130,7 +136,7 @@ async def translate_item_context(
             "options": {"temperature": 0.2, "num_predict": 4096},
         }
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             msg = data.get("message", {})

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import asyncio
 from typing import Any
 
 import httpx
@@ -126,9 +127,13 @@ async def translate_existing_items(
         try:
             results = await _translate_records(model, batch_records)
         except Exception as exc:
-            logger.warning("Item translation batch failed: %s", exc)
-            errors.append(str(exc))
-            continue
+            logger.warning("Item translation batch failed, using web fallback: %s", exc)
+            try:
+                results = await _translate_records_with_web_fallback(batch_records)
+            except Exception as fallback_exc:
+                logger.warning("Item translation web fallback failed: %s", fallback_exc)
+                errors.append(str(fallback_exc) or str(exc) or "translation failed")
+                continue
 
         by_id = {str(row.get("id")): row for row in results}
         for item in batch_items:
@@ -141,7 +146,9 @@ async def translate_existing_items(
             item.raw_metadata = metadata
             translated += 1
 
-    db.commit()
+        # Preserve completed batches if a later external translation request fails.
+        db.commit()
+
     return {
         "requested": limit,
         "translated": translated,
@@ -254,9 +261,12 @@ async def _translate_records(model: ModelConfig, records: list[dict[str, str]]) 
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "think": False,
             "options": {"temperature": 0.1},
         }
-        async with httpx.AsyncClient(timeout=120) as client:
+        # Keep local-model failures bounded so public-source translation can
+        # promptly fall back instead of leaving new items without a rendition.
+        async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -328,9 +338,8 @@ def _normalize_translation(row: dict[str, Any]) -> dict[str, str]:
 
 
 async def _translate_records_with_web_fallback(records: list[dict[str, str]]) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
     async with httpx.AsyncClient(timeout=60, proxy=_translation_proxy()) as client:
-        for record in records:
+        async def translate_record(record: dict[str, str]) -> dict[str, str]:
             row = {
                 "id": str(record.get("id", "")),
                 "title_zh": "",
@@ -354,8 +363,9 @@ async def _translate_records_with_web_fallback(records: list[dict[str, str]]) ->
                         source_key,
                         exc,
                     )
-            rows.append(row)
-    return rows
+            return row
+
+        return list(await asyncio.gather(*(translate_record(record) for record in records)))
 
 
 def _translation_proxy() -> str | None:

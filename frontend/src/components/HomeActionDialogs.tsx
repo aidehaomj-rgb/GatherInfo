@@ -1,6 +1,7 @@
  import { useEffect, useState } from "react";
  import { X, Zap, FileText, Loader2, CalendarDays } from "lucide-react";
  import type { Topic, Report } from "../types";
+ import { formatBeijingDateTime } from "../utils/date";
 
  type CollectTopicsDialogProps = {
    open: boolean;
@@ -152,7 +153,7 @@
                  <p>{r.summary || r.content?.slice(0, 160) || "暂无摘要"}</p>
                  <span className="text-muted small">
                    <CalendarDays size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                   {r.generated_at ? new Date(r.generated_at).toLocaleString("zh") : "未知时间"}
+                   {r.generated_at ? formatBeijingDateTime(r.generated_at) : "未知时间"}
                  </span>
                </button>
              ))}

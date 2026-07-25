@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { PenLine, Eye, Save, Trash2 } from "lucide-react";
+import { formatBeijingDateTime } from "../utils/date";
 
 interface NoteEditorProps {
   itemId: string;
@@ -150,7 +151,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ itemId, className = "" }
 
       {savedAt && (
         <div className="note-saved-hint">
-          已保存 {new Date(savedAt).toLocaleString()}
+          已保存 {formatBeijingDateTime(savedAt)}
         </div>
       )}
     </div>

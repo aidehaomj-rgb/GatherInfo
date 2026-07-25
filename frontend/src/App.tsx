@@ -9,6 +9,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AppLogo } from "./components/AppLogo";
 import { CommandPalette } from "./components/CommandPalette";
 import { ToastProvider, useToast } from "./components/ToastProvider";
+import { getBeijingHour } from "./utils/date";
 
 // Lazy-loaded page components (code-split per view)
 const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
@@ -61,7 +62,7 @@ const views: ViewDef[] = [
 ];
 
 function greeting(): string {
-  const h = new Date().getHours();
+  const h = getBeijingHour();
   if (h < 6) return "夜深了";
   if (h < 12) return "上午好";
   if (h < 18) return "下午好";

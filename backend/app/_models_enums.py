@@ -9,6 +9,7 @@ class SourceChannel(str, enum.Enum):
     COMMERCIAL = "commercial"
     WEB_SCRAPE = "web_scrape"
     API_SEARCH = "api_search"
+    AI_RESEARCH = "ai_research"
     JSON_API = "json_api"
     SOCIAL = "social"
     DEEP_WEB = "deepweb"

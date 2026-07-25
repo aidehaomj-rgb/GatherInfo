@@ -112,7 +112,7 @@ class WebScrapeCollector(BaseCollector):
                             except Exception as exc:
                                 logger.warning("Detail fetch failed for %s: %s", href[:80], exc)
 
-                        if not _matches(title, content, keywords):
+                        if not ac.get("allow_unfiltered_keywords") and not _matches(title, content, keywords):
                             continue
 
                         items.append(FetchItem(

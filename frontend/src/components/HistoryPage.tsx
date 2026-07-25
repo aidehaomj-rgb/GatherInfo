@@ -5,6 +5,7 @@ import type { ActiveRunOut, BatchOut } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
+import { formatBeijingDateTime, formatBeijingTime } from "../utils/date";
 
 type ViewMode = "cards" | "timeline";
 
@@ -25,7 +26,7 @@ function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded
               <StatusBadge status={batch.status as any} />
             </h4>
             <div style={{ fontSize: "0.78rem", color: "var(--ink-muted)", marginTop: 4 }}>
-              {batch.started_at && <>{new Date(batch.started_at).toLocaleString("zh")} · </>}
+              {batch.started_at && <>{formatBeijingDateTime(batch.started_at)} · </>}
               新增 {batch.total_new} 条 · {batch.source_count} 个信息源
             </div>
           </div>
@@ -157,7 +158,7 @@ export function HistoryPage() {
                 <p>
                   {run.source_name && <>来源: {run.source_name} · </>}
                   {run.keywords_used?.length > 0 && <>关键词: {run.keywords_used.slice(0, 3).join(", ")}{run.keywords_used.length > 3 ? "..." : ""} · </>}
-                  {run.started_at && <>开始: {new Date(run.started_at).toLocaleTimeString("zh")}</>}
+                  {run.started_at && <>开始: {formatBeijingTime(run.started_at)}</>}
                   {run.duration_seconds != null && <> · 已耗时: {Math.floor(run.duration_seconds / 60)}分{run.duration_seconds % 60}秒</>}
                 </p>
               </div>
@@ -193,7 +194,7 @@ export function HistoryPage() {
                     <StatusBadge status={batch.status as any} />
                   </h4>
                   <div className="batch-meta">
-                    {batch.started_at && <span>{new Date(batch.started_at).toLocaleString("zh")}</span>}
+                  {batch.started_at && <span>{formatBeijingDateTime(batch.started_at)}</span>}
                   </div>
                 </div>
                 <div className="batch-meta">

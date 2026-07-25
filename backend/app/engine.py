@@ -21,10 +21,30 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+_translation_lock = asyncio.Lock()
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _translate_persisted_items(item_ids: list[str], model_id: str) -> None:
+    """Translate after persistence so collection never waits on a large model job."""
+    from app.database import SessionLocal
+    from app.translation_service import translate_existing_items
+
+    # A local model cannot reliably serve several long translation batches at once.
+    # Serialize post-collection translations so later sources wait instead of failing.
+    async with _translation_lock:
+        db = SessionLocal()
+        try:
+            model = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
+            if model:
+                await translate_existing_items(db, model, limit=len(item_ids), item_ids=item_ids)
+        except Exception as exc:
+            logger.warning("Background item translation failed: %s", exc)
+        finally:
+            db.close()
 
 
 class CollectionEngine:
@@ -78,30 +98,50 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
-        # Add Chinese translations for non-Chinese items before storing.
-        # The original title/content are preserved; translations live in raw_metadata.
-        if result.items:
-            try:
-                from app.translation_service import translate_fetch_items_to_metadata
-                await translate_fetch_items_to_metadata(result.items, model or _web_translation_model())
-            except Exception as exc:
-                logger.warning("Item translation failed (non-blocking): %s", exc)
-        self._persist_items(
+        if topic_id == "weekly-enforcement-intelligence":
+            from app.enforcement_review import review_enforcement_candidates
+            # Keep manual/topic source runs on the same review path. Some
+            # callers do not pass a model explicitly, so resolve the active
+            # default here instead of silently queueing everything pending.
+            if model is None or not model.is_active or not model.api_key:
+                model = self.db.query(ModelConfig).filter(
+                    ModelConfig.is_default == True,
+                    ModelConfig.is_active == True,
+                ).first()
+            result.items = await review_enforcement_candidates(result.items, model)
+            result.items_new = len(result.items)
+            run.items_new = result.items_new
+        persisted_count = self._persist_items(
             result.items, source.id, run.id, topic_id, window_start, window_end, keywords
         )
-        self._update_source(source, len(result.items))
+        result.items_new = persisted_count
+        run.items_new = persisted_count
+        self._update_source(source, persisted_count)
         self.db.commit()
+        if result.items:
+            item_ids = [item.item_id(source.id) for item in result.items]
+            model_id = (model or _web_translation_model()).id
+            asyncio.create_task(_translate_persisted_items(item_ids, model_id))
         return result
 
     # ── Topic-driven collection ─────────────────────────────────────────
 
-    async def collect_topic(self, topic_id: str) -> list[CollectResult]:
+    async def collect_topic(
+        self,
+        topic_id: str,
+        research_prompt: str | None = None,
+        research_model_id: str | None = None,
+        only_source_ids: list[str] | None = None,
+    ) -> list[CollectResult]:
         """Collect from all sources relevant to a topic."""
         topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
         if not topic:
             raise ValueError(f"Topic not found: {topic_id}")
 
         sources = self._resolve_sources(topic)
+        if only_source_ids:
+            allowed = set(only_source_ids)
+            sources = [source for source in sources if source.id in allowed]
         source_ids = [s.id for s in sources]
         keywords = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
 
@@ -109,21 +149,57 @@ class CollectionEngine:
         # window_days <= 0 disables filtering (collect everything).
         window_days = getattr(topic, "collect_window_days", None) or 0
         window_end = utc_now()
-        window_start = window_end - timedelta(days=window_days) if window_days > 0 else None
+        if window_days > 0:
+            # Weekly reports are date-based. Start at UTC midnight for the
+            # boundary date so a valid article published early that day is not
+            # lost merely because the job ran later in the day.
+            window_start = (window_end - timedelta(days=window_days)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        else:
+            window_start = None
 
         # Generate a shared batch_id for all runs in this topic collection
         from uuid import uuid4
         batch_id = f"batch-{uuid4().hex[:12]}"
 
-        # Load default model for item translation
+        # Load default model for item translation and optional AI research planning.
         default_model = self.db.query(ModelConfig).filter(
             ModelConfig.is_default == True, ModelConfig.is_active == True
         ).first()
+        research_model = default_model
+        if research_model_id:
+            research_model = self.db.query(ModelConfig).filter(
+                ModelConfig.id == research_model_id, ModelConfig.is_active == True
+            ).first() or default_model
+
+        ai_research_queries: list[str] = []
+        if research_prompt and any(getattr(s.channel, "value", s.channel) == "ai_research" for s in sources):
+            try:
+                from app.research_planner import build_research_queries
+                ai_research_queries = await build_research_queries(
+                    topic, research_prompt, research_model, max_queries=12
+                )
+                if ai_research_queries:
+                    logger.info(
+                        "AI research prompt generated %d queries for topic %s",
+                        len(ai_research_queries), topic.id,
+                    )
+            except Exception as exc:
+                logger.warning("AI research prompt planning failed for %s: %s", topic.id, exc)
 
         # Parallel collection — topic_id flows through into runs and items
         tasks = [
-            self.collect_from_source(sid, keywords, topic.id, window_start, window_end, batch_id, default_model)
-            for sid in source_ids
+            self.collect_from_source(
+                source.id,
+                ai_research_queries if getattr(source.channel, "value", source.channel) == "ai_research" and ai_research_queries else keywords,
+                topic.id,
+                window_start,
+                window_end,
+                batch_id,
+                default_model,
+            )
+            for source in sources
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -305,6 +381,7 @@ class CollectionEngine:
                        topic_id: str | None = None, window_start: "datetime | None" = None,
                        window_end: "datetime | None" = None,
                        keywords: list[str] | None = None):
+        persisted_count = 0
         for fi in items:
             parsed = parse_fetch_item(fi)
             if not parsed.is_meaningful:
@@ -312,18 +389,33 @@ class CollectionEngine:
 
             pub = _coerce_datetime(fi.published_at)
 
-            # Strictly enforce the configured time window. If a topic has a window
-            # and the item has no usable publication date, we skip it so that old
-            # or undated content does not pollute the collection.
+            # Strictly enforce the configured time window. Search connectors may
+            # explicitly retain undated results for later source verification.
             if window_start is not None:
                 if pub is None:
                     pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
-                if pub is None or _is_out_of_range(pub, window_start, window_end):
+                allow_undated = bool(
+                    isinstance(fi.raw_metadata, dict)
+                    and fi.raw_metadata.get("allow_undated_results")
+                )
+                if (pub is None and not allow_undated) or (
+                    pub is not None and _is_out_of_range(pub, window_start, window_end)
+                ):
                     continue
 
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
-            if keywords:
+            allow_unfiltered = bool(
+                isinstance(fi.raw_metadata, dict)
+                and fi.raw_metadata.get("allow_unfiltered_results")
+            )
+            # Enforcement candidates have already passed the dedicated
+            # semantic review. Requiring two literal topic keywords here can
+            # discard valid cases such as "检获受管制活龟" whose evidence is
+            # expressed with different wording.
+            if topic_id == "weekly-enforcement-intelligence":
+                allow_unfiltered = True
+            if keywords and not allow_unfiltered:
                 metadata_text = ""
                 if isinstance(fi.raw_metadata, dict):
                     metadata_text = " ".join(str(v) for v in fi.raw_metadata.values() if v)
@@ -364,10 +456,12 @@ class CollectionEngine:
                         raw_metadata=parsed.metadata,
                         status=ItemStatus.RAW,
                     ))
+                    persisted_count += 1
                 self.db.flush()
             except Exception:
                 self.db.rollback()
         self.db.commit()
+        return persisted_count
 
     def _update_source(self, source: SourceConfig, items_found: int):
         source.last_sync_at = utc_now()

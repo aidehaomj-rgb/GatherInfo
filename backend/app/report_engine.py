@@ -75,9 +75,11 @@ async def generate_report(
         if not items:
             raise ValueError(f"No collected items found for topic '{topic.name}'")
 
-        collected_times = [it.collected_at for it in items if it.collected_at]
-        range_start = dt_from or (min(collected_times) if collected_times else None)
-        range_end = dt_to or (max(collected_times) if collected_times else None)
+        # Weekly intelligence reports describe publication dates, not the
+        # moment the local crawler happened to persist the records.
+        published_times = [it.published_at for it in items if it.published_at]
+        range_start = dt_from or (min(published_times) if published_times else None)
+        range_end = dt_to or (max(published_times) if published_times else None)
 
         item_context = _build_item_context(items)
 
@@ -173,7 +175,7 @@ def _export_report_files(db: Session, report: Report, topic: Topic | None) -> No
 def _build_item_context(items: list[CollectedItem]) -> list[dict]:
     """Build structured item context dict from ORM objects for prompt building."""
     context = []
-    for idx, it in enumerate(items[:12], 1):
+    for idx, it in enumerate(items[:50], 1):
         context.append({
             "id": it.id,
             "index": idx,
@@ -184,6 +186,7 @@ def _build_item_context(items: list[CollectedItem]) -> list[dict]:
             "language": it.language or "unknown",
             "category": it.category or "unknown",
             "source": it.source_id or "",
+            "published_at": it.published_at.isoformat() if it.published_at else "",
             "tags": [{"namespace": t.namespace, "value": t.value}
                      for t in it.tags] if it.tags else [],
             "published_at": it.published_at.isoformat() if it.published_at else "",
@@ -259,6 +262,7 @@ def _build_report_prompt(
             f"- 标题: {title}",
             f"- 来源: {source}",
             f"- URL: {url}",
+            f"- published_at: {it.get('published_at') or 'unverified'}",
             f"- 分类: {category}",
         ]
         if summary:
@@ -306,6 +310,12 @@ def _build_report_prompt(
 第一部分：报告全文
 第二部分：150字以内的摘要
 """
+    prompt += (
+        "\n\nStrict evidence rules: use each item's published_at as the only publication date. "
+        "Do not use collection timestamps as publication dates. Do not invent numbers, "
+        "authorities, legal outcomes, locations, or trends not present in the supplied items. "
+        "When evidence is missing, write '待核验' instead of guessing."
+    )
     return prompt
 
 

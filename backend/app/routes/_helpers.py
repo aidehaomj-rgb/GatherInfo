@@ -121,6 +121,14 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
         "optional_fields": ["base_url", "api_endpoint"],
         "homepage_hint": "https://tavily.com",
     },
+    "ai_research": {
+        "description": "AI 智能检索（聚合 Tavily 与百度搜索；云端模型配置后可扩展检索词）",
+        "default_base_url": "https://api.tavily.com",
+        "default_api_endpoint": "/search",
+        "required_fields": ["api_key"],
+        "optional_fields": ["base_url", "api_endpoint", "auth_config"],
+        "homepage_hint": "https://tavily.com",
+    },
     "json_api": {
         "description": "通用 JSON API 直连 (NewsAPI / UN Comtrade / World Bank / Inoreader / Feedly 等)",
         "default_base_url": "",

@@ -34,6 +34,7 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
   const [temperature, setTemperature] = useState(String(model?.temperature ?? 0.7));
   const [maxTokens, setMaxTokens] = useState(String(model?.max_tokens ?? 4096));
   const [topP, setTopP] = useState(String(model?.top_p ?? 0.9));
+  const [isActive, setIsActive] = useState(model?.is_active ?? true);
   const [isDefault, setIsDefault] = useState(model?.is_default ?? false);
   const [description, setDescription] = useState(model?.description ?? "");
 
@@ -138,6 +139,10 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
             </div>
           </label>
           <label className="checkbox-label">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            <span>启用模型</span>
+          </label>
+          <label className="checkbox-label">
             <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
             <span>设为默认模型</span>
           </label>
@@ -156,7 +161,7 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
               await onSave({
                 id, name, provider, description: description || null,
                 base_url: baseUrl || null, api_key: apiKey || null,
-                model_name: modelName, is_default: isDefault,
+                model_name: modelName, is_active: isActive, is_default: isDefault,
                 temperature: parseFloat(temperature), max_tokens: parseInt(maxTokens), top_p: parseFloat(topP),
               });
             } catch (e) { alert(e instanceof Error ? e.message : "保存失败"); }

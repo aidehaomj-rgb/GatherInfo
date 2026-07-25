@@ -328,6 +328,8 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 /* ── Chips & badges ─────────────────────────────────────────────────── */
 
 .chip { display: inline-flex; padding: 2px 8px; border-radius: 9999px; background: var(--surface-elevated); font-size: 0.75rem; border: 1px solid var(--line); white-space: nowrap; }
+.chip--button { cursor: pointer; color: var(--accent); border-color: var(--accent); }
+.chip--button:hover { background: var(--accent-soft); }
 .chip--blue { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .chip--green { background: #0d3320; border-color: var(--green); color: var(--green); }
 .chip--pink { background: #37142a; border-color: var(--pink); color: var(--pink); }
@@ -362,6 +364,7 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .card-item-actions { display: flex; align-items: center; gap: 6px; }
 .card-item-meta { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; font-size: 0.85rem; }
 .card-item-meta strong { color: var(--ink-muted); margin-right: 4px; }
+.topic-keyword-list { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
 .card-item-footer { display: flex; gap: 6px; border-top: 1px solid var(--line-light); padding-top: 10px; }
 
 /* Compact source card: tighter padding + single-row wrap meta to reduce height */
@@ -410,6 +413,8 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 /* ── Pagination ─────────────────────────────────────────────────────── */
 
 .pagination { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 16px; }
+.pagination-select select { min-width: 92px; height: 30px; padding: 0 28px 0 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-card); color: var(--ink); font: inherit; font-size: 0.82rem; }
+.pagination-select select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
 
 /* ── Modal ──────────────────────────────────────────────────────────── */
 

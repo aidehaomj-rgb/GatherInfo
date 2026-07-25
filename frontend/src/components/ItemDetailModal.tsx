@@ -3,6 +3,7 @@ import { BookmarkButton } from "./BookmarkButton";
 import type { CollectedItem, Source } from "../types";
 import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 import { cleanContent, extractSummary } from "../utils/contentCleaner";
+import { formatBeijingDateTime } from "../utils/date";
 
 interface ItemDetailModalProps {
   item: CollectedItem;
@@ -42,10 +43,11 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
             <div className="reading-modal-meta" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               {item.source_id && <span className="chip">来源: {sourceName}</span>}
               {item.language && <span className="chip">{item.language}</span>}
+              {item.enforcement_review && <span className="chip chip--green">AI审核</span>}
               {hasTranslation && <span className="chip chip--green">中文译文</span>}
               {item.category && <span className="chip chip--blue">{item.category}</span>}
               {item.published_at && (
-                <span className="text-muted small">发布: {new Date(item.published_at).toLocaleString("zh")}</span>
+                <span className="text-muted small">发布: {formatBeijingDateTime(item.published_at)}</span>
               )}
               {item.tags?.map((t) => (
                 <span key={t.id} className="chip chip--pink" title={`${t.namespace}:${t.value}`}>
@@ -54,6 +56,12 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
               ))}
             </div>
           </div>
+          {item.enforcement_review && (
+            <div className="text-muted small" style={{ marginTop: 6 }}>
+              审核状态: {String(item.enforcement_review.decision || "已审核")}
+              {item.enforcement_review.confidence != null && ` | 置信度: ${String(item.enforcement_review.confidence)}`}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <BookmarkButton itemId={item.id} size={18} />
             <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>

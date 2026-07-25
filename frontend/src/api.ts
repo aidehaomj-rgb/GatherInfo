@@ -99,8 +99,15 @@ export const runScheduleNow = (id: string) =>
 
 // ── Collection ──────────────────────────────────────────────────────────
 
-export const collectTopic = (topicId: string) =>
-  post<CollectResult[]>("/collect", { topic_id: topicId });
+export const collectTopic = (
+  topicId: string,
+  opts: { researchPrompt?: string; researchModelId?: string } = {},
+) =>
+  post<CollectResult[]>("/collect", {
+    topic_id: topicId,
+    ...(opts.researchPrompt ? { research_prompt: opts.researchPrompt } : {}),
+    ...(opts.researchModelId ? { research_model_id: opts.researchModelId } : {}),
+  });
 export const collectSource = (sourceId: string, keywords?: string[]) =>
   post<CollectResult[]>("/collect", { source_id: sourceId, keywords });
 

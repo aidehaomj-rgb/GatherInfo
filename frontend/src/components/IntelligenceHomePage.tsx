@@ -9,6 +9,7 @@ import { ReportViewerModal } from "./ReportViewerModal";
 import { HomeHero } from "./HomeHero";
 import { SystemStatus } from "./SystemStatus";
 import { CollectTopicsDialog, RecentReportsDialog } from "./HomeActionDialogs";
+import { formatBeijingDate, parseDateValue } from "../utils/date";
 
 const HOME_ITEMS_PER_PAGE = 5;
 const HOME_ITEM_LIMIT = 30;
@@ -164,7 +165,7 @@ export function IntelligenceHomePage() {
                   <div className="featured-card-body">
                     <span className="featured-card-date">
                       <CalendarDays size={13} />
-                      {date ? new Date(date).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "未知日期"}
+                      {date ? formatBeijingDate(date, { month: "short", day: "numeric" }) : "未知日期"}
                     </span>
                     <strong className="featured-card-title">{clip(title, 60)}</strong>
                     <p className="featured-card-summary">{clip(summary, 100)}</p>
@@ -199,7 +200,7 @@ export function IntelligenceHomePage() {
               const title = getDisplayTitle(item.title_zh || item.title);
               const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
               const date = item.published_at || item.collected_at;
-              const relativeTime = date ? getRelativeTime(new Date(date)) : "未知";
+              const relativeTime = date ? getRelativeTime(parseDateValue(date)) : "未知";
               return (
                 <article key={item.id} className={`news-entry${index === 0 ? " news-entry--lead" : ""}`}>
                   <div className="news-timeline">
@@ -337,16 +338,14 @@ function scoreItem(item: CollectedItem) {
 function getItemDate(item: CollectedItem) {
   const raw = item.published_at || item.collected_at;
   if (!raw) return null;
-  const date = new Date(raw);
+  const date = parseDateValue(raw);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function isToday(date: Date | null) {
   if (!date) return false;
-  const now = new Date();
-  return date.getFullYear() === now.getFullYear()
-    && date.getMonth() === now.getMonth()
-    && date.getDate() === now.getDate();
+  const parts = { year: "numeric" as const, month: "2-digit" as const, day: "2-digit" as const };
+  return formatBeijingDate(date, parts) === formatBeijingDate(new Date(), parts);
 }
 
 function getRelativeTime(date: Date): string {
@@ -360,7 +359,7 @@ function getRelativeTime(date: Date): string {
   if (minutes < 60) return `${minutes} 分钟前`;
   if (hours < 24) return `${hours} 小时前`;
   if (days < 7) return `${days} 天前`;
-  return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  return formatBeijingDate(date, { month: "short", day: "numeric" });
 }
 
 function extractFinding(text: string) {

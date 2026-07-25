@@ -113,12 +113,13 @@ def _build_evidence_digest(items: list[CollectedItem]) -> tuple[str, list[YmgEvi
             source=it.source_id, published_at=it.published_at.isoformat() if it.published_at else None,
             language=it.language,
         ))
+        url_line = f"\n    链接: {it.url}" if it.url else ""
         lines.append(
             f"[{idx}] {title}"
             f"{f' | 来源: {it.source_id}' if it.source_id else ''}"
             f"{f' | 时间: {it.published_at:%Y-%m-%d}' if it.published_at else ''}"
             f"\n    摘要: {summary[:180]}"
-            f"{f'\n    链接: {it.url}' if it.url else ''}"
+            f"{url_line}"
         )
     return "\n".join(lines), evidence_items
 

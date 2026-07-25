@@ -280,16 +280,20 @@ def _extract_published_date(soup: BeautifulSoup) -> str | None:
     meta_selectors = [
         ("meta", {"property": "article:published_time"}),
         ("meta", {"property": "og:published_time"}),
+        ("meta", {"itemprop": "datePublished"}),
+        ("meta", {"itemprop": "dateCreated"}),
+        ("meta", {"name": "datePublished"}),
         ("meta", {"name": "publishedDate"}),
         ("meta", {"name": "date"}),
         ("meta", {"name": "DC.date.issued"}),
         ("time", {"class": re.compile(r"date|published|time")}),
+        ("time", {"datetime": True}),
     ]
 
     for tag, attrs in meta_selectors:
         el = soup.find(tag, attrs)
         if el:
-            date_str = el.get("content") or el.get_text(strip=True)
+            date_str = el.get("content") or el.get("datetime") or el.get_text(strip=True)
             if date_str:
                 return date_str
 

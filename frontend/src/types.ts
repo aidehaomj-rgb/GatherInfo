@@ -80,6 +80,7 @@ export interface CollectedItem {
   url: string | null;
   language: string | null;
   translation_status: string | null;
+  enforcement_review: Record<string, unknown> | null;
   category: string | null;
   tags: TagRef[];
   entities: Record<string, unknown> | null;

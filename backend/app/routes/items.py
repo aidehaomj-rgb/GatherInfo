@@ -217,14 +217,16 @@ def list_items(
         query = query.filter(CollectedItem.tags.any(Tag.id == tag))
     if q:
         needle = q.lower()
-        candidates = query.order_by(CollectedItem.collected_at.desc()).all()
+        candidates = query.order_by(
+            CollectedItem.published_at.desc(), CollectedItem.collected_at.desc()
+        ).all()
         filtered = [it for it in candidates if _matches_item_query(it, needle)]
         total = len(filtered)
         items = filtered[(page - 1) * page_size: page * page_size]
     else:
         total = query.count()
         items = (
-            query.order_by(CollectedItem.collected_at.desc())
+            query.order_by(CollectedItem.published_at.desc(), CollectedItem.collected_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
@@ -235,6 +237,7 @@ def list_items(
             id=it.id, source_id=it.source_id,
             title=it.title, content=it.content, summary=it.summary, url=it.url,
             **item_translation_fields(it),
+            enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -358,6 +361,7 @@ def search_items(
             id=it.id, source_id=it.source_id, run_id=it.run_id,
             title=it.title, content=it.content, summary=it.summary, url=it.url,
             **item_translation_fields(it),
+            enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -376,6 +380,7 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
         id=it.id, source_id=it.source_id, run_id=it.run_id,
         title=it.title, content=it.content, summary=it.summary, url=it.url,
         **item_translation_fields(it),
+        enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
         language=it.language, category=it.category, tags=_item_tags(it),
         entities=it.entities,
         quality_score=it.quality_score or 0,

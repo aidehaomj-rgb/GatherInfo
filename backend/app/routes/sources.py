@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["sources"])
 
 
-_CHANNELS_NEEDING_KEY = frozenset({"api_search", "json_api", "commercial"})
+_CHANNELS_NEEDING_KEY = frozenset({"api_search", "ai_research", "json_api", "commercial"})
 _CHANNELS_NO_KEY_NEEDED = frozenset({"web_scrape", "official", "rss", "manual", "social", "deepweb"})
 
 
@@ -85,6 +85,11 @@ def update_source(source_id: str, data: SourceUpdate, db: Session = Depends(get_
         raise HTTPException(404)
     update_data = data.model_dump(exclude_unset=True)
     for k, v in update_data.items():
+        # The form sends null when no advanced JSON is supplied. Preserve an
+        # existing connector configuration so a routine API-key edit cannot
+        # silently turn a specialised source into the default connector.
+        if k == "auth_config" and v is None:
+            continue
         setattr(src, k, v)
     if "api_key" in update_data or "channel" in update_data:
         channel_val = src.channel.value if hasattr(src.channel, 'value') else src.channel
@@ -159,10 +164,10 @@ async def validate_source(source_id: str, db: Session = Depends(get_db)):
     # Collect all missing fields
     if channel_str in _CHANNELS_NEEDING_KEY and not src.api_key:
         channel_hints = {
-            "api_search": "搜索 API 渠道（Tavily/Bing/Baidu/360）。"
-                          "可在官网注册获取 Key，或使用环境变量 TAVILY_API_KEY/BING_API_KEY/BAIDU_API_KEY。",
-            "json_api": "通用 JSON API。请填入对应的 API Key 和正确的端点地址。",
-            "commercial": "商业数据 API。请填入购买的 API Key。",
+            "api_search": "Search API requires an API Key.",
+            "ai_research": "AI research requires a Tavily API Key; Baidu is optional in auth_config.",
+            "json_api": "JSON API requires its provider API Key and endpoint.",
+            "commercial": "Commercial API requires a purchased API Key.",
         }
         diagnostics.append(channel_hints.get(channel_str, "请配置 API Key。"))
 

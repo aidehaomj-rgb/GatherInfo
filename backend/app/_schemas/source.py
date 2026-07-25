@@ -7,7 +7,7 @@ class SourceCreate(BaseModel):
     id: str | None = Field(default=None, max_length=80, description="留空则由后端从 name 自动生成")
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
-    channel: str = Field(description="official | rss | commercial | web_scrape | api_search | social | deepweb | manual")
+    channel: str = Field(description="official | rss | commercial | web_scrape | api_search | ai_research | social | deepweb | manual")
     is_active: bool = True
     base_url: str | None = None
     api_endpoint: str | None = None

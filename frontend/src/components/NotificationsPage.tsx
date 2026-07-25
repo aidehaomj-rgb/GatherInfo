@@ -8,6 +8,7 @@ import {
   deleteNotification, testNotification, pruneNotifications,
 } from "../api";
 import type { NotificationConfig } from "../types";
+import { formatBeijingDateTime } from "../utils/date";
 import { Modal } from "./shared/Modal";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
@@ -443,7 +444,7 @@ function NotifGroupSection({
                   {item.trigger_on_failure && <span className="chip chip--red">失败时触发</span>}
                   {item.last_sent_at && (
                     <span className="text-muted" style={{ fontSize: 11 }}>
-                      上次发送: {new Date(item.last_sent_at).toLocaleString("zh")}
+                      上次发送: {formatBeijingDateTime(item.last_sent_at)}
                     </span>
                   )}
                 </div>

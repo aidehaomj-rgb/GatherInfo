@@ -99,9 +99,12 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
         model_name = m.model_name or ""
 
         if m.provider == "ollama":
+            headers = {"Content-Type": "application/json"}
+            if m.api_key:
+                headers["Authorization"] = f"Bearer {m.api_key}"
             try:
                 async with httpx.AsyncClient(timeout=5) as client:
-                    r = await client.get(f"{base}/api/tags")
+                    r = await client.get(f"{base}/api/tags", headers=headers)
                     if r.status_code != 200:
                         return ModelTestResult(
                             success=False,
@@ -130,7 +133,7 @@ async def test_model(model_id: str, db: Session = Depends(get_db)):
                         "model": test_model,
                         "messages": [{"role": "user", "content": "Reply exactly: OK"}],
                         "stream": False,
-                    })
+                    }, headers=headers)
                     if r.status_code == 200:
                         data = r.json()
                         reply = data.get("message", {}).get("content", "")[:100]
@@ -194,7 +197,10 @@ async def list_available_models(model_id: str, db: Session = Depends(get_db)):
         base = (m.base_url or "http://localhost:11434").rstrip("/")
         if m.provider == "ollama":
             async with httpx.AsyncClient(timeout=5) as client:
-                r = await client.get(f"{base}/api/tags")
+                headers = {}
+                if m.api_key:
+                    headers["Authorization"] = f"Bearer {m.api_key}"
+                r = await client.get(f"{base}/api/tags", headers=headers)
                 models = [mod.get("name", "") for mod in r.json().get("models", [])]
                 return ListModelsResult(
                     success=True, message=f"Found {len(models)} models",

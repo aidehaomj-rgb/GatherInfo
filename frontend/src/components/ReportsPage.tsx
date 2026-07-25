@@ -6,6 +6,7 @@ import type { Report, Topic, ModelConfig } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
 import { YmgDeepPanel } from "./YmgDeepPanel";
+import { formatBeijingDateTime } from "../utils/date";
 
 type GenMode = "single" | "multi";
 type SingleSubMode = "merged" | "perBatch";
@@ -249,7 +250,7 @@ export function ReportsPage() {
             </div>
             <div className="card-item-meta">
               <div className="text-muted small">
-                {r.generated_at && <>生成于 {new Date(r.generated_at).toLocaleString("zh")}</>}
+                {r.generated_at && <>生成于 {formatBeijingDateTime(r.generated_at)}</>}
                 {r.item_count > 0 && <> · 基于 {r.item_count} 条采集信息</>}
                 {r.tokens_used > 0 && <> · 约 {r.tokens_used} tokens</>}
               </div>

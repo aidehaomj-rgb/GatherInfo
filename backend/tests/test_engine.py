@@ -207,6 +207,42 @@ class TestWindowFiltering:
 
         assert mock_db.add.call_count >= 1
 
+    def test_undated_search_result_kept_when_source_allows_review(self):
+        """Trusted search results may be retained when their date is unavailable."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        item = FetchItem(
+            title="Undated search result", content="critical minerals update",
+            url="https://example.com/article",
+            raw_metadata={"engine": "tavily", "allow_undated_results": True},
+        )
+        engine._persist_items(
+            [item], "tavily-search", "run-1", topic_id="t1",
+            window_start=utc_now() - timedelta(days=7),
+        )
+
+        assert mock_db.add.call_count >= 1
+
+    def test_search_result_kept_when_source_allows_topic_review(self):
+        """A search result selected by the topic query may bypass generic matching."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        item = FetchItem(
+            title="Result selected by search query", content="source excerpt",
+            url="https://example.com/article",
+            raw_metadata={"engine": "tavily", "allow_unfiltered_results": True},
+        )
+        engine._persist_items(
+            [item], "tavily-search", "run-1", topic_id="t1",
+            keywords=["critical minerals", "export control", "rare earth"],
+        )
+
+        assert mock_db.add.call_count >= 1
+
     def test_items_before_window_are_skipped_even_when_relevant(self):
         """Relevant items outside the requested window should be skipped."""
         mock_db = MagicMock()

@@ -103,13 +103,15 @@ class CollectionScheduler:
 
             topic = db.query(Topic).filter(Topic.id == topic_id).first()
             if topic and topic.auto_report:
-                run_id = topic.last_collection_run_id
+                run_ids = [result.run_id for result in results if getattr(result, "run_id", None)]
                 try:
                     from app.report_engine import generate_report
+                    report_date = datetime.now().strftime("%Y-%m-%d")
                     report = await generate_report(
                         topic_id=topic_id,
                         model_id=topic.auto_report_model_id,
-                        collection_run_id=run_id,
+                        title_override=f"{topic.name}（{report_date}）",
+                        collection_run_ids=run_ids,
                     )
                     logger.info("Auto-report for topic %s: %s (%s)",
                                 topic_id, report.id, report.status)

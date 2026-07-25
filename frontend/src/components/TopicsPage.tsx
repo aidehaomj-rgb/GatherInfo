@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Square } from "lucide-react";
+import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Square, Clock } from "lucide-react";
 import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories, fetchActiveRuns, stopRun } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import type { Topic, CollectResult, ModelConfig, Source, ActiveRunOut } from "../types";
 import { TopicForm } from "./TopicForm";
+import { formatBeijingDateTime } from "../utils/date";
 
 const TOPIC_COLLECT_PENDING_KEY = "gatherinfo.topicCollect.pending";
+const WEEKLY_ENFORCEMENT_RESEARCH_PROMPT =
+  "请检索近一周境外海关、边境执法、港口监管、警察、检察或司法机关，以及可靠区域媒体公开发布的进出口执法案例，形成类似360执法信息周报的线索来源。纳入三类信息：一是香港、台湾、澳门海关或执法机关查获的具体案件，不要求另行证明中国大陆关联；二是其他国家和地区发布的涉中国大陆案件，重点核验中国产、中国籍、中国企业、中国目的地、经中国转运等关联；三是各国境外执法机关查获的重大跨境案件，包括枪支、弹药、爆炸物、武器、暴力犯罪、毒品、野生动物、濒危物种、烟草、假冒侵权和其他违禁品，这类案件可以不涉中国。重点关注走私、查获、扣押、没收、逮捕、调查、起诉、处罚等具体执法行为。使用英语、西班牙语、葡萄牙语，并适当补充法语、阿拉伯语、印尼语、泰语、日语、韩语等检索式。候选信息由大模型自动审核，必须核验原文日期、具体执法行为、来源可信度和纳入依据；不确定或无法核验的信息不得正式入库。排除中国大陆执法案件、普通政策解读、无执法动作或纯转载内容。";
 
 function readPendingTopicIds() {
   try {
@@ -55,6 +58,7 @@ export function TopicsPage() {
   const [sources, setSources] = useState<Source[]>([]);
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
+  const [expandedKeywordTopics, setExpandedKeywordTopics] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,7 +124,7 @@ export function TopicsPage() {
     setConfirmDelete(null);
   };
 
-  const handleCollect = async (id: string) => {
+  const handleCollect = async (id: string, researchPrompt?: string) => {
     setCollecting(id);
     setPendingCollectIds((prev) => {
       const next = Array.from(new Set([...prev, id]));
@@ -129,8 +133,10 @@ export function TopicsPage() {
     });
     setCollectMsg(null);
     try {
-      setCollectMsg("采集任务已启动，页面会自动刷新运行状态。");
-      const results: CollectResult[] = await collectTopic(id);
+      setCollectMsg(researchPrompt
+        ? "AI 正在生成检索式并启动采集，页面会自动刷新运行状态。"
+        : "采集任务已启动，页面会自动刷新运行状态。");
+      const results: CollectResult[] = await collectTopic(id, { researchPrompt });
       const total = results.reduce((s, r) => s + r.items_new, 0);
       const fails = results.filter((r) => r.errors?.length).length;
       setCollectMsg(`采集完成: ${total} 条新增${fails > 0 ? `, ${fails} 源失败` : ""}`);
@@ -150,6 +156,19 @@ export function TopicsPage() {
       });
     }
     setCollecting(null);
+  };
+
+  const handlePromptCollect = async (topic: Topic) => {
+    const defaultPrompt = topic.id === "weekly-enforcement-intelligence"
+      ? ((topic as any).description_prompt || WEEKLY_ENFORCEMENT_RESEARCH_PROMPT)
+      : ((topic as any).description_prompt || "围绕本主题检索最近一周高价值公开信息，优先官方公告、监管动态、可靠新闻和行业报告。");
+    const prompt = window.prompt(
+      `请输入“${topic.name}”本次智能检索提示词`,
+      defaultPrompt,
+    );
+    const value = (prompt || "").trim();
+    if (!value) return;
+    await handleCollect(topic.id, value);
   };
 
   const handleGenerateReport = async (topicId: string, topicName: string) => {
@@ -190,6 +209,26 @@ export function TopicsPage() {
 
   const activeTopicIds = new Set(activeRuns.map((run) => run.topic_id).filter(Boolean) as string[]);
   const runningTopicIds = new Set([...pendingCollectIds, ...activeTopicIds]);
+  const toggleKeywordTopic = (topicId: string) => {
+    setExpandedKeywordTopics((prev) => (
+      prev.includes(topicId) ? prev.filter((id) => id !== topicId) : [...prev, topicId]
+    ));
+  };
+
+  const handleToggleSchedule = async (topic: Topic) => {
+    const enabling = !topic.is_scheduled;
+    const cron = topic.schedule_cron || "0 8 * * *";
+    try {
+      await updateTopic(topic.id, {
+        is_scheduled: enabling,
+        schedule_cron: enabling ? cron : null,
+      });
+      setCollectMsg(enabling ? `已开启“${topic.name}”定期采集（${humanizeCron(cron)}）。` : `已关闭“${topic.name}”定期采集。`);
+      await load();
+    } catch (e) {
+      setCollectMsg(`定期采集设置失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    }
+  };
 
   if (loading) return <div className="loading">加载主题...</div>;
   if (error) return <div className="error-banner">{error}</div>;
@@ -240,7 +279,12 @@ export function TopicsPage() {
       )}
 
       <div className="card-list">
-        {topics.map((t) => (
+        {topics.map((t) => {
+          const keywords = t.keywords ?? [];
+          const keywordExpanded = expandedKeywordTopics.includes(t.id);
+          const visibleKeywords = keywordExpanded ? keywords : keywords.slice(0, 12);
+          const hiddenKeywordCount = Math.max(0, keywords.length - visibleKeywords.length);
+          return (
           <article key={t.id} className="card-item">
             <div className="card-item-header">
               <div>
@@ -255,15 +299,36 @@ export function TopicsPage() {
                 {t.is_scheduled && (
                   <span className="badge badge--blue">定时: {t.schedule_cron}</span>
                 )}
+                <button
+                  type="button"
+                  className={`btn btn-sm ${t.is_scheduled ? "btn-secondary" : "btn-ghost"}`}
+                  onClick={() => void handleToggleSchedule(t)}
+                  title={t.is_scheduled ? "关闭该主题的定期采集" : "开启该主题的定期采集"}
+                >
+                  <Clock size={12} />
+                  {t.is_scheduled ? "关闭定期采集" : "开启定期采集"}
+                </button>
               </div>
             </div>
 
             <div className="card-item-meta">
               <div>
                 <strong>关键词:</strong>{" "}
-                {(t.keywords ?? []).map((kw) => (
-                  <span key={kw} className="chip">{kw}</span>
-                ))}
+                <span className="topic-keyword-list">
+                  {visibleKeywords.map((kw) => (
+                    <span key={kw} className="chip">{kw}</span>
+                  ))}
+                  {hiddenKeywordCount > 0 && (
+                    <button type="button" className="chip chip--button" onClick={() => toggleKeywordTopic(t.id)}>
+                      还有 {hiddenKeywordCount} 个
+                    </button>
+                  )}
+                  {keywordExpanded && keywords.length > 12 && (
+                    <button type="button" className="chip chip--button" onClick={() => toggleKeywordTopic(t.id)}>
+                      收起
+                    </button>
+                  )}
+                </span>
               </div>
               <div>
                 <strong>信息源:</strong>{" "}
@@ -306,7 +371,7 @@ export function TopicsPage() {
               </div>
               <div className="text-muted small">
                 累计采集: {t.total_items_collected} 条
-                {t.last_run_at && <> · 最后运行: {new Date(t.last_run_at).toLocaleString("zh")}</>}
+                {t.last_run_at && <> · 最后运行: {formatBeijingDateTime(t.last_run_at)}</>}
               </div>
             </div>
 
@@ -314,6 +379,16 @@ export function TopicsPage() {
               <button type="button" className="btn btn-sm btn-primary" onClick={() => handleCollect(t.id)} disabled={runningTopicIds.has(t.id)}>
                 <RefreshCw size={12} className={runningTopicIds.has(t.id) ? "spin" : ""} />
                 {runningTopicIds.has(t.id) ? "采集中..." : "立即采集"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => void handlePromptCollect(t)}
+                disabled={runningTopicIds.has(t.id) || !models.some((m) => m.is_active && m.is_default)}
+                title={!models.some((m) => m.is_active && m.is_default) ? "请先启用一个默认AI模型" : "输入提示词，由AI生成检索式后采集"}
+              >
+                <BrainCircuit size={12} />
+                AI提示采集
               </button>
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleGenerateReport(t.id, t.name)}
                 disabled={generating === t.id} title={models.length === 0 ? "请先在模型配置页面添加AI模型" : "生成智能分析报告"}>
@@ -328,7 +403,7 @@ export function TopicsPage() {
               </button>
             </div>
           </article>
-        ))}
+        );})}
         {topics.length === 0 && (
           <div className="empty">暂无主题。点击"新建主题"创建第一个采集主题。</div>
         )}
