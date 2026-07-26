@@ -362,6 +362,15 @@ export interface BatchOut {
   runs: BatchRunOut[];
 }
 
+export interface CollectionProgressEvent {
+  stage: string;
+  status: "running" | "completed" | "failed" | "skipped" | string;
+  message: string;
+  item_title: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ActiveRunOut {
   id: string;
   source_id: string;
@@ -375,6 +384,11 @@ export interface ActiveRunOut {
   started_at: string | null;
   duration_seconds: number | null;
   batch_id: string | null;
+  progress_events: CollectionProgressEvent[];
+  batch_total_sources: number;
+  batch_completed_sources: number;
+  batch_failed_sources: number;
+  batch_active_sources: number;
 }
 
 // ── Notifications ───────────────────────────────────────────────────────

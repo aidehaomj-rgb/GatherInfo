@@ -157,9 +157,12 @@ class TestExportHelpers:
         import json
         # Seed an item, tag it, then export
         db = SessionLocal()
+        iid = None
+        tag_id = None
         try:
             from app.services.tag_service import ensure_tag
             tag = ensure_tag(db, "key-export", "export-tag-test")
+            tag_id = tag.id
             db.commit()
 
             iid = f"it-exp-{uuid4().hex[:8]}"
@@ -184,4 +187,16 @@ class TestExportHelpers:
                     assert len(export_item["tags"]) >= 1
                     assert export_item["tags"][0]["value"] == "export-tag-test"
         finally:
+            from app.models import Tag, item_tags
+
+            if iid:
+                db.execute(item_tags.delete().where(item_tags.c.item_id == iid))
+                db.query(CollectedItem).filter(CollectedItem.id == iid).delete()
+            if tag_id:
+                remaining = db.execute(
+                    item_tags.select().where(item_tags.c.tag_id == tag_id).limit(1)
+                ).first()
+                if remaining is None:
+                    db.query(Tag).filter(Tag.id == tag_id).delete()
+            db.commit()
             db.close()

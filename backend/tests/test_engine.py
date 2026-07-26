@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.engine import CollectionEngine, utc_now, _hash
 from app.connectors.base import FetchItem, CollectResult
-from app.models import CollectedItem, ItemStatus, JobStatus
+from app.models import CollectedItem, CollectionRun, ItemStatus, JobStatus
 
 
 def test_hash_deterministic():
@@ -29,6 +29,30 @@ def test_hash_empty_string():
     result = _hash("")
     assert isinstance(result, str)
     assert len(result) == 64
+
+
+def test_record_progress_appends_an_immutable_timestamped_event():
+    mock_db = MagicMock()
+    engine = CollectionEngine(mock_db)
+    original_events = [{"stage": "queued", "message": "任务已创建"}]
+    run = MagicMock(spec=CollectionRun)
+    run.progress_events = original_events
+
+    engine._record_progress(
+        run,
+        stage="discover",
+        message="发现信息：《测试文章》",
+        item_title="测试文章",
+        detail={"url": "https://example.com/article"},
+    )
+
+    assert run.progress_events is not original_events
+    assert original_events == [{"stage": "queued", "message": "任务已创建"}]
+    assert run.progress_events[-1]["stage"] == "discover"
+    assert run.progress_events[-1]["item_title"] == "测试文章"
+    assert run.progress_events[-1]["detail"]["url"] == "https://example.com/article"
+    assert run.progress_events[-1]["created_at"]
+    mock_db.commit.assert_called_once()
 
 
 class TestFetchItemId:

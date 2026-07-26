@@ -3,13 +3,15 @@ GatherInfo backend tests — collection engine, API, tag system.
 """
 from pathlib import Path
 import sys
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import create_app  # noqa: E402
-from app.database import init_db  # noqa: E402
+from app.database import SessionLocal, init_db  # noqa: E402
+from app.models import CollectionRun, JobStatus  # noqa: E402
 
 app = create_app()
 client = TestClient(app)
@@ -240,6 +242,59 @@ def test_list_runs() -> None:
     resp = client.get("/api/v1/runs")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_active_runs_include_rich_progress_events() -> None:
+    client.delete("/api/v1/sources/progress-test-source")
+    source = client.post("/api/v1/sources", json={
+        "id": "progress-test-source",
+        "name": "实时进度测试源",
+        "channel": "web_scrape",
+        "base_url": "https://example.com",
+    })
+    assert source.status_code == 201
+
+    db = SessionLocal()
+    try:
+        db.add(CollectionRun(
+            id="progress-test-run",
+            source_id="progress-test-source",
+            status=JobStatus.RUNNING,
+            batch_id="progress-test-batch",
+            started_at=datetime.now(timezone.utc),
+            progress_events=[{
+                "stage": "discovered",
+                "status": "running",
+                "message": "发现候选信息：《测试文章》",
+                "item_title": "测试文章",
+                "detail": {"url": "https://example.com/article"},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }],
+        ))
+        db.add(CollectionRun(
+            id="progress-test-completed-run",
+            source_id="progress-test-source",
+            status=JobStatus.COMPLETED,
+            batch_id="progress-test-batch",
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+
+        response = client.get("/api/v1/runs/active")
+        assert response.status_code == 200
+        active = next(run for run in response.json() if run["id"] == "progress-test-run")
+        assert active["source_name"] == "实时进度测试源"
+        assert active["progress_events"][0]["stage"] == "discovered"
+        assert active["progress_events"][0]["item_title"] == "测试文章"
+        assert active["batch_total_sources"] == 2
+        assert active["batch_completed_sources"] == 1
+        assert active["batch_active_sources"] == 1
+    finally:
+        db.query(CollectionRun).filter(CollectionRun.batch_id == "progress-test-batch").delete()
+        db.commit()
+        db.close()
+        client.delete("/api/v1/sources/progress-test-source")
 
 
 # ── Report scope + batch ────────────────────────────────────────────

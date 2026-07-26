@@ -124,3 +124,8 @@ class ActiveRunOut(BaseModel):
     started_at: IsoDT = None
     duration_seconds: int | None = None
     batch_id: str | None = None
+    progress_events: list[dict] = Field(default_factory=list)
+    batch_total_sources: int = 1
+    batch_completed_sources: int = 0
+    batch_failed_sources: int = 0
+    batch_active_sources: int = 1

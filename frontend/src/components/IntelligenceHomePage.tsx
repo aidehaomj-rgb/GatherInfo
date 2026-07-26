@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { ArrowRight, BookOpenText, CalendarDays, FileText, Globe2, Newspaper } from "lucide-react";
-import { collectTopic, fetchDashboard, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
+import { collectTopic, fetchDashboard, fetchFeaturedItems, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
 import { useToast } from "./ToastProvider";
 import type { CollectedItem, DashboardData, Report, Source, Topic } from "../types";
 import { getDisplayTitle } from "../utils/title";
 import { ItemDetailModal } from "./ItemDetailModal";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { HomeHero } from "./HomeHero";
-import { SystemStatus } from "./SystemStatus";
 import { CollectTopicsDialog, RecentReportsDialog } from "./HomeActionDialogs";
 import { formatBeijingDate, parseDateValue } from "../utils/date";
 
@@ -38,7 +37,7 @@ export function IntelligenceHomePage() {
     let active = true;
     setLoading(true);
     Promise.all([
-      fetchItems({ page: 1, page_size: 40 }),
+      fetchFeaturedItems(),
       fetchReports(undefined, 7),
       fetchSources(),
       fetchTopics(),
@@ -46,7 +45,7 @@ export function IntelligenceHomePage() {
     ])
       .then(([featuredList, reportList, sourceList, topicList, dash]) => {
         if (!active) return;
-        setFeaturedPool(featuredList.items);
+        setFeaturedPool(featuredList);
         setReports(reportList.reports);
         setSources(sourceList);
         setTopics(topicList);
@@ -81,11 +80,34 @@ export function IntelligenceHomePage() {
     return () => { active = false; };
   }, [itemPage]);
 
+  useEffect(() => {
+    let active = true;
+    const refreshAfterBackgroundCollection = async () => {
+      const [itemList, featuredList, dash] = await Promise.all([
+        fetchItems({ page: 1, page_size: HOME_ITEMS_PER_PAGE }),
+        fetchFeaturedItems(),
+        fetchDashboard(),
+      ]);
+      if (!active) return;
+      setItemPage(1);
+      setItems(itemList.items);
+      setItemTotal(Math.min(itemList.total, HOME_ITEM_LIMIT));
+      setFeaturedPool(featuredList);
+      setDashboard(dash);
+    };
+    const handleUpdated = () => { void refreshAfterBackgroundCollection(); };
+    window.addEventListener("collection-data-updated", handleUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("collection-data-updated", handleUpdated);
+    };
+  }, []);
+
   const sourceMap = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
   const topicMap = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics]);
   const itemTotalPages = Math.max(1, Math.ceil(itemTotal / HOME_ITEMS_PER_PAGE));
   const safeItemPage = Math.min(itemPage, itemTotalPages);
-  const featuredItems = useMemo(() => selectFeaturedItems(featuredPool), [featuredPool]);
+  const featuredItems = useMemo(() => featuredPool.slice(0, 3), [featuredPool]);
   const featuredCards = useMemo(() => assignFeatureImages(featuredItems), [featuredItems]);
   const featuredGroups = useMemo(() => chunkItems(featuredCards, 3), [featuredCards]);
   const featuredSlideCount = Math.max(1, Math.ceil(featuredCards.length / 3));
@@ -115,13 +137,16 @@ export function IntelligenceHomePage() {
         const results = await collectTopic(topicId);
         totalNew += results.reduce((sum, r) => sum + r.items_new, 0);
       }
-      const [itemList, reportList, topicList, dash] = await Promise.all([
+      const [itemList, featuredList, reportList, topicList, dash] = await Promise.all([
         fetchItems({ page: 1, page_size: HOME_ITEMS_PER_PAGE }),
+        fetchFeaturedItems(),
         fetchReports(),
         fetchTopics(),
         fetchDashboard(),
       ]);
       setItems(itemList.items);
+      setFeaturedPool(featuredList);
+      setItemPage(1);
       setItemTotal(Math.min(itemList.total, HOME_ITEM_LIMIT));
       setReports(reportList.reports);
       setTopics(topicList);
@@ -199,8 +224,8 @@ export function IntelligenceHomePage() {
               const source = sourceMap.get(item.source_id);
               const title = getDisplayTitle(item.title_zh || item.title);
               const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
-              const date = item.published_at || item.collected_at;
-              const relativeTime = date ? getRelativeTime(parseDateValue(date)) : "未知";
+              const collectedDate = item.collected_at;
+              const relativeTime = collectedDate ? getRelativeTime(parseDateValue(collectedDate)) : "未知";
               return (
                 <article key={item.id} className={`news-entry${index === 0 ? " news-entry--lead" : ""}`}>
                   <div className="news-timeline">
@@ -213,7 +238,7 @@ export function IntelligenceHomePage() {
                       <span>{source?.name || item.source_id}</span>
                       {item.category && <span className="news-badge">{item.category}</span>}
                       {item.language && <span className="news-badge news-badge--lang">{item.language}</span>}
-                      <span className="news-relative-time">{relativeTime}</span>
+                      <span className="news-relative-time">入库 {relativeTime}</span>
                     </div>
                     <button type="button" className="news-title-button" onClick={() => setReadingItem(item)}>
                       {title}
@@ -243,8 +268,6 @@ export function IntelligenceHomePage() {
         </main>
 
         <aside className="home-side">
-          <SystemStatus sources={sources} />
-
           <section className="home-panel">
             <h3><FileText size={17} /> 分析报告摘要</h3>
             <div className="report-summary-list">
@@ -301,51 +324,12 @@ function clip(text: string, max: number) {
   return compact.length > max ? `${compact.slice(0, max)}...` : compact;
 }
 
-function selectFeaturedItems(items: CollectedItem[]) {
-  const todayItems = items.filter((item) => isToday(getItemDate(item)));
-  const pool = todayItems.length >= 9 ? todayItems : items;
-  return [...pool]
-    .sort((a, b) => scoreItem(b) - scoreItem(a))
-    .slice(0, 9);
-}
-
 function chunkItems<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
-}
-
-function scoreItem(item: CollectedItem) {
-  const text = `${item.title_zh || item.title} ${item.summary_zh || item.summary || ""} ${item.content_zh || item.content || ""}`;
-  const valueKeywords = [
-    "关税", "海关", "公告", "政策", "制裁", "反倾销", "出口管制", "进口", "贸易救济",
-    "tariff", "customs", "sanction", "dumping", "export control", "section 301", "section 232",
-    "TBT", "SPS", "technical regulation", "notification",
-  ];
-  const keywordScore = valueKeywords.reduce((sum, keyword) => {
-    return sum + (text.toLowerCase().includes(keyword.toLowerCase()) ? 8 : 0);
-  }, 0);
-  const summaryScore = (item.summary_zh || item.summary) ? 10 : 0;
-  const qualityScore = (item.quality_score || 0) * 30;
-  const relevanceScore = (item.relevance_score || 0) * 40;
-  const date = getItemDate(item);
-  const recencyScore = date ? Math.max(0, 20 - (Date.now() - date.getTime()) / 86400000) : 0;
-  return keywordScore + summaryScore + qualityScore + relevanceScore + recencyScore;
-}
-
-function getItemDate(item: CollectedItem) {
-  const raw = item.published_at || item.collected_at;
-  if (!raw) return null;
-  const date = parseDateValue(raw);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function isToday(date: Date | null) {
-  if (!date) return false;
-  const parts = { year: "numeric" as const, month: "2-digit" as const, day: "2-digit" as const };
-  return formatBeijingDate(date, parts) === formatBeijingDate(new Date(), parts);
 }
 
 function getRelativeTime(date: Date): string {

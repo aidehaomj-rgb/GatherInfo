@@ -24,13 +24,15 @@ from app.models import (
 logger = logging.getLogger(__name__)
 _translation_lock = asyncio.Lock()
 SEMANTIC_SEARCH_CHANNELS = frozenset({"ai_research", "api_search"})
+MAX_PROGRESS_EVENTS = 120
+MAX_ITEM_PROGRESS_EVENTS = 40
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _translate_persisted_items(item_ids: list[str], model_id: str | None) -> None:
+async def _translate_persisted_items(item_ids: list[str], model_id: str | None) -> dict:
     """Translate persisted items before collection results are exposed to the UI."""
     from app.database import SessionLocal
     from app.translation_service import translate_existing_items
@@ -45,9 +47,16 @@ async def _translate_persisted_items(item_ids: list[str], model_id: str | None) 
                 if model_id else _web_translation_model()
             )
             if model:
-                await translate_existing_items(db, model, limit=len(item_ids), item_ids=item_ids)
+                return await translate_existing_items(
+                    db, model, limit=len(item_ids), item_ids=item_ids,
+                )
+            return {"requested": len(item_ids), "translated": 0, "items": []}
         except Exception as exc:
             logger.warning("Background item translation failed: %s", exc)
+            return {
+                "requested": len(item_ids), "translated": 0,
+                "items": [], "errors": [str(exc)],
+            }
         finally:
             db.close()
 
@@ -55,6 +64,30 @@ async def _translate_persisted_items(item_ids: list[str], model_id: str | None) 
 class CollectionEngine:
     def __init__(self, db: Session):
         self.db = db
+
+    def _record_progress(
+        self,
+        run: CollectionRun,
+        stage: str,
+        message: str,
+        *,
+        status: str = "running",
+        item_title: str | None = None,
+        detail: dict | None = None,
+        commit: bool = True,
+    ) -> None:
+        event = {
+            "stage": stage,
+            "status": status,
+            "message": message,
+            "item_title": item_title,
+            "detail": dict(detail or {}),
+            "created_at": utc_now().isoformat(),
+        }
+        previous = [dict(entry) for entry in (run.progress_events or []) if isinstance(entry, dict)]
+        run.progress_events = [*previous, event][-MAX_PROGRESS_EVENTS:]
+        if commit:
+            self.db.commit()
 
     # ── Single source collection ────────────────────────────────────────
 
@@ -93,18 +126,55 @@ class CollectionEngine:
         run.started_at = utc_now()
         self.db.add(run)
         self.db.commit()
+        self._record_progress(
+            run, "queued", f"已创建采集任务，准备连接信息源“{source.name}”",
+            detail={"source_id": source.id, "source_name": source.name},
+        )
 
         try:
+            self._record_progress(
+                run, "connecting", f"正在连接信息源“{source.name}”",
+                detail={"source_id": source.id, "source_name": source.name},
+            )
             connector = ConnectorRegistry.create(source)
             connector.set_collection_window(window_start, window_end)
         except ValueError as exc:
             run.status = JobStatus.FAILED
             run.error_log = [str(exc)]
-            self.db.commit()
+            self._record_progress(
+                run, "failed", f"信息源连接失败：{exc}", status="failed",
+            )
             return CollectResult(run_id=run.id, source_id=source.id,
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
+        self._record_progress(
+            run, "searching", f"正在“{source.name}”检索与主题相关的信息",
+            detail={"query_count": len(keywords)},
+        )
         result = await connector.execute(run, keywords)
+        if result.status == JobStatus.FAILED:
+            self._record_progress(
+                run, "failed", f"信息源采集失败：{'；'.join(result.error_log or ['未知错误'])}",
+                status="failed",
+            )
+            return result
+
+        run.status = JobStatus.RUNNING
+        run.completed_at = None
+        run.items_found = len(result.items)
+        self._record_progress(
+            run, "fetched", f"信息源返回 {len(result.items)} 条候选信息，正在逐条核验",
+            detail={"items_found": len(result.items)},
+        )
+        for item in result.items[:MAX_ITEM_PROGRESS_EVENTS]:
+            self._record_progress(
+                run, "discovered", f"发现候选信息：《{item.title or '未命名信息'}》",
+                item_title=item.title or None,
+                detail={"url": item.url or "", "published_at": str(item.published_at or "")},
+                commit=False,
+            )
+        self.db.commit()
+
         window_items, window_rejected = _filter_items_by_window(
             result.items, window_start, window_end
         )
@@ -115,6 +185,11 @@ class CollectionEngine:
                 *(result.error_log or []),
                 f"采集窗口过滤 {window_rejected} 条：发布日期缺失或超出范围",
             ]
+        self._record_progress(
+            run, "window_review",
+            f"时间窗口核验完成：保留 {len(window_items)} 条，排除 {window_rejected} 条",
+            detail={"kept": len(window_items), "rejected": window_rejected},
+        )
         if model is None:
             model = self.db.query(ModelConfig).filter(
                 ModelConfig.is_default == True,
@@ -129,6 +204,9 @@ class CollectionEngine:
             self.db.query(Topic).filter(Topic.id == topic_id).first()
             if topic_id else None
         )
+        self._record_progress(
+            run, "quality_review", f"正在对 {len(result.items)} 条信息进行价值、独立性和完整性审核",
+        )
         approved_items, rejected_items = await curate_article_candidates(
             result.items,
             model,
@@ -139,6 +217,20 @@ class CollectionEngine:
         if rejected_items:
             reasons = list(dict.fromkeys(rejection.reason for rejection in rejected_items))
             result.error_log = [*(result.error_log or []), f"质量审核拒绝 {len(rejected_items)} 条：{'；'.join(reasons[:3])}"]
+        for rejection in rejected_items[:MAX_ITEM_PROGRESS_EVENTS]:
+            self._record_progress(
+                run, "rejected", f"未纳入：《{rejection.item.title or '未命名信息'}》；{rejection.reason}",
+                status="skipped", item_title=rejection.item.title or None,
+                detail={"reason": rejection.reason, "url": rejection.item.url or ""},
+                commit=False,
+            )
+        for item in approved_items[:MAX_ITEM_PROGRESS_EVENTS]:
+            self._record_progress(
+                run, "approved", f"审核通过：《{item.title or '未命名信息'}》",
+                item_title=item.title or None,
+                detail={"url": item.url or ""}, commit=False,
+            )
+        self.db.commit()
 
         if topic_id == "weekly-enforcement-intelligence":
             from app.enforcement_review import review_enforcement_candidates
@@ -158,11 +250,41 @@ class CollectionEngine:
         )
         result.items_new = persisted_count
         run.items_new = persisted_count
+        duplicate_count = max(0, len(result.items) - persisted_count)
+        self._record_progress(
+            run, "persisted",
+            f"已入库 {persisted_count} 条新信息，识别并跳过 {duplicate_count} 条重复或已存在信息",
+            detail={"items_new": persisted_count, "duplicates_or_existing": duplicate_count},
+        )
         self._update_source(source, persisted_count)
         self.db.commit()
         if result.items:
             item_ids = [item.item_id(source.id) for item in result.items]
-            await _translate_persisted_items(item_ids, model.id if model else None)
+            self._record_progress(
+                run, "translating", f"正在翻译并整理 {len(item_ids)} 条信息的中文标题、摘要和正文",
+            )
+            translation = await _translate_persisted_items(item_ids, model.id if model else None)
+            translated_ids = set(translation.get("items", []))
+            for item in result.items[:MAX_ITEM_PROGRESS_EVENTS]:
+                item_id = item.item_id(source.id)
+                action = "中文转译与内容整理完成" if item_id in translated_ids else "中文内容整理完成"
+                self._record_progress(
+                    run, "translated", f"{action}：《{item.title or '未命名信息'}》",
+                    item_title=item.title or None,
+                    detail={"item_id": item_id, "url": item.url or ""}, commit=False,
+                )
+            self.db.commit()
+        run.status = result.status
+        run.completed_at = utc_now()
+        if run.started_at:
+            started_at = run.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            run.duration_ms = int((run.completed_at - started_at).total_seconds() * 1000)
+        self._record_progress(
+            run, "completed", f"采集处理完成，共新增 {persisted_count} 条有效信息",
+            status="completed", detail={"items_new": persisted_count},
+        )
         return result
 
     # ── Topic-driven collection ─────────────────────────────────────────

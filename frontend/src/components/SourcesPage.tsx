@@ -435,7 +435,7 @@ function SourceForm({ source, connectors, onSave, onClose }: SourceFormProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal--source" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal--config modal--source" onClick={(e) => e.stopPropagation()}>
         <h3>{source ? "编辑信息源" : "新建信息源"}</h3>
         <div className="form-grid">
           {source && (

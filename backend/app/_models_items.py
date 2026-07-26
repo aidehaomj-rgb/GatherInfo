@@ -79,6 +79,7 @@ class CollectionRun(Base):
     # Diagnostics
     error_log = Column(JSON, nullable=True)
     metadata_json = Column(JSON, nullable=True)
+    progress_events = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_utc_now)
 

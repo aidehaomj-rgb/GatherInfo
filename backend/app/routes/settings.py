@@ -15,6 +15,7 @@ from app.models import (
     ScheduleConfig, SearchToolConfig, SourceConfig,
     SystemConfig, Tag, Topic,
 )
+from app.time_utils import beijing_day_bounds_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["settings"])
@@ -37,7 +38,7 @@ def _get_system_config(db: Session) -> SystemConfig:
 
 @router.get("/stats", response_model=StatsOut)
 def get_stats(db: Session = Depends(get_db)):
-    today = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today, tomorrow = beijing_day_bounds_utc(now=_now())
     last = db.query(CollectedItem).order_by(CollectedItem.collected_at.desc()).first()
     return StatsOut(
         total_sources=db.query(SourceConfig).count(),
@@ -45,7 +46,10 @@ def get_stats(db: Session = Depends(get_db)):
         total_topics=db.query(Topic).count(),
         active_topics=db.query(Topic).filter(Topic.is_active == True).count(),
         total_items=db.query(CollectedItem).count(),
-        items_today=db.query(CollectedItem).filter(CollectedItem.collected_at >= today).count(),
+        items_today=db.query(CollectedItem).filter(
+            CollectedItem.collected_at >= today,
+            CollectedItem.collected_at < tomorrow,
+        ).count(),
         total_tags=db.query(Tag).count(),
         total_schedules=db.query(ScheduleConfig).filter(ScheduleConfig.is_active == True).count(),
         last_collection_at=last.collected_at if last else None,

@@ -133,6 +133,20 @@ def list_active_runs(db: Session = Depends(get_db)):
         CollectionRun.status.in_([JobStatus.RUNNING, JobStatus.PENDING]),
     ).order_by(CollectionRun.created_at.desc()).limit(20).all()
 
+    batch_ids = {run.batch_id for run in runs if run.batch_id}
+    batch_metrics: dict[str, dict[str, int]] = {}
+    if batch_ids:
+        batch_runs = db.query(CollectionRun).filter(CollectionRun.batch_id.in_(batch_ids)).all()
+        for batch_id in batch_ids:
+            grouped = [run for run in batch_runs if run.batch_id == batch_id]
+            statuses = [str(run.status or "").lower() for run in grouped]
+            batch_metrics[batch_id] = {
+                "total": len(grouped),
+                "completed": sum(status in ("completed", "partial") for status in statuses),
+                "failed": sum(status == "failed" for status in statuses),
+                "active": sum(status in ("running", "pending") for status in statuses),
+            }
+
     result: list[ActiveRunOut] = []
     for r in runs:
         src = db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
@@ -144,6 +158,9 @@ def list_active_runs(db: Session = Depends(get_db)):
                 started = started.replace(tzinfo=timezone.utc)
             duration = int((datetime.now(timezone.utc) - started).total_seconds())
 
+        metrics = batch_metrics.get(r.batch_id or "", {
+            "total": 1, "completed": 0, "failed": 0, "active": 1,
+        })
         result.append(ActiveRunOut(
             id=r.id, source_id=r.source_id,
             source_name=src.name if src else r.source_id,
@@ -156,6 +173,11 @@ def list_active_runs(db: Session = Depends(get_db)):
             started_at=r.started_at.isoformat() if r.started_at else None,
             duration_seconds=duration,
             batch_id=getattr(r, 'batch_id', None),
+            progress_events=getattr(r, 'progress_events', None) or [],
+            batch_total_sources=metrics["total"],
+            batch_completed_sources=metrics["completed"],
+            batch_failed_sources=metrics["failed"],
+            batch_active_sources=metrics["active"],
         ))
 
     return result
@@ -223,7 +245,7 @@ def list_items(
     if q:
         needle = q.lower()
         candidates = query.order_by(
-            CollectedItem.published_at.desc(), CollectedItem.collected_at.desc()
+            CollectedItem.collected_at.desc(), CollectedItem.published_at.desc()
         ).all()
         filtered = [it for it in candidates if _matches_item_query(it, needle)]
         total = len(filtered)
@@ -231,27 +253,38 @@ def list_items(
     else:
         total = query.count()
         items = (
-            query.order_by(CollectedItem.published_at.desc(), CollectedItem.collected_at.desc())
+            query.order_by(CollectedItem.collected_at.desc(), CollectedItem.published_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
         )
 
     return ItemListOut(
-        items=[ItemOut(
-            id=it.id, source_id=it.source_id, run_id=it.run_id,
-            title=it.title, content=it.content, summary=it.summary, url=it.url,
-            **item_translation_fields(it),
-            enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
-            quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
-            language=it.language, category=it.category, tags=_item_tags(it),
-            entities=it.entities,
-            quality_score=it.quality_score or 0,
-            relevance_score=it.relevance_score or 0,
-            status=it.status if it.status else "raw",
-            collected_at=it.collected_at, published_at=it.published_at,
-        ) for it in items],
+        items=[_item_out(it) for it in items],
         total=total, page=page, page_size=page_size,
+    )
+
+
+@router.get("/items/featured", response_model=list[ItemOut])
+def list_featured_items(db: Session = Depends(get_db)):
+    from app.services.featured_intelligence import get_featured_items
+
+    return [_item_out(item) for item in get_featured_items(db)]
+
+
+def _item_out(it: CollectedItem) -> ItemOut:
+    return ItemOut(
+        id=it.id, source_id=it.source_id, run_id=it.run_id,
+        title=it.title, content=it.content, summary=it.summary, url=it.url,
+        **item_translation_fields(it),
+        enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
+        quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
+        language=it.language, category=it.category, tags=_item_tags(it),
+        entities=it.entities,
+        quality_score=it.quality_score or 0,
+        relevance_score=it.relevance_score or 0,
+        status=it.status if it.status else "raw",
+        collected_at=it.collected_at, published_at=it.published_at,
     )
 
 

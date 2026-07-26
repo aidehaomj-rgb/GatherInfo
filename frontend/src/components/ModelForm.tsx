@@ -95,13 +95,13 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>{model ? "编辑模型" : "添加 AI 模型"}</h3>
 
         <div className="form-grid" style={{ gap: 14 }}>
-          <label>名称 <span className="text-red">*</span>
+          <label><span className="field-label-row">名称 <span className="required-mark" aria-hidden="true">*</span></span>
             <input value={name} onChange={(e) => setName(e.target.value)}
-              placeholder="例如：本地 Llama3" autoFocus />
+              placeholder="例如：本地 Llama3" autoFocus required />
             {!model && (
               <span className="text-muted small">建议用服务+型号命名，如 "Ollama-Qwen2.5"</span>
             )}
@@ -155,9 +155,9 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
             <input value={modelName} onChange={(e) => setModelName(e.target.value)}
               placeholder={modelPlaceholder} />
           </label>
-          <label>API Key {providerNeedsApiKey ? <span className="text-red">*</span> : null}
+          <label><span className="field-label-row">API Key {providerNeedsApiKey ? <span className="required-mark" aria-hidden="true">*</span> : null}</span>
             <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-              placeholder={apiKeyPlaceholder} />
+              placeholder={apiKeyPlaceholder} required={providerNeedsApiKey} />
           </label>
 
           <div className="span-2">

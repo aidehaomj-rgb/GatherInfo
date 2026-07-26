@@ -210,7 +210,7 @@ function CategoryForm({ category, onSave, onClose }: {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>{category ? "编辑类别" : "新建类别"}</h3>
         <div className="form-grid">
           <label>ID <input value={id} onChange={(e) => setId(e.target.value)} disabled={!!category} placeholder="trade-policy" /></label>

@@ -56,6 +56,15 @@ async function del(path: string): Promise<void> {
   }
 }
 
+async function postCollection<T>(path: string, body?: unknown): Promise<T> {
+  window.dispatchEvent(new CustomEvent("collection-started"));
+  try {
+    return await post<T>(path, body);
+  } finally {
+    window.dispatchEvent(new CustomEvent("collection-finished"));
+  }
+}
+
 // ── Sources ─────────────────────────────────────────────────────────────
 
 export const fetchSources = (configured?: boolean) => {
@@ -95,7 +104,7 @@ export const createSchedule = (data: Partial<Schedule> & { id: string; name: str
   post<Schedule>("/schedules", data);
 export const deleteSchedule = (id: string) => del(`/schedules/${id}`);
 export const runScheduleNow = (id: string) =>
-  post<CollectResult[]>(`/schedules/${id}/run-now`);
+  postCollection<CollectResult[]>(`/schedules/${id}/run-now`);
 
 // ── Collection ──────────────────────────────────────────────────────────
 
@@ -103,13 +112,13 @@ export const collectTopic = (
   topicId: string,
   opts: { researchPrompt?: string; researchModelId?: string } = {},
 ) =>
-  post<CollectResult[]>("/collect", {
+  postCollection<CollectResult[]>("/collect", {
     topic_id: topicId,
     ...(opts.researchPrompt ? { research_prompt: opts.researchPrompt } : {}),
     ...(opts.researchModelId ? { research_model_id: opts.researchModelId } : {}),
   });
 export const collectSource = (sourceId: string, keywords?: string[]) =>
-  post<CollectResult[]>("/collect", { source_id: sourceId, keywords });
+  postCollection<CollectResult[]>("/collect", { source_id: sourceId, keywords });
 
 // ── Collection Batches / History ─────────────────────────────────────────
 
@@ -158,6 +167,7 @@ export const fetchItems = (filters: ItemFilters = {}) =>
     page: String(filters.page ?? 1),
     page_size: String(filters.page_size ?? 50),
   } as Record<string, string>);
+export const fetchFeaturedItems = () => get<CollectedItem[]>("/items/featured");
 export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
 export const translateItems = (itemIds: string[]) =>
   post<{ requested: number; translated: number; items: string[]; errors?: string[] }>(

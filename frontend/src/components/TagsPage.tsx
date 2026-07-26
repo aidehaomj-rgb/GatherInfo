@@ -334,7 +334,7 @@ function TagEditModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>编辑标签</h3>
         <p className="text-muted small" style={{ marginBottom: 16 }}>ID: {tag.id}</p>
         <div className="form-grid">

@@ -1,5 +1,5 @@
 """
-TradeRadar — 全球贸易风险情报中枢 v0.6.0
+TradeRadar — 全球贸易风险情报中枢 v0.7.0
 
 后端优化版本：
 - 完善的 OpenAPI 文档
@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TradeRadar",
-        version="0.6.0",
+        version="0.7.0",
         description="全球贸易风险情报中枢 — 主题驱动的多源采集、标签结构化入库、统计与分析。",
         contact={
             "name": "TradeRadar Team",
@@ -218,7 +218,7 @@ def create_app() -> FastAPI:
         health = {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "0.6.0",
+            "version": "0.7.0",
             "environment": os.getenv("ENV", "production"),
             "components": {},
         }

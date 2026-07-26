@@ -159,9 +159,8 @@ export function TopicForm({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal"
+        className="modal modal--config"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 640 }}
       >
         <div className="modal-header-with-actions">
           <h3>{topic ? "编辑主题" : "新建主题"}</h3>
@@ -172,8 +171,9 @@ export function TopicForm({
 
         <div className="form-grid">
           <label>
-            主题名称 <span className="text-red">*</span>{" "}
+            <span className="field-label-row">主题名称 <span className="required-mark" aria-hidden="true">*</span></span>
             <input
+              required
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：中美贸易政策监控"
@@ -195,8 +195,9 @@ export function TopicForm({
             </select>
           </label>
           <label className="span-2">
-            关键词 (逗号分隔) <span className="text-red">*</span>{" "}
+            <span className="field-label-row">关键词 (逗号分隔) <span className="required-mark" aria-hidden="true">*</span></span>
             <input
+              required
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
               placeholder="例如：tariffs, trade war, semiconductor sanctions, export control"

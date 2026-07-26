@@ -244,7 +244,7 @@ function ScheduleForm({ topics, onSave, onClose }: ScheduleFormProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 600 }}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>新建周期调度</h3>
 
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>

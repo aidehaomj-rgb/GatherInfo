@@ -66,6 +66,8 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN window_start TIMESTAMP"))
             if "window_end" not in cols:
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN window_end TIMESTAMP"))
+            if "progress_events" not in cols:
+                conn.execute(text("ALTER TABLE collection_runs ADD COLUMN progress_events JSON"))
             conn.commit()
 
     # Add scope columns to `reports` table if it exists
@@ -165,8 +167,18 @@ def migrate_schema(engine):
                     report_output_dir VARCHAR(800),
                     report_dir_pattern VARCHAR(100) DEFAULT '%Y-%m-%d',
                     report_formats JSON,
+                    featured_item_ids JSON,
+                    featured_updated_at TIMESTAMP,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP
                 )
             """))
+            conn.commit()
+    else:
+        cols = {c["name"] for c in inspector.get_columns("system_config")}
+        with engine.connect() as conn:
+            if "featured_item_ids" not in cols:
+                conn.execute(text("ALTER TABLE system_config ADD COLUMN featured_item_ids JSON"))
+            if "featured_updated_at" not in cols:
+                conn.execute(text("ALTER TABLE system_config ADD COLUMN featured_updated_at TIMESTAMP"))
             conn.commit()

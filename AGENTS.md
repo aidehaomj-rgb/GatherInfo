@@ -536,3 +536,45 @@ collect_topic(topic_id)
 - 信息源树交互：`node frontend/_test_selector.mjs`
 - YMG-Deep 素材接收：`.venv/bin/python -m pytest backend/tests/test_input_materials.py backend/tests/test_config_export_import.py -q`
 - HaiSee 批量任务：项目后端全量 pytest，保持覆盖率门禁通过
+
+---
+
+## 2026-07-26 配置弹窗工作区规范
+
+1. 新建或编辑信息源、模型、主题、调度、采集类别、标签等配置表单，统一使用
+   `modal modal--config`。
+2. 桌面端配置弹窗占用约 `75vw × 78vh`（并设置最大值），标题和操作区固定，
+   仅表单内容区域滚动；不得出现整窗横向滚动。
+3. 配置表单默认使用两列自适应布局，窄屏自动切换为单列、近全屏工作区。
+4. 确认、提示、阅读详情等非配置弹窗保持紧凑尺寸，不套用 `modal--config`。
+5. 调整配置界面后至少执行 `npm --prefix frontend run build` 验证。
+
+---
+
+## 2026-07-26 实时采集进度规范
+
+1. 所有采集入口统一经过 `CollectionEngine`，运行过程写入
+   `CollectionRun.progress_events`，不得只在前端模拟进度。
+2. 进度事件至少覆盖：任务准备、连接、检索、候选发现、时间窗口核验、质量审核、
+   去重入库、中文转译与内容整理、完成或失败。
+3. 顶部 `CollectionActivityIndicator` 每 2 秒读取活动任务；手动采集通过
+   `collection-started` / `collection-finished` 事件即时反馈，周期任务由轮询自动发现。
+   “查看进度”使用主工作区右侧常驻 panel，不使用弹窗或遮罩；panel 打开时主内容必须自适应让位。
+4. 配置表单必填项统一使用 `field-label-row` + `required-mark`，星号与字段名同行，
+   对应输入控件同时设置原生 `required` 属性。
+5. 实时进度事件采用不可变列表追加并限制数量，单次运行最多保留 120 个节点。
+6. 顶部工作栏在工作区滚动时保持固定；采集中轮换显示“全网搜集、智能处理、服务战略”，
+   文字使用随机颜色及随机进出方向，并提供 reduced-motion 降级。
+
+---
+
+## 2026-07-26 首页情报与统计口径
+
+1. “今日采集”和每日趋势按北京时间自然日计算，条目列表按 `collected_at` 倒序展示，
+   确保顶部数字、仪表盘和“最新采集信息”口径一致。
+2. 重点情报由后端从最近 10 天候选中评估中国海关监管、风险防控、出口管制、
+   对华贸易影响和内容完整性，默认展示 3 条。
+3. 重点情报 ID 持久化在 `SystemConfig.featured_item_ids`；没有新的合格内容时保持原选择，
+   不因普通新入库信息造成首页重点内容抖动。
+4. 测试写入正式开发库时必须在 `finally` 或模块 teardown 中精确清理，禁止遗留测试条目
+   污染仪表盘统计；清理历史污染前必须先备份数据库。

@@ -165,6 +165,8 @@ class SystemConfig(Base):
     report_output_dir = Column(String(800), nullable=True)
     report_dir_pattern = Column(String(100), default="%Y-%m-%d")
     report_formats = Column(JSON, default=lambda: ["docx", "pdf"])
+    featured_item_ids = Column(JSON, nullable=True)
+    featured_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utc_now)
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 

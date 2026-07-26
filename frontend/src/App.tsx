@@ -9,6 +9,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AppLogo } from "./components/AppLogo";
 import { CommandPalette } from "./components/CommandPalette";
 import { ToastProvider, useToast } from "./components/ToastProvider";
+import { CollectionActivityIndicator } from "./components/CollectionActivityIndicator";
 import { getBeijingHour } from "./utils/date";
 
 // Lazy-loaded page components (code-split per view)
@@ -106,6 +107,7 @@ function AppInner() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [collectionPanelOpen, setCollectionPanelOpen] = useState(false);
   const { success } = useToast();
 
   useEffect(() => {
@@ -115,7 +117,12 @@ function AppInner() {
     };
     refreshDashboard();
     window.addEventListener("dashboard-refresh", refreshDashboard);
-    return () => { cancelled = true; window.removeEventListener("dashboard-refresh", refreshDashboard); };
+    window.addEventListener("collection-data-updated", refreshDashboard);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("dashboard-refresh", refreshDashboard);
+      window.removeEventListener("collection-data-updated", refreshDashboard);
+    };
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -205,12 +212,13 @@ function AppInner() {
           {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </aside>
-      <main className="workspace">
+      <main className={`workspace${collectionPanelOpen ? " workspace--activity-open" : ""}`}>
         <header className="workspace-header">
           <div className="header-greeting">
             <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
           </div>
           <div className="header-actions">
+            <CollectionActivityIndicator open={collectionPanelOpen} onOpenChange={setCollectionPanelOpen} />
             <button
               type="button"
               className="btn-icon header-action-btn"

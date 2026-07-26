@@ -378,7 +378,7 @@ function AiPromptCollectDialog({
 }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <section className="modal ai-prompt-modal" role="dialog" aria-modal="true" aria-labelledby="ai-prompt-title" onClick={(event) => event.stopPropagation()}>
+      <section className="modal modal--config ai-prompt-modal" role="dialog" aria-modal="true" aria-labelledby="ai-prompt-title" onClick={(event) => event.stopPropagation()}>
         <header className="modal-header-with-actions">
           <div>
             <h3 id="ai-prompt-title">AI 提示采集</h3>

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0] - 2026-07-26
+
+### Added
+- Added persisted, source-level collection progress events covering search, time-window checks, quality review, deduplication, Chinese translation, and completion.
+- Added a fixed right-side collection progress panel with task overview, keywords, current sources, completed and pending source counts, and live processing details.
+- Added stable home-page featured intelligence selection based on China Customs risk relevance, export controls, China trade impact, recency, and content completeness.
+
+### Changed
+- Enlarged configuration dialogs to a consistent responsive workspace and aligned required markers with their field labels.
+- Fixed the top workspace bar while scrolling and expanded the collection activity indicator with bold multicolor text and randomized entry and exit motion.
+- Ranked latest collection information by actual ingestion time and refreshed the header, dashboard, home feed, and featured intelligence together after manual or scheduled collection.
+- Calculated daily dashboard statistics using Beijing calendar-day boundaries.
+
+### Fixed
+- Removed the ambiguous collector-health warning from the intelligence home page.
+- Removed leaked export-test records from the local database, added failure-safe test cleanup, and protected dashboard totals from recurring test pollution.
+- Kept the previous three featured intelligence items when no new recent item passes the customs-value and completeness threshold.
+
 ## [0.6.0] - 2026-07-26
 
 ### Added
