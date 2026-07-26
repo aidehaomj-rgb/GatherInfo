@@ -3,10 +3,11 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
-    ActiveRunOut, BatchOut, BatchRunOut,
+    ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut,
     ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
     RunOut,
 )
@@ -181,6 +182,70 @@ def list_active_runs(db: Session = Depends(get_db)):
         ))
 
     return result
+
+
+@router.get("/runs/failures", response_model=list[RunFailureOut])
+def list_run_failures(
+    batch_ids: str = Query(min_length=1, max_length=2000),
+    db: Session = Depends(get_db),
+):
+    requested_ids = [value.strip() for value in batch_ids.split(",") if value.strip()]
+    if not requested_ids:
+        return []
+    runs = db.query(CollectionRun).filter(
+        CollectionRun.batch_id.in_(requested_ids),
+        CollectionRun.status == JobStatus.FAILED,
+    ).order_by(CollectionRun.created_at.desc()).all()
+    if not runs:
+        return []
+
+    source_ids = [run.source_id for run in runs]
+    recurring = dict(db.query(CollectionRun.source_id, func.count(CollectionRun.id)).filter(
+        CollectionRun.source_id.in_(source_ids),
+        CollectionRun.status == JobStatus.FAILED,
+    ).group_by(CollectionRun.source_id).all())
+    sources = {
+        source.id: source for source in db.query(SourceConfig).filter(SourceConfig.id.in_(source_ids)).all()
+    }
+    return [_failure_out(run, sources.get(run.source_id), int(recurring.get(run.source_id, 1))) for run in runs]
+
+
+def _failure_out(run: CollectionRun, source: SourceConfig | None, recurring_failures: int) -> RunFailureOut:
+    errors = [str(value) for value in (run.error_log or []) if str(value).strip()]
+    category, repairable, recommendation, action = _failure_guidance(errors, recurring_failures)
+    channel = source.channel.value if source and hasattr(source.channel, "value") else str(source.channel if source else "unknown")
+    return RunFailureOut(
+        run_id=run.id,
+        batch_id=run.batch_id,
+        source_id=run.source_id,
+        source_name=source.name if source else run.source_id,
+        source_channel=channel,
+        errors=errors or ["未记录具体错误，请重新验证该信息源。"],
+        category=category,
+        repairable=repairable,
+        recurring_failures=recurring_failures,
+        recommendation=recommendation,
+        suggested_action=action,
+    )
+
+
+def _failure_guidance(errors: list[str], recurring_failures: int) -> tuple[str, bool, str, str]:
+    detail = " ".join(errors).lower()
+    if "api_key" in detail or "authentication" in detail or "unauthorized" in detail:
+        return "credentials", True, "该渠道缺少或拒绝 API Key。请在信息源配置中更新密钥后重新验证。", "edit_source"
+    if "403" in detail or "406" in detail or "forbidden" in detail or "not acceptable" in detail:
+        return "access_restricted", True, "目标站拒绝当前访问方式。请改用官方 RSS、允许的 API，或将其改为网页抓取后验证。", "edit_source"
+    if "404" in detail or "not found" in detail:
+        action = "delete_candidate" if recurring_failures >= 3 else "edit_source"
+        ending = "连续多次返回 404；如无法找到新的官方入口，建议删除该信息源。" if action == "delete_candidate" else "请更新为有效的 RSS 或网页地址后重新验证。"
+        return "endpoint_missing", True, ending, action
+    if "xml parse" in detail or "not well-formed" in detail or "undefined entity" in detail:
+        return "feed_format", True, "地址返回的不是兼容 RSS/Atom。请更换有效订阅地址，或改为网页抓取渠道。", "edit_source"
+    if "certificate" in detail or "ssl" in detail:
+        return "tls", True, "站点证书校验失败。请先核验站点证书和地址；不建议关闭证书校验。", "edit_source"
+    if "base_url not configured" in detail:
+        return "address_missing", True, "信息源缺少采集地址。请填写网页、RSS 或 API 地址后重新验证。", "edit_source"
+    return "network_or_provider", False, "请重新验证该信息源；若连续失败且没有替代入口，建议停用或删除。", "disable_candidate"
 
 
 @router.post("/runs/{run_id}/stop")

@@ -12,7 +12,10 @@ from unittest.mock import MagicMock, patch, AsyncMock
 # Ensure the backend package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.engine import CollectionEngine, utc_now, _hash
+from app.engine import (
+    CollectionEngine, MAX_CANDIDATES_PER_SOURCE,
+    SOURCE_EXECUTION_TIMEOUT_SECONDS, utc_now, _hash,
+)
 from app.connectors.base import FetchItem, CollectResult
 from app.models import CollectedItem, CollectionRun, ItemStatus, JobStatus
 
@@ -73,6 +76,32 @@ class TestFetchItemId:
         fi1 = FetchItem(title="A", url="http://x.com/1", content="c1")
         fi2 = FetchItem(title="A", url="http://x.com/2", content="c2")
         assert fi1.item_id("s1") != fi2.item_id("s1")
+
+
+def test_collection_fails_source_when_connector_exceeds_timeout(monkeypatch):
+    """A slow website must not block the entire topic queue indefinitely."""
+    mock_db = MagicMock()
+    source = MagicMock()
+    source.id = "slow-source"
+    source.name = "Slow source"
+    source.is_active = True
+    source.max_items_per_run = 1
+    mock_db.query.return_value.filter.return_value.first.return_value = source
+    connector = MagicMock()
+
+    async def never_finishes(*_args, **_kwargs):
+        await __import__("asyncio").sleep(SOURCE_EXECUTION_TIMEOUT_SECONDS + 1)
+
+    connector.execute = never_finishes
+    monkeypatch.setattr("app.engine.SOURCE_EXECUTION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr("app.engine.ConnectorRegistry.create", lambda _source: connector)
+    engine = CollectionEngine(mock_db)
+
+    import asyncio
+    result = asyncio.run(engine.collect_from_source("slow-source", ["risk"], "topic-1"))
+
+    assert result.status == JobStatus.FAILED
+    assert "超过" in result.error_log[0]
 
 
 class TestPersistItems:
@@ -246,6 +275,33 @@ class TestWindowFiltering:
                               window_start=window_start)
 
         assert mock_db.add.call_count >= 1
+
+    @patch("app.content_quality.curate_article_candidates", new_callable=AsyncMock)
+    @patch("app.connectors.base.ConnectorRegistry.create")
+    def test_collection_caps_candidates_before_model_review(self, mock_create, mock_curate):
+        """A large source response must not create an unbounded LLM review queue."""
+        mock_db = MagicMock()
+        source = MagicMock()
+        source.id = "source-1"
+        source.name = "Source"
+        source.is_active = True
+        source.max_items_per_run = 100
+        mock_db.query.return_value.filter.return_value.first.return_value = source
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+        connector = MagicMock()
+        connector.execute = AsyncMock(return_value=CollectResult(
+            run_id="connector-run", source_id="source-1", status=JobStatus.COMPLETED,
+            items=[FetchItem(title=f"Article {index}", content="x" * 250, url=f"https://example.com/{index}", published_at=utc_now()) for index in range(MAX_CANDIDATES_PER_SOURCE + 4)],
+        ))
+        mock_create.return_value = connector
+        mock_curate.return_value = ([], [])
+        engine = CollectionEngine(mock_db)
+
+        import asyncio
+        asyncio.run(engine.collect_from_source("source-1", ["Article"], "topic-1"))
+
+        reviewed = mock_curate.call_args.args[0]
+        assert len(reviewed) == MAX_CANDIDATES_PER_SOURCE
 
     def test_undated_search_result_is_rejected_even_when_source_requests_bypass(self):
         """A topic window is a hard boundary and cannot be bypassed by a connector."""

@@ -2,7 +2,7 @@
 import type {
   Source, Topic, Schedule, Tag, TagStats, Stats,
   DashboardData, CollectedItem, ItemList, NotificationConfig,
-  CollectResult, ConnectorInfo, CollectRun,
+  CollectResult, ConnectorInfo, CollectRun, RunFailure,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -79,6 +79,8 @@ export const updateSource = (id: string, data: Partial<Source>) =>
 export const deleteSource = (id: string) => del(`/sources/${id}`);
 export const validateSource = (id: string) =>
   post<{ source_id: string; valid: boolean; error: string | null }>(`/sources/${id}/validate`);
+export const reconcileSourceReadiness = () =>
+  post<{ updated: number; configured: number }>("/sources/reconcile-readiness");
 
 // ── Topics ──────────────────────────────────────────────────────────────
 
@@ -128,6 +130,8 @@ export const fetchBatches = (topicId?: string, limit = 20) =>
     limit: String(limit),
   } as Record<string, string>);
 export const fetchActiveRuns = () => get<import("./types").ActiveRunOut[]>("/runs/active");
+export const fetchRunFailures = (batchIds: string[]) =>
+  get<RunFailure[]>("/runs/failures", { batch_ids: batchIds.join(",") });
 export const stopRun = (runId: string) =>
   post<{ id: string; status: string; message: string }>(`/runs/${runId}/stop`);
 

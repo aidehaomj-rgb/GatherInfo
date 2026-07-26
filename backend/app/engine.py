@@ -26,6 +26,9 @@ _translation_lock = asyncio.Lock()
 SEMANTIC_SEARCH_CHANNELS = frozenset({"ai_research", "api_search"})
 MAX_PROGRESS_EVENTS = 120
 MAX_ITEM_PROGRESS_EVENTS = 40
+MAX_CANDIDATES_PER_SOURCE = 9
+SOURCE_COLLECTION_CONCURRENCY = 4
+SOURCE_EXECUTION_TIMEOUT_SECONDS = 90
 
 
 def utc_now() -> datetime:
@@ -151,7 +154,21 @@ class CollectionEngine:
             run, "searching", f"正在“{source.name}”检索与主题相关的信息",
             detail={"query_count": len(keywords)},
         )
-        result = await connector.execute(run, keywords)
+        try:
+            result = await asyncio.wait_for(
+                connector.execute(run, keywords),
+                timeout=SOURCE_EXECUTION_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            message = f"信息源处理超过 {SOURCE_EXECUTION_TIMEOUT_SECONDS} 秒，已停止以保护采集队列"
+            run.status = JobStatus.FAILED
+            run.completed_at = utc_now()
+            run.error_log = [message]
+            self._record_progress(run, "failed", message, status="failed")
+            return CollectResult(
+                run_id=run.id, source_id=source.id, status=JobStatus.FAILED,
+                items=[], error_log=[message],
+            )
         if result.status == JobStatus.FAILED:
             self._record_progress(
                 run, "failed", f"信息源采集失败：{'；'.join(result.error_log or ['未知错误'])}",
@@ -178,17 +195,24 @@ class CollectionEngine:
         window_items, window_rejected = _filter_items_by_window(
             result.items, window_start, window_end
         )
-        result.items = window_items
-        result.items_failed += window_rejected
+        retained_items = window_items[:MAX_CANDIDATES_PER_SOURCE]
+        candidate_limited = max(0, len(window_items) - len(retained_items))
+        result.items = retained_items
+        result.items_failed += window_rejected + candidate_limited
         if window_rejected:
             result.error_log = [
                 *(result.error_log or []),
                 f"采集窗口过滤 {window_rejected} 条：发布日期缺失或超出范围",
             ]
+        if candidate_limited:
+            result.error_log = [
+                *(result.error_log or []),
+                f"候选限额保留 {len(retained_items)} 条，延后处理 {candidate_limited} 条",
+            ]
         self._record_progress(
             run, "window_review",
-            f"时间窗口核验完成：保留 {len(window_items)} 条，排除 {window_rejected} 条",
-            detail={"kept": len(window_items), "rejected": window_rejected},
+            f"时间窗口与候选限额核验完成：保留 {len(retained_items)} 条，排除或延后 {window_rejected + candidate_limited} 条",
+            detail={"kept": len(retained_items), "rejected": window_rejected, "deferred": candidate_limited},
         )
         if model is None:
             model = self.db.query(ModelConfig).filter(
@@ -365,20 +389,25 @@ class CollectionEngine:
             except Exception as exc:
                 logger.warning("AI research prompt planning failed for %s: %s", topic.id, exc)
 
-        # Parallel collection — topic_id flows through into runs and items
-        tasks = [
-            self.collect_from_source(
-                source.id,
-                semantic_queries if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS and semantic_queries else keywords,
-                topic.id,
-                window_start,
-                window_end,
-                batch_id,
-                collection_models[index % len(collection_models)] if collection_models else default_model,
-                effective_research_prompt,
-            )
-            for index, source in enumerate(sources)
-        ]
+        # Keep remote sources and SQLite writes within a bounded work queue.
+        # A topic may intentionally bind dozens of sources; opening all of them
+        # at once makes one slow source starve LLM review and progress updates.
+        semaphore = asyncio.Semaphore(SOURCE_COLLECTION_CONCURRENCY)
+
+        async def collect_one(index: int, source: SourceConfig) -> CollectResult:
+            async with semaphore:
+                return await self.collect_from_source(
+                    source.id,
+                    semantic_queries if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS and semantic_queries else keywords,
+                    topic.id,
+                    window_start,
+                    window_end,
+                    batch_id,
+                    collection_models[index % len(collection_models)] if collection_models else default_model,
+                    effective_research_prompt,
+                )
+
+        tasks = [collect_one(index, source) for index, source in enumerate(sources)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         final: list[CollectResult] = []
@@ -546,10 +575,12 @@ class CollectionEngine:
             selected = self.db.query(SourceConfig).filter(
                 SourceConfig.id.in_(topic.source_ids),
                 SourceConfig.is_active == True,
+                SourceConfig.is_configured == True,
             ).all()
         else:
             selected = self.db.query(SourceConfig).filter(
-                SourceConfig.is_active == True
+                SourceConfig.is_active == True,
+                SourceConfig.is_configured == True,
             ).all()
         if not topic.collection_model_ids or not topic.source_ids:
             return selected
@@ -557,6 +588,7 @@ class CollectionEngine:
         selected_ids = {source.id for source in selected}
         broad_sources = self.db.query(SourceConfig).filter(
             SourceConfig.is_active == True,
+            SourceConfig.is_configured == True,
             SourceConfig.channel.in_(list(SEMANTIC_SEARCH_CHANNELS)),
         ).all()
         ai_research_sources = [

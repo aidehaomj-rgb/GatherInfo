@@ -2,12 +2,28 @@
 import logging
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models import Tag, item_tags
 
 logger = logging.getLogger(__name__)
+
+
+def refresh_tag_counts(db: Session, tag_ids: list[str] | None = None) -> None:
+    """Synchronize cached tag counts from the item-tag association table."""
+    counts_query = db.query(item_tags.c.tag_id, func.count(item_tags.c.item_id))
+    if tag_ids:
+        counts_query = counts_query.filter(item_tags.c.tag_id.in_(tag_ids))
+    counts = dict(counts_query.group_by(item_tags.c.tag_id).all())
+
+    tags_query = db.query(Tag)
+    if tag_ids:
+        tags_query = tags_query.filter(Tag.id.in_(tag_ids))
+    for tag in tags_query.all():
+        tag.item_count = int(counts.get(tag.id, 0))
+    db.commit()
 
 
 def list_tags(
@@ -17,6 +33,7 @@ def list_tags(
     limit: int = 100,
 ):
     """List tags with optional namespace filter and sorting."""
+    refresh_tag_counts(db)
     q = db.query(Tag)
     if namespace:
         q = q.filter(Tag.namespace == namespace)
@@ -106,6 +123,7 @@ def tag_stats(db: Session, limit: int = 50) -> list[dict]:
     """Compute per-tag distribution stats (categories, languages, sources)."""
     from app.collection_schemas import TagStatsOut
 
+    refresh_tag_counts(db)
     tags = db.query(Tag).order_by(Tag.item_count.desc()).limit(limit).all()
     result = []
     for tag in tags:

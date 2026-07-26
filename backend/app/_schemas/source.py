@@ -30,6 +30,7 @@ class SourceCreate(BaseModel):
 class SourceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    channel: str | None = None
     is_active: bool | None = None
     base_url: str | None = None
     api_endpoint: str | None = None
@@ -38,6 +39,9 @@ class SourceUpdate(BaseModel):
     api_key: str | None = None
     auth_config: dict | None = None
     rate_limit_rps: float | None = None
+    max_retries: int | None = Field(default=None, ge=0)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+    max_items_per_run: int | None = Field(default=None, gt=0)
     default_keywords: list[str] | None = None
     default_categories: list[str] | None = None
     languages: list[str] | None = None
@@ -53,6 +57,9 @@ class SourceOut(BaseModel):
     api_endpoint: str | None = None
     homepage_url: str | None = None
     api_key: str | None = None
+    rate_limit_rps: float = 1.0
+    timeout_seconds: int = 30
+    max_items_per_run: int = 100
     default_keywords: list | None = None
     default_categories: list | None = None
     languages: list | None = None

@@ -280,7 +280,7 @@ export function SourceSelector({
             <header className="source-picker-header">
               <div>
                 <h3 id="source-picker-title">关联信息源</h3>
-                <p className="text-muted small">信息源按业务分类展示；AI 模型直接复用已生效配置，不需要再次录入密钥。</p>
+                <p className="text-muted small">网站与 RSS 是原始证据渠道；AI 模型复用已生效配置，用于生成语义检索计划、中文转译和审核，不需要再次录入密钥。</p>
               </div>
               <button type="button" className="btn btn-ghost btn-sm" onClick={closePicker} title="关闭">
                 <X size={16} />
@@ -335,11 +335,10 @@ export function SourceSelector({
                       </button>
                       <span className="source-tree-count">{selectedCount}/{configuredModelIds.length}</span>
                     </div>
-                      <div
+                      {isExpanded && <div
                         id="source-tree-ai-children"
                         className="source-tree-children"
                         role="group"
-                        hidden={!isExpanded}
                       >
                         {configuredModels.map((model) => {
                           const isSelected = modelDraft.includes(model.id);
@@ -354,7 +353,7 @@ export function SourceSelector({
                             </label>
                           );
                         })}
-                      </div>
+                      </div>}
                   </section>
                 );
               })()}
@@ -386,11 +385,10 @@ export function SourceSelector({
                       <span className="source-tree-count">{groupSelected}/{groupIds.length}</span>
                     </div>
 
-                      <div
+                      {groupExpanded && <div
                         id={`source-tree-${encodeURIComponent(group.id)}-children`}
                         className="source-tree-children"
                         role="group"
-                        hidden={!groupExpanded}
                       >
                         {group.sources.map((source) => {
                           const isSelected = draft.includes(source.id);
@@ -409,7 +407,7 @@ export function SourceSelector({
                             </label>
                           );
                         })}
-                      </div>
+                      </div>}
                   </section>
                 );
               })}

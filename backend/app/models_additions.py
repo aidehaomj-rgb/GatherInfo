@@ -20,8 +20,16 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN is_configured BOOLEAN DEFAULT 0"))
                 # Auto-set: web_scrape/official/rss/manual sources are always configured
                 conn.execute(text("UPDATE source_configs SET is_configured = 1 WHERE channel IN ('WEB_SCRAPE','OFFICIAL','RSS','SOCIAL','DEEPWEB','MANUAL')"))
-            # Imported web_scrape / social sources do not need extra configuration.
-            conn.execute(text("UPDATE source_configs SET is_configured = 1 WHERE channel IN ('web_scrape','social') AND is_configured = 0"))
+            # Public URL sources imported before readiness checks were introduced
+            # already have all credentials they need. Only mark them ready when
+            # an actual collection address is present.
+            conn.execute(text("""
+                UPDATE source_configs
+                SET is_configured = 1
+                WHERE UPPER(channel) IN ('WEB_SCRAPE', 'OFFICIAL', 'RSS', 'SOCIAL', 'DEEPWEB')
+                  AND is_configured = 0
+                  AND COALESCE(base_url, api_endpoint, homepage_url, '') != ''
+            """))
             conn.commit()
 
     # Add columns to `topics` table if it exists

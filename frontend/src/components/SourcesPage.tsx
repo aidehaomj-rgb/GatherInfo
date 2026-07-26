@@ -1,7 +1,7 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List } from "lucide-react";
-import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors } from "../api";
+import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List, Wrench } from "lucide-react";
+import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors, reconcileSourceReadiness } from "../api";
 import type { Source, ConnectorInfo } from "../types";
 
 const GROUP_LABEL_L1: Record<string, string> = {
@@ -71,8 +71,10 @@ export function SourcesPage() {
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
   const [sourceSearch, setSourceSearch] = useState("");
- const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
+  const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [reconciling, setReconciling] = useState(false);
+  const [readinessMessage, setReadinessMessage] = useState<string | null>(null);
 
  const load = useCallback(async () => {
     try {
@@ -111,6 +113,20 @@ export function SourcesPage() {
     }
   };
 
+  const handleReconcileReadiness = async () => {
+    setReconciling(true);
+    try {
+      const result = await reconcileSourceReadiness();
+      setReadinessMessage(`已检查 ${result.updated} 个信息源；其中 ${result.configured} 个已具备可采集条件。`);
+      setSourceTab("configured");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "信息源状态检查失败");
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const visibleSources = sources
     .filter((s) => sourceTab === "configured" ? s.is_configured : !s.is_configured)
     .filter((s) => matchesSourceSearch(s, sourceSearch));
@@ -131,7 +147,7 @@ export function SourcesPage() {
         </div>
         <div className="card-item-actions">
           <span className={`badge ${s.is_configured ? (s.is_active ? "badge--green" : "badge--gray") : "badge--yellow"}`}>
-            {s.is_configured ? (s.is_active ? "活跃" : "停用") : "待配置"}
+            {s.is_configured ? (s.is_active ? "可采集" : "已配置停用") : "待补充配置"}
           </span>
           {!s.is_configured && s.api_key && <span className="badge badge--blue" style={{ marginLeft: 4 }}>已填Key</span>}
         </div>
@@ -141,6 +157,7 @@ export function SourcesPage() {
         <span className="meta-inline"><strong>语言:</strong> {(s.languages ?? []).join(", ") || "any"}</span>
         <span className="meta-inline"><strong>关键词:</strong> {(s.default_keywords ?? []).join(", ") || "无"}</span>
         <span className="meta-inline text-muted">采集 {s.items_collected} 条{s.last_error && <span className="text-red"> · 错误: {s.last_error}</span>}</span>
+        {!s.is_configured && <span className="meta-inline text-muted">{sourceReadinessHint(s)}</span>}
       </div>
       <div className="card-item-footer">
         {s.is_configured ? (
@@ -242,6 +259,19 @@ export function SourcesPage() {
           <Settings size={12} /> 备用未配置 ({sources.filter(s => !s.is_configured).length})
         </button>
       </div>
+
+      {readinessMessage && <div className="toast" onClick={() => setReadinessMessage(null)}>{readinessMessage}</div>}
+      {sourceTab === "standby" && (
+        <div className="source-readiness-notice">
+          <div>
+            <strong>备用信息源的判定方式</strong>
+            <p>具有有效网站地址的公开网页、RSS 和官方渠道可直接采集；搜索 API 需要检索服务凭据。AI 模型用于语义规划、转译和审核，不替代可核验的网站原文。</p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => void handleReconcileReadiness()} disabled={reconciling}>
+            <Wrench size={14} /> {reconciling ? "检查中..." : "检查并启用可直接采集的网站"}
+          </button>
+        </div>
+      )}
 
       <div className="search-bar source-search-bar">
         <div className="search-input-wrapper">
@@ -357,6 +387,15 @@ function matchesSourceSearch(source: Source, query: string) {
     .join(" ")
     .toLowerCase();
   return q.split(/\s+/).every((part) => haystack.includes(part));
+}
+
+function sourceReadinessHint(source: Source): string {
+  const address = source.base_url || source.api_endpoint || source.homepage_url;
+  if (["api_search", "json_api", "commercial", "ai_research"].includes(source.channel)) {
+    return "需要填写该检索或数据服务的 API Key 后才能启用。";
+  }
+  if (!address) return "需要补充有效的网址、RSS 地址或接口地址。";
+  return "已具备地址，执行“检查并启用”即可纳入可采集信息源。";
 }
 
 // ── Source form ──────────────────────────────────────────────────────────────

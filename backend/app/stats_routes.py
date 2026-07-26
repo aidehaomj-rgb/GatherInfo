@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import CollectedItem, CollectionRun, SourceConfig, Tag, Topic
+from app.services.tag_service import refresh_tag_counts
 from app.time_utils import BEIJING_TIMEZONE, beijing_day_bounds_utc
 
 router = APIRouter(prefix="/api/v1", tags=["stats"])
@@ -22,6 +23,7 @@ def _now():
 @router.get("/stats/dashboard")
 def dashboard(db: Session = Depends(get_db)):
     """One-call dashboard summary."""
+    refresh_tag_counts(db)
     now = _now()
     today, tomorrow = beijing_day_bounds_utc(now=now)
     week_start, _ = beijing_day_bounds_utc(day_offset=-6, now=now)

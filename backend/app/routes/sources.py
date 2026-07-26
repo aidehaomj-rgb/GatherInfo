@@ -20,11 +20,21 @@ _CHANNELS_NEEDING_KEY = frozenset({"api_search", "ai_research", "json_api", "com
 _CHANNELS_NO_KEY_NEEDED = frozenset({"web_scrape", "official", "rss", "manual", "social", "deepweb"})
 
 
-def _eval_configured(channel: str, api_key: str | None) -> bool:
-    """Determine if a source is configured based on channel + API key presence."""
+def _eval_configured(
+    channel: str,
+    api_key: str | None,
+    *,
+    base_url: str | None = None,
+    api_endpoint: str | None = None,
+    homepage_url: str | None = None,
+) -> bool:
+    """Determine whether a source has the minimum viable collection setup."""
     channel = str(channel or "").lower()
-    if channel in _CHANNELS_NO_KEY_NEEDED:
+    has_address = bool((base_url or api_endpoint or homepage_url or "").strip())
+    if channel == "manual":
         return True
+    if channel in _CHANNELS_NO_KEY_NEEDED:
+        return has_address
     return bool(api_key)
 
 
@@ -57,7 +67,11 @@ def create_source(data: SourceCreate, db: Session = Depends(get_db)):
         raise HTTPException(400, f"信息源 '{src_id}' 已存在")
     payload["id"] = src_id
     payload["is_configured"] = _eval_configured(
-        payload.get("channel", ""), payload.get("api_key"))
+        payload.get("channel", ""), payload.get("api_key"),
+        base_url=payload.get("base_url"),
+        api_endpoint=payload.get("api_endpoint"),
+        homepage_url=payload.get("homepage_url"),
+    )
     try:
         src = SourceConfig(**payload)
         db.add(src)
@@ -68,6 +82,24 @@ def create_source(data: SourceCreate, db: Session = Depends(get_db)):
         logger.error("create_source failed: %s", exc)
         raise HTTPException(500, f"创建信息源失败: {exc}")
     return src
+
+
+@router.post("/sources/reconcile-readiness")
+def reconcile_source_readiness(db: Session = Depends(get_db)):
+    """Promote public website sources that already have a usable address."""
+    sources = db.query(SourceConfig).all()
+    updated = 0
+    for source in sources:
+        channel = source.channel.value if hasattr(source.channel, "value") else str(source.channel)
+        configured = _eval_configured(
+            channel, source.api_key, base_url=source.base_url,
+            api_endpoint=source.api_endpoint, homepage_url=source.homepage_url,
+        )
+        if source.is_configured != configured:
+            source.is_configured = configured
+            updated += 1
+    db.commit()
+    return {"updated": updated, "configured": sum(1 for source in sources if source.is_configured)}
 
 
 @router.get("/sources/{source_id}", response_model=SourceOut)
@@ -91,10 +123,14 @@ def update_source(source_id: str, data: SourceUpdate, db: Session = Depends(get_
         if k == "auth_config" and v is None:
             continue
         setattr(src, k, v)
-    if "api_key" in update_data or "channel" in update_data:
+    if {"api_key", "channel", "base_url", "api_endpoint", "homepage_url"} & update_data.keys():
         channel_val = src.channel.value if hasattr(src.channel, 'value') else src.channel
         src.is_configured = _eval_configured(
-            str(channel_val), getattr(src, 'api_key', None))
+            str(channel_val), getattr(src, 'api_key', None),
+            base_url=src.base_url,
+            api_endpoint=src.api_endpoint,
+            homepage_url=src.homepage_url,
+        )
     db.commit()
     db.refresh(src)
     return src

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Clock } from "lucide-react";
+import { Plus, RefreshCw, Trash2, Edit3, BrainCircuit, Clock } from "lucide-react";
 import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import type { Topic, CollectResult, ModelConfig, Source } from "../types";
@@ -40,7 +40,6 @@ export function TopicsPage() {
   const [sources, setSources] = useState<Source[]>([]);
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
-  const [expandedKeywordTopics, setExpandedKeywordTopics] = useState<string[]>([]);
   const [aiPromptTopic, setAiPromptTopic] = useState<Topic | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiPromptModelId, setAiPromptModelId] = useState("");
@@ -145,12 +144,6 @@ export function TopicsPage() {
   };
 
   const runningTopicIds = new Set(collecting ? [collecting] : []);
-  const toggleKeywordTopic = (topicId: string) => {
-    setExpandedKeywordTopics((prev) => (
-      prev.includes(topicId) ? prev.filter((id) => id !== topicId) : [...prev, topicId]
-    ));
-  };
-
   const handleToggleSchedule = async (topic: Topic) => {
     const enabling = !topic.is_scheduled;
     const cron = topic.schedule_cron || "0 8 * * *";
@@ -190,16 +183,13 @@ export function TopicsPage() {
       <div className="card-list">
         {topics.map((t) => {
           const keywords = t.keywords ?? [];
-          const keywordExpanded = expandedKeywordTopics.includes(t.id);
-          const visibleKeywords = keywordExpanded ? keywords : keywords.slice(0, 12);
+          const visibleKeywords = keywords.slice(0, 6);
           const hiddenKeywordCount = Math.max(0, keywords.length - visibleKeywords.length);
           return (
           <article key={t.id} className="card-item">
             <div className="card-item-header">
               <div>
                 <h4>{t.name}</h4>
-                <span className="text-muted">{t.id}</span>
-                {t.description && <p className="text-muted small">{t.description}</p>}
               </div>
               <div className="card-item-actions">
                 <span className={`badge ${t.is_active ? "badge--green" : "badge--gray"}`}>
@@ -228,52 +218,12 @@ export function TopicsPage() {
                     <span key={kw} className="chip">{kw}</span>
                   ))}
                   {hiddenKeywordCount > 0 && (
-                    <button type="button" className="chip chip--button" onClick={() => toggleKeywordTopic(t.id)}>
-                      还有 {hiddenKeywordCount} 个
-                    </button>
-                  )}
-                  {keywordExpanded && keywords.length > 12 && (
-                    <button type="button" className="chip chip--button" onClick={() => toggleKeywordTopic(t.id)}>
-                      收起
-                    </button>
+                    <span className="chip">+{hiddenKeywordCount}</span>
                   )}
                 </span>
               </div>
-              <div>
-                <strong>信息源:</strong>{" "}
-                {t.source_names?.length
-                  ? t.source_names.map((nm) => (
-                      <span key={nm} className="chip chip--blue">{nm}</span>
-                    ))
-                  : (t.source_ids?.length
-                      ? t.source_ids.map((s) => (
-                          <span key={s} className="chip chip--blue">{s}</span>
-                        ))
-                      : <span className="text-muted">所有活跃信息源</span>)}
-              </div>
-              {t.target_urls?.length ? (
-                <div>
-                  <strong><Target size={12} /> 目标URL:</strong>{" "}
-                  {t.target_urls.map((u) => (
-                    <span key={u} className="chip chip--green" title={u}>{u.slice(0, 50)}{u.length > 50 ? "..." : ""}</span>
-                  ))}
-                </div>
-              ) : null}
-              <div>
-                <strong>自动标签规则:</strong>{" "}
-                {t.auto_tag_rules?.length
-                  ? t.auto_tag_rules.map((r) => (
-                      <span key={r.tag} className="chip chip--pink">{r.keyword} → {r.tag}</span>
-                    ))
-                  : <span className="text-muted">无</span>}
-              {(t as any).description_prompt && (
-                <div className="text-muted small" style={{ marginTop: 4 }}>
-                <strong>AI 采集提示词:</strong> 已配置
-                </div>
-              )}
-              </div>
               <div className="text-muted small">
-                采集周期: {t.is_scheduled ? humanizeCron(t.schedule_cron) : "手动"}
+                采集窗口: {t.collect_window_days} 天 · {t.is_scheduled ? humanizeCron(t.schedule_cron) : "手动"}
                 {" · "}自动报告: {t.auto_report
                   ? <span className="badge badge--green">开启</span>
                   : <span className="text-muted">关闭</span>}

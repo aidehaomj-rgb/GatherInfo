@@ -129,3 +129,17 @@ class ActiveRunOut(BaseModel):
     batch_completed_sources: int = 0
     batch_failed_sources: int = 0
     batch_active_sources: int = 1
+
+
+class RunFailureOut(BaseModel):
+    run_id: str
+    batch_id: str | None = None
+    source_id: str
+    source_name: str
+    source_channel: str
+    errors: list[str] = Field(default_factory=list)
+    category: str
+    repairable: bool
+    recurring_failures: int = 1
+    recommendation: str
+    suggested_action: str

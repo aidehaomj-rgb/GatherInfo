@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, CheckCircle2, ChevronRight, CircleDot, Clock3,
+  Activity, AlertTriangle, CheckCircle2, ChevronRight, CircleDot, Clock3,
   FileSearch, Languages, ListTree, Search, ShieldCheck, X,
 } from "lucide-react";
 
-import { fetchActiveRuns } from "../api";
-import type { ActiveRunOut, CollectionProgressEvent } from "../types";
+import { fetchActiveRuns, fetchRunFailures } from "../api";
+import type { ActiveRunOut, CollectionProgressEvent, RunFailure } from "../types";
 import { formatBeijingTime } from "../utils/date";
 
 const STATUS_WORDS = ["全网搜集", "智能处理", "服务战略"] as const;
@@ -91,7 +91,11 @@ function ActivityPill({ word, count, colorIndex, motionIndex }: {
   );
 }
 
-function TaskOverview({ runs, active }: { runs: ActiveRunOut[]; active: boolean }) {
+function TaskOverview({ runs, active, onOpenFailures }: {
+  runs: ActiveRunOut[];
+  active: boolean;
+  onOpenFailures: (batchIds: string[]) => void;
+}) {
   const summaries = new Map<string, ActiveRunOut>();
   runs.forEach((run) => summaries.set(run.batch_id || run.id, run));
   const batches = [...summaries.values()];
@@ -107,6 +111,11 @@ function TaskOverview({ runs, active }: { runs: ActiveRunOut[]; active: boolean 
   const tasks = [...new Set(runs.map((run) => run.topic_name || "即时采集任务"))];
   const keywords = [...new Set(runs.flatMap((run) => run.keywords_used || []))];
   const channels = [...new Set(runs.map((run) => run.source_name || run.source_id))];
+  const batchIds = [...new Set(runs.map((run) => run.batch_id).filter((id): id is string => Boolean(id)))];
+
+  const openFailures = () => {
+    if (failed > 0 && batchIds.length > 0) onOpenFailures(batchIds);
+  };
 
   return (
     <section className="collection-task-overview">
@@ -128,7 +137,21 @@ function TaskOverview({ runs, active }: { runs: ActiveRunOut[]; active: boolean 
         <div><strong>{total}</strong><span>信息源总数</span></div>
         <div><strong>{completed}</strong><span>已采集</span></div>
         <div><strong>{remaining}</strong><span>待采集</span></div>
-        <div><strong>{failed}</strong><span>失败</span></div>
+        <button
+          type="button"
+          className={`collection-task-overview__failure ${failed > 0 ? "collection-task-overview__failure--actionable" : ""}`}
+          onDoubleClick={openFailures}
+          onKeyDown={(event) => {
+            if ((event.key === "Enter" || event.key === " ") && failed > 0) {
+              event.preventDefault();
+              openFailures();
+            }
+          }}
+          disabled={failed === 0}
+          title={failed > 0 ? "双击查看失败原因与处理建议" : "本轮没有失败信息源"}
+        >
+          <strong>{failed}</strong><span>{failed > 0 ? "失败 · 双击查看" : "失败"}</span>
+        </button>
       </div>
     </section>
   );
@@ -176,6 +199,22 @@ export function CollectionActivityIndicator({ open, onOpenChange }: ActivityIndi
   const [lastRuns, setLastRuns] = useState<ActiveRunOut[]>([]);
   const [frame, setFrame] = useState({ word: 0, color: 0, motion: 0 });
   const [starting, setStarting] = useState(false);
+  const [failures, setFailures] = useState<RunFailure[] | null>(null);
+  const [failureError, setFailureError] = useState<string | null>(null);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+
+  const openFailures = async (batchIds: string[]) => {
+    setLoadingFailures(true);
+    setFailureError(null);
+    setFailures([]);
+    try {
+      setFailures(await fetchRunFailures(batchIds));
+    } catch (error) {
+      setFailureError(error instanceof Error ? error.message : "无法读取失败诊断信息");
+    } finally {
+      setLoadingFailures(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -263,11 +302,66 @@ export function CollectionActivityIndicator({ open, onOpenChange }: ActivityIndi
           </header>
           <div className="collection-drawer__content">
             {displayedRuns.length > 0 ? (
-              <><TaskOverview runs={displayedRuns} active={runs.length > 0} />{displayedRuns.map((run) => <RunProgress key={run.id} run={run} />)}</>
+              <><TaskOverview runs={displayedRuns} active={runs.length > 0} onOpenFailures={(batchIds) => void openFailures(batchIds)} />{displayedRuns.map((run) => <RunProgress key={run.id} run={run} />)}</>
             ) : <div className="collection-drawer__empty">当前没有正在进行的采集任务。</div>}
           </div>
         </aside>
       )}
+      {failures && (
+        <FailureDiagnosticsDialog
+          failures={failures}
+          loading={loadingFailures}
+          error={failureError}
+          onClose={() => setFailures(null)}
+        />
+      )}
     </>
+  );
+}
+
+function FailureDiagnosticsDialog({
+  failures,
+  loading,
+  error,
+  onClose,
+}: {
+  failures: RunFailure[];
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <section className="modal collection-failure-modal" role="dialog" aria-modal="true" aria-labelledby="failure-diagnostics-title" onClick={(event) => event.stopPropagation()}>
+        <header className="collection-failure-modal__header">
+          <div>
+            <span className="collection-failure-modal__eyebrow"><AlertTriangle size={14} />采集异常诊断</span>
+            <h3 id="failure-diagnostics-title">失败信息源与处理建议</h3>
+            <p>系统依据本轮错误和历史失败次数给出建议；连续无法修复的失效来源会标记为可删除候选。</p>
+          </div>
+          <button type="button" className="btn-icon" title="关闭" onClick={onClose}><X size={18} /></button>
+        </header>
+        <div className="collection-failure-modal__content">
+          {loading && <div className="loading">正在读取失败诊断...</div>}
+          {error && <div className="error-banner">{error}</div>}
+          {!loading && !error && failures.length === 0 && <div className="collection-drawer__empty">本轮未找到可诊断的失败记录。</div>}
+          {!loading && !error && failures.map((failure) => (
+            <article key={failure.run_id} className="failure-diagnostic-row">
+              <div className="failure-diagnostic-row__title">
+                <div><strong>{failure.source_name}</strong><span>{failure.source_channel} · 历史失败 {failure.recurring_failures} 次</span></div>
+                <span className={`badge ${failure.suggested_action === "delete_candidate" ? "badge--red" : "badge--yellow"}`}>
+                  {failure.suggested_action === "delete_candidate" ? "建议删除" : "可修复"}
+                </span>
+              </div>
+              <p><strong>建议：</strong>{failure.recommendation}</p>
+              <details>
+                <summary>查看技术错误</summary>
+                <ul>{failure.errors.map((item, index) => <li key={`${failure.run_id}-${index}`}>{item}</li>)}</ul>
+              </details>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }

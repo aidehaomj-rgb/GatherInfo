@@ -194,6 +194,20 @@ export interface CollectRun {
   error_log: string[] | null;
 }
 
+export interface RunFailure {
+  run_id: string;
+  batch_id: string | null;
+  source_id: string;
+  source_name: string;
+  source_channel: string;
+  errors: string[];
+  category: string;
+  repairable: boolean;
+  recurring_failures: number;
+  recommendation: string;
+  suggested_action: "edit_source" | "delete_candidate" | string;
+}
+
 export interface CollectResult {
   run: CollectRun;
   total_items: number;

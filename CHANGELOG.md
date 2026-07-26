@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.0] - 2026-07-27
+
+### Added
+- Added a stable, bounded topic queue for unattended collection, with source concurrency limits, per-source timeouts, candidate caps, and clear skip reasons.
+- Added source readiness reconciliation and failure diagnostics, including repair guidance for failed sources and a double-click detail view from collection progress.
+- Added a complete tag-count refresh path based on the item-tag relation, keeping tag statistics consistent with actual collected items.
+
+### Changed
+- Improved the topic source selector so second-level sources render reliably inside the expanded first-level category and remain easy to select.
+- Simplified topic cards by hiding source and title details from the main management list while retaining them in the editor.
+- Strengthened collection quality controls, semantic model binding, deduplication, time-window filtering, Chinese translation, and structured content organization.
+- Added ten focused collection topics for export controls, trade remedies, TBT/SPS, strategic minerals, customs enforcement, logistics, counterfeiting, and China-related trade risks.
+
+### Fixed
+- Prevented disabled or unconfigured sources from being silently included in automatic collection runs.
+- Preserved existing model configurations and local collected data while applying the new collection stability rules.
+- Added regression coverage for source readiness, failure diagnostics, tag counts, selector expansion, and bounded collection behavior.
+
 ## [0.7.0] - 2026-07-26
 
 ### Added
