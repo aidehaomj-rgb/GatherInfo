@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { ExternalLink, BookOpenText, Languages } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { ExternalLink, BookOpenText, Languages, ShieldCheck, Send, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import {
   fetchItems, fetchTags, fetchSources, fetchTopics,
-  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems, translateItems,
+  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems, reviewItemQuality,
+  translateItems, pushItemsToHaiSee,
 } from "../api";
-import type { CollectedItem, ItemList, Tag, Source, Topic } from "../types";
+import type { BatchOut, CollectedItem, HaiSeePushResponse, ItemList, Tag, Source, Topic } from "../types";
 import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { ItemFilterBar } from "./ItemFilterBar";
@@ -28,15 +29,23 @@ export function ItemsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
-  const [batchOptions, setBatchOptions] = useState<{ run_id: string; label: string }[]>([]);
-  const [filterRun, setFilterRun] = useState("");
+  const [batches, setBatches] = useState<BatchOut[]>([]);
+  const [filterBatch, setFilterBatch] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [selectAllMode, setSelectAllMode] = useState<"page" | "all">("page");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteCount, setDeleteCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [showQualityConfirm, setShowQualityConfirm] = useState(false);
+  const [reviewingQuality, setReviewingQuality] = useState(false);
+  const [qualityNotice, setQualityNotice] = useState<string | null>(null);
+  const [haiseeResult, setHaiSeeResult] = useState<HaiSeePushResponse | null>(null);
+  const [haiseeError, setHaiSeeError] = useState<string | null>(null);
+  const [pushingHaiSee, setPushingHaiSee] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
   const requestedTranslationIds = useRef(new Set<string>());
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchTags(undefined, 200).then(setTags).catch(() => {});
@@ -47,19 +56,16 @@ export function ItemsPage() {
       for (const r of rows) m[r.source_id] = r.count;
       setSourceCounts(m);
     }).catch(() => {});
-    fetchBatches(filterTopic || undefined, 30).then((batches) => {
-      const options: { run_id: string; label: string }[] = [];
-      for (const b of batches) {
-        for (const r of b.runs || []) {
-          if (r.id) options.push({
-            run_id: r.id,
-            label: b.batch_label || `${b.topic_name || "采集"}_${b.started_at?.slice(0, 16) || ""}`,
-          });
-        }
-      }
-      setBatchOptions(options);
-    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchBatches(filterTopic || undefined, 50).then(setBatches).catch(() => setBatches([]));
+  }, [filterTopic]);
+
+  const batchOptions = useMemo(() => batches.map((batch) => ({
+    batch_id: batch.batch_id,
+    label: batch.batch_label || `${batch.topic_name || "采集"}_${batch.started_at?.slice(0, 16) || ""}`,
+  })), [batches]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,7 +76,7 @@ export function ItemsPage() {
         ...(filterTag ? { tag: filterTag } : {}),
         ...(filterSource ? { source_id: filterSource } : {}),
         ...(filterTopic ? { topic_id: filterTopic } : {}),
-        ...(filterRun ? { run_id: filterRun } : {}),
+        ...(filterBatch ? { batch_id: filterBatch } : {}),
         ...(filterCat ? { category: filterCat } : {}),
       });
       setData(result);
@@ -79,7 +85,7 @@ export function ItemsPage() {
       setError(e instanceof Error ? e.message : "Failed");
     }
     setLoading(false);
-  }, [page, query, filterTag, filterSource, filterTopic, filterCat, filterRun]);
+  }, [page, query, filterTag, filterSource, filterTopic, filterCat, filterBatch]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -132,7 +138,7 @@ export function ItemsPage() {
             source_id: filterSource || undefined,
             tag: filterTag || undefined,
             category: filterCat || undefined,
-            run_id: filterRun || undefined,
+            batch_id: filterBatch || undefined,
           })).ids;
       const r = await batchDeleteItems(ids);
       setSelectedItems(new Set());
@@ -143,6 +149,93 @@ export function ItemsPage() {
       alert(e instanceof Error ? e.message : "删除失败");
     }
     setDeleting(false);
+  };
+
+  const executeQualityReview = async () => {
+    const itemIds = selectedItems.size > 0
+      ? Array.from(selectedItems)
+      : (data?.items.map((item) => item.id) ?? []);
+    if (!itemIds.length) return;
+    setReviewingQuality(true);
+    try {
+      const result = await reviewItemQuality(itemIds, itemIds.length);
+      setSelectedItems(new Set());
+      setSelectAllMode("page");
+      setQualityNotice(`AI 已审核 ${result.reviewed} 条，整理 ${result.curated} 条，删除 ${result.deleted} 条低价值信息。`);
+      await load();
+      setShowQualityConfirm(false);
+    } catch (e) {
+      setQualityNotice(e instanceof Error ? e.message : "AI 质量审核失败");
+    }
+    setReviewingQuality(false);
+  };
+
+  const handleHaiSeePush = async () => {
+    const itemIds = Array.from(selectedItems);
+    if (!itemIds.length) return;
+    if (itemIds.length > 50) {
+      setHaiSeeError("HaiSee 单次最多接收 50 条信息，请缩小选择范围后重试。");
+      return;
+    }
+    setPushingHaiSee(true);
+    setHaiSeeError(null);
+    setHaiSeeResult(null);
+    try {
+      setHaiSeeResult(await pushItemsToHaiSee(itemIds));
+    } catch (e) {
+      setHaiSeeError(e instanceof Error ? e.message : "推送 HaiSee 失败");
+    }
+    setPushingHaiSee(false);
+  };
+
+  const itemTree = useMemo(() => {
+    const runToBatch = new Map<string, BatchOut>();
+    for (const batch of batches) {
+      for (const run of batch.runs) runToBatch.set(run.id, batch);
+    }
+    const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
+    const tree = new Map<string, { label: string; timestamp: string | null; sources: Map<string, CollectedItem[]> }>();
+    for (const item of data?.items ?? []) {
+      const batch = item.run_id ? runToBatch.get(item.run_id) : undefined;
+      const batchId = batch?.batch_id || "unbatched";
+      const label = batch?.batch_label || (item.run_id ? `采集运行 ${item.run_id.slice(0, 12)}` : "未归档采集条目");
+      const current = tree.get(batchId) ?? { label, timestamp: batch?.started_at ?? item.collected_at, sources: new Map() };
+      current.sources.set(item.source_id, [...(current.sources.get(item.source_id) ?? []), item]);
+      tree.set(batchId, current);
+    }
+    return Array.from(tree.entries()).map(([batchId, batch]) => ({
+      batchId,
+      label: batch.label,
+      timestamp: batch.timestamp,
+      sources: Array.from(batch.sources.entries()).map(([sourceId, items]) => ({
+        sourceId,
+        sourceName: sourceNames.get(sourceId) || sourceId,
+        items,
+      })),
+    }));
+  }, [batches, data?.items, sources]);
+
+  const toggleBatchExpanded = (key: string) => {
+    setExpandedBatches((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSourceExpanded = (key: string) => {
+    setExpandedSources((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const expandAllTree = () => {
+    const batchIds = itemTree.map((batch) => batch.batchId);
+    const sourceKeys = itemTree.flatMap((batch) => batch.sources.map((source) => `${batch.batchId}:${source.sourceId}`));
+    setExpandedBatches(new Set(batchIds));
+    setExpandedSources(new Set(sourceKeys));
   };
 
   return (
@@ -161,11 +254,11 @@ export function ItemsPage() {
         query={query}
         onQueryChange={(v) => { setQuery(v); setPage(1); }}
         filterTopic={filterTopic}
-        onFilterTopicChange={(v) => { setFilterTopic(v); setPage(1); }}
+        onFilterTopicChange={(v) => { setFilterTopic(v); setFilterBatch(""); setPage(1); }}
         filterSource={filterSource}
         onFilterSourceChange={(v) => { setFilterSource(v); setPage(1); }}
-        filterRun={filterRun}
-        onFilterRunChange={(v) => { setFilterRun(v); setPage(1); }}
+        filterBatch={filterBatch}
+        onFilterBatchChange={(v) => { setFilterBatch(v); setPage(1); }}
         filterTag={filterTag}
         onFilterTagChange={(v) => { setFilterTag(v); setPage(1); }}
         topics={topics}
@@ -174,6 +267,20 @@ export function ItemsPage() {
         batchOptions={batchOptions}
         tags={tags}
       />
+
+      {qualityNotice && <div className="info-banner" style={{ marginBottom: 12 }}>{qualityNotice}</div>}
+      {haiseeError && <div className="error-banner" style={{ marginBottom: 12 }}>{haiseeError}</div>}
+      {haiseeResult && (
+        <div className="info-banner haisee-handoff-notice" style={{ marginBottom: 12 }}>
+          <span>
+            已向 HaiSee 提交 {haiseeResult.task_ids.length} 个转译分析任务
+            {haiseeResult.batch_id ? `，批次 ${haiseeResult.batch_id}` : ""}。
+          </span>
+          <a className="btn btn-sm btn-ghost" href={`${haiseeResult.web_url}/tasks`} target="_blank" rel="noreferrer">
+            <ExternalLink size={13} /> 打开 HaiSee
+          </a>
+        </div>
+      )}
 
       {/* Selection toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "8px 14px", background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)" }}>
@@ -193,6 +300,9 @@ export function ItemsPage() {
           <strong>全选</strong>
         </label>
         <span className="text-muted small">已选 {selectedItems.size} / {data?.total || 0} 条</span>
+        <button type="button" className="btn btn-sm btn-secondary" disabled={!data?.items.length} onClick={() => setShowQualityConfirm(true)}>
+          <ShieldCheck size={14} /> AI 质量清理{selectedItems.size > 0 ? `（${selectedItems.size}）` : "本页"}
+        </button>
 
         {selectedItems.size > 0 && (
           <>
@@ -204,7 +314,7 @@ export function ItemsPage() {
                   source_id: filterSource || undefined,
                   tag: filterTag || undefined,
                   category: filterCat || undefined,
-                  run_id: filterRun || undefined,
+                  batch_id: filterBatch || undefined,
                 });
                 setSelectedItems(new Set(result.ids));
                 setSelectAllMode("all");
@@ -220,6 +330,16 @@ export function ItemsPage() {
             <button type="button" className="btn btn-sm btn-danger" onClick={handleBatchDelete}>
               批量删除
             </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => void handleHaiSeePush()}
+              disabled={pushingHaiSee || selectedItems.size > 50}
+              title={selectedItems.size > 50 ? "HaiSee 单次最多接收 50 条" : "送入下一环节开展转译分析"}
+            >
+              <Send size={14} />
+              {pushingHaiSee ? "推送中..." : `推送至 HaiSee（${selectedItems.size}）`}
+            </button>
           </>
         )}
       </div>
@@ -230,53 +350,49 @@ export function ItemsPage() {
         <div className="error-banner">{error}</div>
       ) : !data ? null : (
         <>
+          <div className="item-tree-actions">
+            <button type="button" className="btn btn-sm btn-ghost" onClick={expandAllTree}><ChevronsUpDown size={14} /> 全部展开</button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setExpandedBatches(new Set()); setExpandedSources(new Set()); }}><ChevronsDownUp size={14} /> 收起到一级</button>
+          </div>
           <div className="item-list">
-            {(() => {
-              const groups = new Map<string, CollectedItem[]>();
-              for (const item of data.items) {
-                const key = item.run_id || item.source_id || "unknown";
-                if (!groups.has(key)) groups.set(key, []);
-                groups.get(key)!.push(item);
-              }
-              const runLabelMap = new Map(batchOptions.map((b) => [b.run_id, b.label]));
-              const entries = Array.from(groups.entries());
-              return entries.map(([runId, items]) => (
-                <div key={runId} style={{ marginBottom: 12 }}>
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "6px 12px", marginBottom: 6,
-                    background: "var(--surface-elevated)", borderRadius: "var(--radius)",
-                    fontSize: "0.78rem", color: "var(--ink-muted)",
-                    borderLeft: "3px solid var(--accent)",
-                  }}>
-                    <span style={{ fontWeight: 600, color: "var(--ink)" }}>
-                      {runLabelMap.get(runId) || "批次: " + runId.slice(0, 16)}
-                    </span>
-                    <span>{items.length} 条</span>
-                    {items[0].collected_at && (
-                      <span>{formatBeijingDateTime(items[0].collected_at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                    )}
-                  </div>
-                  {items.map((item) => (
-                    <div className="item-list-row" key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                      <input type="checkbox" style={{ marginTop: 14, accentColor: "var(--accent)", cursor: "pointer" }}
-                        checked={selectedItems.has(item.id)}
-                        onChange={() => {
-                          setSelectedItems((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-                            return next;
-                          });
-                        }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <ItemCard key={item.id} item={item} />
+            {itemTree.map((batch) => {
+              const batchExpanded = expandedBatches.has(batch.batchId);
+              const itemCount = batch.sources.reduce((sum, source) => sum + source.items.length, 0);
+              return (
+                <section key={batch.batchId} className="item-tree-batch">
+                  <button type="button" className="item-tree-row item-tree-row--batch" onClick={() => toggleBatchExpanded(batch.batchId)} aria-expanded={batchExpanded}>
+                    {batchExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    <strong>{batch.label}</strong>
+                    <span>{itemCount} 条</span>
+                    {batch.timestamp && <span>{formatBeijingDateTime(batch.timestamp, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+                  </button>
+                  {batchExpanded && batch.sources.map((source) => {
+                    const sourceKey = `${batch.batchId}:${source.sourceId}`;
+                    const sourceExpanded = expandedSources.has(sourceKey);
+                    return (
+                      <div key={sourceKey} className="item-tree-source">
+                        <button type="button" className="item-tree-row item-tree-row--source" onClick={() => toggleSourceExpanded(sourceKey)} aria-expanded={sourceExpanded}>
+                          {sourceExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          <strong>{source.sourceName}</strong><span>{source.items.length} 条</span>
+                        </button>
+                        {sourceExpanded && source.items.map((item) => (
+                          <div className="item-list-row item-tree-item" key={item.id}>
+                            <input type="checkbox" checked={selectedItems.has(item.id)} onChange={() => {
+                              setSelectedItems((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                                return next;
+                              });
+                            }} />
+                            <div><ItemCard item={item} /></div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ));
-            })()}
+                    );
+                  })}
+                </section>
+              );
+            })}
           </div>
 
           <div className="pagination">
@@ -318,6 +434,16 @@ export function ItemsPage() {
         onConfirm={executeDelete}
         loading={deleting}
       />
+      <ConfirmDialog
+        open={showQualityConfirm}
+        title="AI 质量清理"
+        message={`将使用已配置的默认模型审核 ${selectedItems.size || data?.items.length || 0} 条信息。非独立文章、广告聚合页和不完整低价值内容会被直接删除；通过的信息会整理为中文情报简报。`}
+        variant="danger"
+        confirmLabel="审核并清理"
+        onClose={() => setShowQualityConfirm(false)}
+        onConfirm={executeQualityReview}
+        loading={reviewingQuality}
+      />
     </>
   );
 }
@@ -350,6 +476,7 @@ function ItemCard({ item }: { item: CollectedItem }) {
             </a>
           )}
           {hasTranslation && <span className="chip chip--green"><Languages size={12} /> 译文</span>}
+          {item.quality_review && <span className="chip chip--green"><ShieldCheck size={12} /> AI整理</span>}
           {item.enforcement_review && <span className="chip chip--green">AI审核</span>}
           <span className="chip">{item.language ?? "?"}</span>
           {item.category && <span className="chip chip--blue">{item.category}</span>}
@@ -368,7 +495,7 @@ function ItemCard({ item }: { item: CollectedItem }) {
                   <p className="text-muted">{item.summary_zh || item.content_zh}</p>
                 </div>
               )}
-              {(originalTitle || item.summary || item.content) && (
+              {!item.quality_review && (originalTitle || item.summary || item.content) && (
                 <div className="item-original-preview">
                   <strong>源文件内容</strong>
                   {originalTitle && originalTitle !== displayTitle && (

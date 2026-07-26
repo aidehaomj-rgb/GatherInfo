@@ -4,6 +4,7 @@ Tavily Search connector for GatherInfo.
 import logging
 import os
 import asyncio
+from datetime import timedelta
 
 import httpx
 import re
@@ -95,6 +96,14 @@ class TavilyCollector(BaseCollector):
                         "include_answer": False,
                         "include_raw_content": False,
                     }
+                    if self.window_start:
+                        payload["start_date"] = self.window_start.date().isoformat()
+                    if self.window_end:
+                        # Tavily's end_date is exclusive. Add one day while the
+                        # engine still applies the exact inclusive boundary.
+                        payload["end_date"] = (
+                            self.window_end.date() + timedelta(days=1)
+                        ).isoformat()
                     if include_domains_param:
                         payload["include_domains"] = include_domains_param
                     resp = await client.post(self.BASE_URL, json=payload)
@@ -152,7 +161,7 @@ class TavilyCollector(BaseCollector):
                             relevance_score=r.get("score", 0.5),
                             raw_metadata={"engine": "tavily", "query": query,
                                           "score": r.get("score"),
-                                          "allow_undated_results": True,
+                                          "allow_undated_results": False,
                                           "allow_unfiltered_results": True},
                         ))
 
@@ -228,7 +237,7 @@ class TavilyCollector(BaseCollector):
                                 # search query; do not require it to contain every
                                 # keyword configured for the topic again.
                                 "allow_unfiltered_results": True,
-                                "allow_undated_results": True,
+                                "allow_undated_results": False,
                             },
                         ))
                     await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)

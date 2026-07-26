@@ -41,6 +41,7 @@ async def generate_report(data: ReportGenerateRequest, db: Session = Depends(get
         report = await gen(
             topic_id=data.topic_id,
             model_id=data.model_id,
+            report_type=data.report_type,
             title_override=data.title,
             collection_run_id=data.collection_run_id,
             collection_run_ids=data.collection_run_ids,
@@ -62,6 +63,7 @@ async def batch_generate_reports(data: BatchGenerateRequest, db: Session = Depen
         raise HTTPException(400, "topic_ids 不能为空")
 
     run_ids = data.collection_run_ids or []
+    semaphore = asyncio.Semaphore(2)
 
     async def _one(idx: int, tid: str):
         run_id = run_ids[idx] if idx < len(run_ids) else None
@@ -69,12 +71,15 @@ async def batch_generate_reports(data: BatchGenerateRequest, db: Session = Depen
             (data.collection_run_ids_list or [None] * len(data.topic_ids))[idx]
             if data.collection_run_ids_list else None
         )
-        return await gen(
-            topic_id=tid, model_id=data.model_id,
-            collection_run_id=run_id,
-            collection_run_ids=run_ids_for_topic,
-            model_name_override=data.model_name_override,
-        )
+        async with semaphore:
+            return await gen(
+                topic_id=tid,
+                model_id=data.model_id,
+                report_type=data.report_type,
+                collection_run_id=run_id,
+                collection_run_ids=run_ids_for_topic,
+                model_name_override=data.model_name_override,
+            )
 
     tasks = [_one(i, tid) for i, tid in enumerate(data.topic_ids)]
     raw = await asyncio.gather(*tasks, return_exceptions=True)

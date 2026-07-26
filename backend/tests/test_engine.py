@@ -169,6 +169,22 @@ class TestPersistItems:
         assert existing.content == "body"  # updated
         assert existing.topic_id == "t1"  # backfilled
 
+    def test_dedup_skips_same_article_from_another_source(self):
+        """A canonical URL should prevent duplicate rows across sources and runs."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        existing = MagicMock(spec=CollectedItem)
+        existing.content = "body"
+        existing.summary = None
+        existing.published_at = None
+        existing.topic_id = "t1"
+        mock_db.query.return_value.filter.return_value.first.side_effect = [None, existing]
+
+        fi = FetchItem(title="Shared news", content="body", url="https://example.com/article?utm_source=test")
+        engine._persist_items([fi], "src-2", "run-2", topic_id="t1")
+
+        mock_db.add.assert_not_called()
+
 
 class TestWindowFiltering:
     """Window-based filtering of items by publication date."""
@@ -207,8 +223,8 @@ class TestWindowFiltering:
 
         assert mock_db.add.call_count >= 1
 
-    def test_undated_search_result_kept_when_source_allows_review(self):
-        """Trusted search results may be retained when their date is unavailable."""
+    def test_undated_search_result_is_rejected_even_when_source_requests_bypass(self):
+        """A topic window is a hard boundary and cannot be bypassed by a connector."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -223,7 +239,7 @@ class TestWindowFiltering:
             window_start=utc_now() - timedelta(days=7),
         )
 
-        assert mock_db.add.call_count >= 1
+        mock_db.add.assert_not_called()
 
     def test_search_result_kept_when_source_allows_topic_review(self):
         """A search result selected by the topic query may bypass generic matching."""

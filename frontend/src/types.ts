@@ -32,11 +32,13 @@ export interface Topic {
   keywords: string[];
   keyword_tags: KeywordTag[] | null;
   description_prompt: string | null;
+  ai_research_model_id: string | null;
   synonyms: string[] | null;
   categories: string[] | null;
   focus_countries: string[] | null;
   focus_languages: string[] | null;
   source_ids: string[] | null;
+  collection_model_ids: string[] | null;
   target_urls: string[] | null;
   auto_tag_rules: AutoTagRule[] | null;
   collect_window_days: number;
@@ -46,6 +48,7 @@ export interface Topic {
   is_configured: boolean;
   auto_report: boolean;
   auto_report_model_id: string | null;
+  auto_report_type: "analytical" | "archive";
   last_collection_run_id: string | null;
   source_names: string[];
   total_items_collected: number;
@@ -81,6 +84,7 @@ export interface CollectedItem {
   language: string | null;
   translation_status: string | null;
   enforcement_review: Record<string, unknown> | null;
+  quality_review: Record<string, unknown> | null;
   category: string | null;
   tags: TagRef[];
   entities: Record<string, unknown> | null;
@@ -157,6 +161,12 @@ export interface DashboardData {
     total_tags: number;
   };
   categories: { category: string; count: number }[];
+  topic_stats: {
+    topic_id: string;
+    topic_name: string;
+    item_count: number;
+    last_collected_at: string | null;
+  }[];
   languages: { language: string; count: number }[];
   top_tags: { id: string; namespace: string; value: string; count: number }[];
   source_health: {
@@ -242,6 +252,7 @@ export interface Report {
   topic_id: string;
   topic_name?: string;
   title: string;
+  report_type: "analytical" | "archive";
   content: string | null;
   summary: string | null;
   status: string;           // pending | generating | completed | failed
@@ -404,10 +415,54 @@ export interface YmgAnalyzeResponse {
   ymg_status: string;
   ymg_message: string | null;
   ymg_base_url: string;
+  material_set_id: string;
+  handoff_run_id: string;
 }
 
 export interface YmgHealthResponse {
   reachable: boolean;
   base_url: string;
   message: string | null;
+}
+
+export interface HaiSeePushResponse {
+  batch_id: string | null;
+  batch_ids: string[];
+  task_ids: string[];
+  status: string;
+  web_url: string;
+  material_set_id: string;
+  handoff_run_id: string;
+}
+
+export interface HaiSeeHealthResponse {
+  reachable: boolean;
+  base_url: string;
+  message: string | null;
+}
+
+export interface HandoffRun {
+  id: string;
+  material_set_id: string;
+  target: "ymg_deep" | "haisee";
+  status: string;
+  remote_session_id: string | null;
+  remote_batch_ids: string[];
+  remote_task_ids: string[];
+  error_message: string | null;
+  created_at: string | null;
+}
+
+export interface MaterialSet {
+  id: string;
+  name: string;
+  topic_id: string | null;
+  report_id: string | null;
+  source_type: string;
+  source_ref_id: string | null;
+  item_ids: string[];
+  item_count: number;
+  is_archived: boolean;
+  created_at: string | null;
+  handoff_runs: HandoffRun[];
 }

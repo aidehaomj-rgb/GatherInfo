@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.llm_client import call_llm
 from app.models import ModelConfig, Topic
@@ -18,17 +18,17 @@ async def build_research_queries(
     user_prompt: str,
     model: ModelConfig | None,
     max_queries: int = 12,
+    window_days: int = 7,
+    today: date | None = None,
 ) -> list[str]:
     """Turn an analyst prompt into search inputs, keeping evidence on the web."""
-    request = (user_prompt or "").strip()
-    if not request:
-        return _fallback_queries(topic, datetime.now(timezone.utc).date(), max_queries)
-
-    today = datetime.now(timezone.utc).date()
-    window_start = today - timedelta(days=6)
+    current_date = today or datetime.now(timezone.utc).date()
+    safe_window_days = max(1, int(window_days or 7))
+    window_start = current_date - timedelta(days=safe_window_days)
+    request = _collection_instruction(topic, user_prompt)
     time_constraint = (
-        f"Today is {today.isoformat()}. The target publication window is "
-        f"{window_start.isoformat()} through {today.isoformat()}. "
+        f"Today is {current_date.isoformat()}. The target publication window is "
+        f"{window_start.isoformat()} through {current_date.isoformat()}. "
         "Search for recent or latest publications in this window. Do not use "
         "an obsolete year or month. Do not make an exact quoted date a required match."
     )
@@ -64,6 +64,9 @@ Requirements:
 4. For enforcement cases, vary the wording so that a China nexus in the article
    body can still be found even when it is absent from the title.
 5. Do not include mainland China Customs domains or document farms.
+6. Treat the configured keywords as semantic intent. Do not require every literal keyword
+   to appear in a result; use close concepts, synonyms, translations,
+   authorities, conduct, goods and routes that express the same information direction.
 
 Topic: {topic.name}
 Topic description: {topic_desc}
@@ -79,7 +82,7 @@ Analyst request: {request}
         content = str(result.get("content") or "")
     except Exception as exc:
         logger.warning("AI research query planning failed: %s", exc)
-        return _fallback_queries(topic, today, max_queries)
+        return _fallback_queries(topic, current_date, safe_window_days, max_queries)
 
     queries = _parse_query_json(content)
     cleaned: list[str] = []
@@ -105,34 +108,45 @@ Analyst request: {request}
         cleaned.append(value[:240])
         if len(cleaned) >= max_queries:
             break
-    return cleaned or _fallback_queries(topic, today, max_queries)
+    return cleaned or _fallback_queries(topic, current_date, safe_window_days, max_queries)
 
 
-def _fallback_queries(topic: Topic, today, max_queries: int) -> list[str]:
-    """Deterministic multilingual plan used when the planning model is unavailable."""
-    start = today - timedelta(days=6)
-    date_hint = f"recent since {start.isoformat()} latest"
-    queries = [
-        f"Hong Kong Customs seizure drugs firearms wildlife tobacco counterfeit {date_hint}",
-        f"Taiwan Customs seizure drugs firearms wildlife tobacco counterfeit {date_hint}",
-        f"Macao Customs seizure smuggling drugs counterfeit {date_hint}",
-        f"U.S. CBP customs seizure smuggling Chinese-origin goods {date_hint}",
-        f"Canada CBSA border seizure Chinese-origin goods {date_hint}",
-        f"UK Border Force customs seizure Chinese-made goods {date_hint}",
-        f"Australia Border Force Chinese national customs smuggling seizure {date_hint}",
-        f"Singapore Customs seizure Chinese-origin goods {date_hint}",
-        f"South Africa SARS customs seizure China-origin goods {date_hint}",
-        f"Colombia DIAN incautación mercancía de origen chino contrabando {date_hint}",
-        f"Ecuador policía incautó cocaína destino China contenedor banano {date_hint}",
-        f"Perú SUNAT incautó contrabando mercancía china {date_hint}",
-        f"Brasil Receita Federal apreensão contrabando origem China {date_hint}",
-        f"India DRI seized Chinese-origin goods smuggling customs {date_hint}",
-        f"Sri Lanka Customs seized Chinese cigarettes smuggling {date_hint}",
-        f"customs border seizure firearms ammunition explosives drugs narcotics {date_hint}",
-        f"customs border seizure wildlife endangered species tobacco counterfeit {date_hint}",
-        f"customs enforcement Chinese-origin pharmaceuticals electronics minerals {date_hint}",
+def _collection_instruction(topic: Topic, user_prompt: str) -> str:
+    explicit = (user_prompt or "").strip()
+    if explicit:
+        return explicit
+    keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]
+    return (
+        f"Collect information closely related to the topic '{topic.name}'. "
+        f"Topic description: {topic.description or 'not provided'}. "
+        f"Semantic directions: {', '.join(keywords) or topic.name}. "
+        "Use the concepts as a combined information direction, including synonyms, "
+        "translations and equivalent events; do not require literal keyword matching."
+    )
+
+
+def _fallback_queries(
+    topic: Topic,
+    today: date,
+    window_days: int,
+    max_queries: int,
+) -> list[str]:
+    """Build deterministic topic-specific queries when the model is unavailable."""
+    start = today - timedelta(days=max(1, window_days))
+    date_hint = f"since {start.isoformat()} through {today.isoformat()}"
+    keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]
+    directions = keywords[:4] or [topic.name]
+    query_suffixes = [
+        "official announcement latest",
+        "news enforcement policy case",
+        "customs trade supply chain risk",
+        "regulation authority evidence",
     ]
-    return queries[:max_queries]
+    queries = [
+        f"{topic.name} {direction} {query_suffixes[index % len(query_suffixes)]} {date_hint}"
+        for index, direction in enumerate(directions)
+    ]
+    return list(dict.fromkeys(queries))[:max_queries]
 
 
 def _parse_query_json(content: str) -> list[str]:

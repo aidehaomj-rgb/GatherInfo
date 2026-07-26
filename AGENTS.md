@@ -516,3 +516,23 @@ collect_topic(topic_id)
 ### 验证
 - `npm run build` 通过
 - `npm run dev` 前后端正常启动，前端 `localhost:5178`、后端 `localhost:8109/health` 均可用
+
+---
+
+## 2026-07-26 素材集与下游分析衔接
+
+### 核心约定
+1. `MaterialSet` 是不可变的信息成员快照；相同主题、报告和条目组合复用同一素材集。
+2. 每次发送到 YMG-Deep 或 HaiSee 都写入独立 `HandoffRun`，不得覆盖此前会话或任务记录。
+3. YMG-Deep 接收 `risk-intelligence-material-set/v1`，将结构化素材保存为会话输入，阶段报告仅作为分析线索。
+4. HaiSee 每条采集信息对应一个独立转译分析任务；超过 50 条时由 GatherInfo 自动拆成多个批次。
+5. 报告分为 `analytical`（总结推理分析型）和 `archive`（逐条信息归档型）。归档型保留全部条目的完整中文正文，不进行跨条目事实合并。
+6. 搜索采集必须严格执行主题发布日期窗口；无可核验日期或超窗的条目不得入库。
+7. 关键词是语义方向，不是逐字匹配条件；AI 模型信息源应生成语义检索计划，并可独立于指定网站开展广泛采集。
+
+### 验证基线
+- GatherInfo 后端：`backend/.venv/bin/python -m pytest backend/tests -q`
+- GatherInfo 前端：`npm --prefix frontend run build`
+- 信息源树交互：`node frontend/_test_selector.mjs`
+- YMG-Deep 素材接收：`.venv/bin/python -m pytest backend/tests/test_input_materials.py backend/tests/test_config_export_import.py -q`
+- HaiSee 批量任务：项目后端全量 pytest，保持覆盖率门禁通过

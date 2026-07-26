@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BrainCircuit } from "lucide-react";
-import { fetchBatches, generateReport, batchGenerateReports } from "../api";
-import type { Report, Topic, ModelConfig } from "../types";
+import { fetchBatches, batchGenerateReports } from "../api";
+import type { Topic, ModelConfig } from "../types";
 
 interface Props {
   topics: Topic[];
@@ -12,6 +12,7 @@ interface Props {
   onGenerated: () => void;
   genMsg: string | null;
   onGenMsg: (msg: string | null) => void;
+  reportType: "analytical" | "archive";
 }
 
 /** Multi-topic batch mode. */
@@ -21,7 +22,7 @@ interface BatchMeta { label: string; run_id: string; }
 
 export function ReportBatchPanel({
   topics, models, ollamaModels, generating,
-  onGeneratingChange, onGenerated, genMsg, onGenMsg,
+  onGeneratingChange, onGenerated, genMsg, onGenMsg, reportType,
 }: Props) {
   const [topicIds, setTopicIds] = useState<string[]>([]);
   const [mode, setMode] = useState<MultiMode>("allItems");
@@ -68,20 +69,24 @@ export function ReportBatchPanel({
     try {
       const { modelId, modelNameOverride } = parseModel(batchModel);
       if (mode === "allItems") {
-        const results = await Promise.all(topicIds.map((tid) => generateReport(tid, { modelId, modelNameOverride })));
-        const ok = results.filter((r: Report) => r.status !== "failed").length;
-        onGenMsg(`每个主题全量报告生成完成：成功 ${ok} 份，失败 ${results.length - ok} 份`);
+        const result = await batchGenerateReports(
+          topicIds, modelId, undefined, modelNameOverride, undefined, reportType,
+        );
+        onGenMsg(`每个主题全量报告生成完成：成功 ${result.results.length - result.failed} 份，失败 ${result.failed} 份`);
       } else {
-        const tasks: Promise<Report>[] = [];
+        const requestedTopics: string[] = [];
+        const requestedRuns: string[] = [];
         for (const tid of topicIds) {
           for (const rid of runIdsFor(tid)) {
-            tasks.push(generateReport(tid, { modelId, modelNameOverride, collectionRunId: rid }));
+            requestedTopics.push(tid);
+            requestedRuns.push(rid);
           }
         }
-        if (!tasks.length) { onGenMsg("按批次生成需至少选择一个批次"); onGeneratingChange(false); return; }
-        const results = await Promise.all(tasks);
-        const ok = results.filter((r) => r.status !== "failed").length;
-        onGenMsg(`按批次独立报告生成完成：成功 ${ok} 份，失败 ${results.length - ok} 份`);
+        if (!requestedTopics.length) { onGenMsg("按批次生成需至少选择一个批次"); onGeneratingChange(false); return; }
+        const result = await batchGenerateReports(
+          requestedTopics, modelId, requestedRuns, modelNameOverride, undefined, reportType,
+        );
+        onGenMsg(`按批次独立报告生成完成：成功 ${result.results.length - result.failed} 份，失败 ${result.failed} 份`);
       }
       setTopicIds([]);
       setTopicBatchSelections({});
@@ -176,6 +181,9 @@ export function ReportBatchPanel({
               })}
             </select>
           </div>
+        )}
+        {reportType === "archive" && (
+          <span className="text-muted small">逐条归档型按规则直接编排，不进行跨条目综合推理。</span>
         )}
         <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
           <BrainCircuit size={14} className={generating ? "spin" : ""} />

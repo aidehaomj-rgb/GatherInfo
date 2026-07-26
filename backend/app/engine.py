@@ -8,6 +8,7 @@ Flow:
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 _translation_lock = asyncio.Lock()
+SEMANTIC_SEARCH_CHANNELS = frozenset({"ai_research", "api_search"})
 
 
 def utc_now() -> datetime:
@@ -60,6 +62,7 @@ class CollectionEngine:
         self, source_id: str, keywords: list[str], topic_id: str | None = None,
         window_start: "datetime | None" = None, window_end: "datetime | None" = None,
         batch_id: str | None = None, model: ModelConfig | None = None,
+        semantic_prompt: str | None = None,
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
@@ -93,6 +96,7 @@ class CollectionEngine:
 
         try:
             connector = ConnectorRegistry.create(source)
+            connector.set_collection_window(window_start, window_end)
         except ValueError as exc:
             run.status = JobStatus.FAILED
             run.error_log = [str(exc)]
@@ -101,6 +105,41 @@ class CollectionEngine:
                                  status=JobStatus.FAILED, items=[], error_log=[str(exc)])
 
         result = await connector.execute(run, keywords)
+        window_items, window_rejected = _filter_items_by_window(
+            result.items, window_start, window_end
+        )
+        result.items = window_items
+        result.items_failed += window_rejected
+        if window_rejected:
+            result.error_log = [
+                *(result.error_log or []),
+                f"采集窗口过滤 {window_rejected} 条：发布日期缺失或超出范围",
+            ]
+        if model is None:
+            model = self.db.query(ModelConfig).filter(
+                ModelConfig.is_default == True,
+                ModelConfig.is_active == True,
+            ).first()
+
+        # A search result is only a lead. Before it reaches the local library,
+        # reject listing/advertising pages and use the selected model to turn a
+        # complete article into a concise Chinese intelligence brief.
+        from app.content_quality import curate_article_candidates
+        topic = (
+            self.db.query(Topic).filter(Topic.id == topic_id).first()
+            if topic_id else None
+        )
+        approved_items, rejected_items = await curate_article_candidates(
+            result.items,
+            model,
+            _topic_review_context(topic, semantic_prompt) if topic else None,
+        )
+        result.items = approved_items
+        result.items_failed += len(rejected_items)
+        if rejected_items:
+            reasons = list(dict.fromkeys(rejection.reason for rejection in rejected_items))
+            result.error_log = [*(result.error_log or []), f"质量审核拒绝 {len(rejected_items)} 条：{'；'.join(reasons[:3])}"]
+
         if topic_id == "weekly-enforcement-intelligence":
             from app.enforcement_review import review_enforcement_candidates
             # Keep manual/topic source runs on the same review path. Some
@@ -165,27 +204,41 @@ class CollectionEngine:
         from uuid import uuid4
         batch_id = f"batch-{uuid4().hex[:12]}"
 
-        # Load default model for item translation and optional AI research planning.
+        # Topic-selected models are existing model configs, so no provider
+        # credentials need to be copied into a topic. Rotate them by source so
+        # multiple selections participate in the collection pipeline.
         default_model = self.db.query(ModelConfig).filter(
             ModelConfig.is_default == True, ModelConfig.is_active == True
         ).first()
-        research_model = default_model
-        if research_model_id:
+        selected_model_ids = topic.collection_model_ids if isinstance(topic.collection_model_ids, list) else []
+        collection_models = self.db.query(ModelConfig).filter(
+            ModelConfig.id.in_(selected_model_ids),
+            ModelConfig.is_active == True,
+        ).all() if selected_model_ids else []
+        collection_models = [model for model in collection_models if model.model_name]
+        research_model = collection_models[0] if collection_models else default_model
+        configured_research_model_id = research_model_id or topic.ai_research_model_id
+        if configured_research_model_id:
             research_model = self.db.query(ModelConfig).filter(
-                ModelConfig.id == research_model_id, ModelConfig.is_active == True
-            ).first() or default_model
+                ModelConfig.id == configured_research_model_id, ModelConfig.is_active == True
+            ).first() or research_model
 
-        ai_research_queries: list[str] = []
-        if research_prompt and any(getattr(s.channel, "value", s.channel) == "ai_research" for s in sources):
+        semantic_queries: list[str] = []
+        effective_research_prompt = research_prompt or topic.description_prompt
+        if any(_channel_value(source) in SEMANTIC_SEARCH_CHANNELS for source in sources):
             try:
                 from app.research_planner import build_research_queries
-                ai_research_queries = await build_research_queries(
-                    topic, research_prompt, research_model, max_queries=12
+                semantic_queries = await build_research_queries(
+                    topic,
+                    effective_research_prompt or "",
+                    research_model,
+                    max_queries=12,
+                    window_days=window_days or 7,
                 )
-                if ai_research_queries:
+                if semantic_queries:
                     logger.info(
-                        "AI research prompt generated %d queries for topic %s",
-                        len(ai_research_queries), topic.id,
+                        "Semantic collection plan generated %d queries for topic %s",
+                        len(semantic_queries), topic.id,
                     )
             except Exception as exc:
                 logger.warning("AI research prompt planning failed for %s: %s", topic.id, exc)
@@ -194,14 +247,15 @@ class CollectionEngine:
         tasks = [
             self.collect_from_source(
                 source.id,
-                ai_research_queries if getattr(source.channel, "value", source.channel) == "ai_research" and ai_research_queries else keywords,
+                semantic_queries if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS and semantic_queries else keywords,
                 topic.id,
                 window_start,
                 window_end,
                 batch_id,
-                default_model,
+                collection_models[index % len(collection_models)] if collection_models else default_model,
+                effective_research_prompt,
             )
-            for source in sources
+            for index, source in enumerate(sources)
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -367,11 +421,32 @@ class CollectionEngine:
 
     def _resolve_sources(self, topic: Topic) -> list[SourceConfig]:
         if topic.source_ids:
-            return self.db.query(SourceConfig).filter(
+            selected = self.db.query(SourceConfig).filter(
                 SourceConfig.id.in_(topic.source_ids),
                 SourceConfig.is_active == True,
             ).all()
-        return self.db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
+        else:
+            selected = self.db.query(SourceConfig).filter(
+                SourceConfig.is_active == True
+            ).all()
+        if not topic.collection_model_ids or not topic.source_ids:
+            return selected
+
+        selected_ids = {source.id for source in selected}
+        broad_sources = self.db.query(SourceConfig).filter(
+            SourceConfig.is_active == True,
+            SourceConfig.channel.in_(list(SEMANTIC_SEARCH_CHANNELS)),
+        ).all()
+        ai_research_sources = [
+            source for source in broad_sources if _channel_value(source) == "ai_research"
+        ]
+        additions = ai_research_sources or [
+            source for source in broad_sources if _channel_value(source) == "api_search"
+        ]
+        return [
+            *selected,
+            *(source for source in additions if source.id not in selected_ids),
+        ]
 
     async def _translate_fetch_items(self, items: list[FetchItem], model: ModelConfig) -> list[FetchItem] | None:
         """Backward-compatible wrapper: attach translations without replacing originals."""
@@ -396,11 +471,7 @@ class CollectionEngine:
             if window_start is not None:
                 if pub is None:
                     pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
-                allow_undated = bool(
-                    isinstance(fi.raw_metadata, dict)
-                    and fi.raw_metadata.get("allow_undated_results")
-                )
-                if (pub is None and not allow_undated) or (
+                if pub is None or (
                     pub is not None and _is_out_of_range(pub, window_start, window_end)
                 ):
                     continue
@@ -411,6 +482,12 @@ class CollectionEngine:
                 isinstance(fi.raw_metadata, dict)
                 and fi.raw_metadata.get("allow_unfiltered_results")
             )
+            if isinstance(fi.raw_metadata, dict):
+                review = fi.raw_metadata.get("quality_review")
+                allow_unfiltered = allow_unfiltered or bool(
+                    isinstance(review, dict)
+                    and review.get("topic_relevance_score", 0) >= 60
+                )
             # Enforcement candidates have already passed the dedicated
             # semantic review. Requiring two literal topic keywords here can
             # discard valid cases such as "检获受管制活龟" whose evidence is
@@ -428,8 +505,13 @@ class CollectionEngine:
                 if len(matched_kws) < required_matches:
                     continue
             item_id = fi.item_id(source_id)
+            content_hash = _hash(_dedupe_fingerprint(fi.url, fi.title, parsed.content))
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
+                if not existing:
+                    existing = self.db.query(CollectedItem).filter(
+                        CollectedItem.content_hash == content_hash,
+                    ).first()
                 if existing:
                     if parsed.content and parsed.content != existing.content:
                         existing.content = parsed.content
@@ -447,7 +529,7 @@ class CollectionEngine:
                         id=item_id, source_id=source_id, run_id=run_id,
                         topic_id=topic_id,
                         title=fi.title.strip(), content=parsed.content,
-                        content_hash=_hash(parsed.content or fi.title),
+                        content_hash=content_hash,
                         summary=parsed.summary, url=fi.url,
                         language=fi.language, category=fi.category,
                         entities=parsed.entities,
@@ -473,6 +555,19 @@ class CollectionEngine:
 def _hash(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
+
+
+def _dedupe_fingerprint(url: str | None, title: str, content: str | None) -> str:
+    """Return a stable cross-source identity without retaining tracking parameters."""
+    if url:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parsed = urlsplit(url.strip())
+        normalized_url = urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", ""))
+        if normalized_url:
+            return f"url:{normalized_url}"
+    normalized_text = re.sub(r"\s+", " ", f"{title} {content or ''}").strip().lower()
+    return f"text:{normalized_text}"
 
 
 def _web_translation_model() -> ModelConfig:
@@ -532,6 +627,45 @@ def _is_out_of_range(
     if end is not None and pub > end:
         return True
     return False
+
+
+def _filter_items_by_window(
+    items: list[FetchItem],
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> tuple[list[FetchItem], int]:
+    if window_start is None:
+        return list(items), 0
+    accepted: list[FetchItem] = []
+    rejected = 0
+    for item in items:
+        published_at = _coerce_datetime(item.published_at)
+        if published_at is None:
+            published_at = _extract_date_from_text(
+                f"{item.title} {item.content or ''} {item.summary or ''}"
+            )
+        if published_at is None or _is_out_of_range(
+            published_at, window_start, window_end
+        ):
+            rejected += 1
+            continue
+        accepted.append(replace(item, published_at=published_at.isoformat()))
+    return accepted, rejected
+
+
+def _topic_review_context(topic: Topic, semantic_prompt: str | None) -> dict:
+    keywords = topic.keywords if isinstance(topic.keywords, list) else []
+    return {
+        "topic_id": topic.id,
+        "name": topic.name,
+        "description": topic.description or "",
+        "semantic_instruction": semantic_prompt or topic.description_prompt or "",
+        "keywords": [str(value) for value in keywords if value],
+    }
+
+
+def _channel_value(source: SourceConfig) -> str:
+    return str(getattr(source.channel, "value", source.channel))
 
 
 def _as_aware_utc(value: datetime | None) -> datetime | None:

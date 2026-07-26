@@ -31,6 +31,7 @@ from app._models_config import (
     SearchToolConfig,
     SystemConfig,
 )
+from app._models_handoff import MaterialSet, HandoffRun
 
 __all__ = [
     "SourceChannel",
@@ -48,4 +49,6 @@ __all__ = [
     "Report",
     "SearchToolConfig",
     "SystemConfig",
+    "MaterialSet",
+    "HandoffRun",
 ]

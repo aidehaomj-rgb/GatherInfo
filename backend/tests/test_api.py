@@ -89,6 +89,34 @@ def test_list_items() -> None:
     assert "total" in data
 
 
+def test_quality_review_deletes_known_low_value_page() -> None:
+    from app.database import SessionLocal
+    from app.models import CollectedItem
+
+    source = client.post("/api/v1/sources", json={
+        "id": "quality-review-source", "name": "Quality Review Source", "channel": "api_search",
+    })
+    assert source.status_code in (200, 201)
+    db = SessionLocal()
+    try:
+        db.add(CollectedItem(
+            id="quality-review-noise", source_id="quality-review-source",
+            title="查获_【环球博讯】",
+            content="BOSS体育 U存U取 编辑推荐 SIDE1 招租 Copyright 环球博彩资讯门户网",
+            url="https://m.wgi888.com/tag/%E6%9F%A5%E8%8E%B7",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/v1/items/quality-review", json={
+        "item_ids": ["quality-review-noise"], "limit": 1,
+    })
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    client.delete("/api/v1/sources/quality-review-source")
+
+
 # ── Tags ────────────────────────────────────────────────────────────
 
 def test_list_tags() -> None:
@@ -118,6 +146,24 @@ def test_dashboard() -> None:
     data = resp.json()
     assert "summary" in data
     assert "daily_trend" in data
+    assert "topic_stats" in data
+    assert isinstance(data["topic_stats"], list)
+
+
+def test_topic_ai_collection_strategy_round_trips() -> None:
+    payload = {
+        "id": "test-ai-collection-topic",
+        "name": "AI Collection Topic",
+        "keywords": ["test"],
+        "description_prompt": "检索近一周的高价值贸易风险信息。",
+        "ai_research_model_id": "configured-model",
+    }
+    created = client.post("/api/v1/topics", json=payload)
+    assert created.status_code in (200, 201)
+    body = created.json()
+    assert body["description_prompt"] == payload["description_prompt"]
+    assert body["ai_research_model_id"] == payload["ai_research_model_id"]
+    assert client.delete("/api/v1/topics/test-ai-collection-topic").status_code == 200
 
 
 # ── Connectors ──────────────────────────────────────────────────────

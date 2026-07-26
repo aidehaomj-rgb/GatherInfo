@@ -94,6 +94,8 @@ def export_config(db: Session = Depends(get_db)):
         td = {"id": t.id, "name": t.name, "description": t.description,
               "keywords": t.keywords, "keyword_tags": t.keyword_tags,
               "description_prompt": t.description_prompt, "source_ids": t.source_ids,
+              "collection_model_ids": t.collection_model_ids,
+              "ai_research_model_id": t.ai_research_model_id,
               "target_urls": t.target_urls, "auto_tag_rules": t.auto_tag_rules,
               "schedule_cron": t.schedule_cron, "is_scheduled": t.is_scheduled,
               "is_active": t.is_active}
@@ -229,5 +231,3 @@ def import_config(data: dict, db: Session = Depends(get_db)):
 
     db.commit()
     return {"imported": imported, "conflicts": conflicts, "conflict_count": len(conflicts)}
-
-

@@ -21,3 +21,9 @@ pptx_build/node_modules/
 
 # Project docs
 data/backups/
+
+# IDE / agent working data (never version-controlled)
+.codebuddy/
+
+# Temporary diagnostic scripts
+frontend/_test_*.mjs

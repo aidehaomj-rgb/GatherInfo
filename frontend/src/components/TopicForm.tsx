@@ -63,11 +63,17 @@ export function TopicForm({
   const [descriptionPrompt, setDescriptionPrompt] = useState(
     (topic as any)?.description_prompt ?? "",
   );
+  const [aiResearchModelId, setAiResearchModelId] = useState(
+    topic?.ai_research_model_id ?? topic?.collection_model_ids?.[0] ?? models.find((model) => model.is_default)?.id ?? "",
+  );
   const [collectWindowDays, setCollectWindowDays] = useState<number>(
     (topic as any)?.collect_window_days ?? 7,
   );
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(
     topic?.source_ids ?? [],
+  );
+  const [selectedCollectionModelIds, setSelectedCollectionModelIds] = useState<string[]>(
+    topic?.collection_model_ids ?? [],
   );
   const [targetUrls, setTargetUrls] = useState(
     (topic?.target_urls ?? []).join("\n"),
@@ -76,6 +82,9 @@ export function TopicForm({
   const [autoReport, setAutoReport] = useState(topic?.auto_report ?? false);
   const [autoReportModelId, setAutoReportModelId] = useState(
     topic?.auto_report_model_id ?? models.find((m) => m.is_default)?.id ?? "",
+  );
+  const [autoReportType, setAutoReportType] = useState<"analytical" | "archive">(
+    topic?.auto_report_type ?? "analytical",
   );
   const [autoTags, setAutoTags] = useState(
     (topic?.auto_tag_rules ?? [])
@@ -107,7 +116,9 @@ export function TopicForm({
               .filter((r: { keyword: string; weight: number }) => r.keyword)
           : null,
         description_prompt: descriptionPrompt || null,
+        ai_research_model_id: aiResearchModelId || null,
         source_ids: selectedSourceIds.length ? selectedSourceIds : null,
+        collection_model_ids: selectedCollectionModelIds.length ? selectedCollectionModelIds : null,
         collect_window_days: Number.isFinite(collectWindowDays)
           ? collectWindowDays
           : 7,
@@ -121,6 +132,7 @@ export function TopicForm({
         is_scheduled: !!cron,
         auto_report: autoReport,
         auto_report_model_id: autoReport ? autoReportModelId || null : null,
+        auto_report_type: autoReportType,
         auto_tag_rules: autoTags
           ? autoTags
               .split(/[,，]/)
@@ -227,11 +239,14 @@ export function TopicForm({
           </label>
           <div className="span-2 topic-source-field">
             <span className="topic-source-label">关联信息源</span>
-            <SourceSelector
-              sources={activeSources}
-              selected={selectedSourceIds}
-              onChange={setSelectedSourceIds}
-            />
+          <SourceSelector
+            sources={activeSources}
+            selected={selectedSourceIds}
+            onChange={setSelectedSourceIds}
+            models={models}
+            selectedModelIds={selectedCollectionModelIds}
+            onModelChange={setSelectedCollectionModelIds}
+          />
           </div>
           <label>
             Cron 表达式
@@ -311,8 +326,20 @@ export function TopicForm({
               </select>
             </label>
           )}
+          {autoReport && (
+            <label>
+              自动报告类型
+              <select
+                value={autoReportType}
+                onChange={(e) => setAutoReportType(e.target.value as "analytical" | "archive")}
+              >
+                <option value="analytical">总结推理分析型</option>
+                <option value="archive">逐条信息归档型</option>
+              </select>
+            </label>
+          )}
           <label className="span-2">
-            AI 描述提示词{" "}
+            AI 采集提示词{" "}
             <select
               style={{ marginBottom: 4 }}
               value=""
@@ -337,9 +364,17 @@ export function TopicForm({
               placeholder="例如：监控全球主要经济体的贸易政策变化、关税调整、贸易协定进展，重点关注影响中国出口的措施"
             />
             <span className="text-muted small">
-              用自然语言描述这个主题的关注重点和需求，AI
-              报告生成时会参考此描述
+              主题关联“AI 提示采集”信息源时，手动与定时采集都会使用这份提示词生成检索式。
             </span>
+          </label>
+          <label>
+            AI 采集模型
+            <select value={aiResearchModelId} onChange={(event) => setAiResearchModelId(event.target.value)}>
+              <option value="">使用主题采集模型或默认模型</option>
+              {models.filter((model) => model.is_active && model.is_configured).map((model) => (
+                <option key={model.id} value={model.id}>{model.name} · {model.model_name}</option>
+              ))}
+            </select>
           </label>
           <label className="span-2">
             目标URL (每行一个){" "}

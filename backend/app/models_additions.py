@@ -32,10 +32,16 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE topics ADD COLUMN keyword_tags JSON"))
             if "description_prompt" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN description_prompt TEXT"))
+            if "ai_research_model_id" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN ai_research_model_id VARCHAR(80)"))
             if "auto_report" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN auto_report BOOLEAN DEFAULT 0"))
             if "auto_report_model_id" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN auto_report_model_id VARCHAR(80)"))
+            if "auto_report_type" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE topics ADD COLUMN auto_report_type VARCHAR(20) DEFAULT 'analytical'"
+                ))
             if "last_collection_run_id" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN last_collection_run_id VARCHAR(80)"))
             if "last_error" not in cols:
@@ -46,6 +52,8 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE topics ADD COLUMN schedule_cron VARCHAR(100)"))
             if "next_run_at" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN next_run_at TIMESTAMP"))
+            if "collection_model_ids" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN collection_model_ids JSON"))
             conn.commit()
 
     # Add window columns to `collection_runs` table if it exists
@@ -74,6 +82,10 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE reports ADD COLUMN output_files JSON"))
             if "output_dir" not in cols:
                 conn.execute(text("ALTER TABLE reports ADD COLUMN output_dir VARCHAR(800)"))
+            if "report_type" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE reports ADD COLUMN report_type VARCHAR(20) DEFAULT 'analytical'"
+                ))
             conn.commit()
 
     # Create model_configs table
@@ -107,6 +119,7 @@ def migrate_schema(engine):
                     id VARCHAR(80) PRIMARY KEY,
                     topic_id VARCHAR(80) REFERENCES topics(id),
                     title VARCHAR(500) NOT NULL,
+                    report_type VARCHAR(20) DEFAULT 'analytical',
                     content TEXT,
                     summary TEXT,
                     status VARCHAR(20) DEFAULT 'pending',

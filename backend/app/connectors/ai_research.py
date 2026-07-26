@@ -7,6 +7,7 @@ then, it transparently uses the topic's own keyword list as the research plan.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from types import SimpleNamespace
 
 from app.connectors.base import (
@@ -56,6 +57,7 @@ class AIResearchCollector(BaseCollector):
         if "tavily" in providers:
             try:
                 tavily = TavilyCollector(self._provider_config("tavily", self.config.api_key))
+                tavily.set_collection_window(self.window_start, self.window_end)
                 response = await tavily.fetch(queries, per_provider)
                 items.extend(self._annotate(response.items, "tavily"))
                 errors.extend(response.error_log or [])
@@ -69,6 +71,7 @@ class AIResearchCollector(BaseCollector):
             else:
                 try:
                     baidu = TavilyCollector(self._provider_config("baidu_qianfan", baidu_key))
+                    baidu.set_collection_window(self.window_start, self.window_end)
                     response = await baidu.fetch(queries, per_provider)
                     items.extend(self._annotate(response.items, "baidu_qianfan"))
                     errors.extend(response.error_log or [])
@@ -134,6 +137,7 @@ class AIResearchCollector(BaseCollector):
             session.close()
 
     def _annotate(self, items: list[FetchItem], provider: str) -> list[FetchItem]:
+        annotated: list[FetchItem] = []
         for item in items:
             metadata = dict(item.raw_metadata or {})
             metadata.update({
@@ -145,5 +149,5 @@ class AIResearchCollector(BaseCollector):
                 "allow_undated_results": False,
                 "allow_unfiltered_results": True,
             })
-            item.raw_metadata = metadata
-        return items
+            annotated.append(replace(item, raw_metadata=metadata))
+        return annotated

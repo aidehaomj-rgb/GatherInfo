@@ -102,7 +102,7 @@ class CollectionScheduler:
             logger.info("Topic %s done: %d new", topic_id, total_new)
 
             topic = db.query(Topic).filter(Topic.id == topic_id).first()
-            if topic and topic.auto_report:
+            if topic and topic.auto_report and total_new > 0:
                 run_ids = [result.run_id for result in results if getattr(result, "run_id", None)]
                 try:
                     from app.report_engine import generate_report
@@ -110,6 +110,7 @@ class CollectionScheduler:
                     report = await generate_report(
                         topic_id=topic_id,
                         model_id=topic.auto_report_model_id,
+                        report_type=topic.auto_report_type or "analytical",
                         title_override=f"{topic.name}（{report_date}）",
                         collection_run_ids=run_ids,
                     )

@@ -78,6 +78,17 @@ class BaseCollector(ABC):
 
     def __init__(self, config: SourceConfig):
         self.config = config
+        self.window_start: datetime | None = None
+        self.window_end: datetime | None = None
+
+    def set_collection_window(
+        self,
+        window_start: datetime | None,
+        window_end: datetime | None,
+    ) -> None:
+        """Attach a topic publication window for connectors that support server-side filtering."""
+        self.window_start = window_start
+        self.window_end = window_end
 
     @abstractmethod
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:

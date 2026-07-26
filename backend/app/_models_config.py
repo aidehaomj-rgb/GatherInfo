@@ -35,6 +35,7 @@ class Topic(Base):
     keyword_tags = Column(JSON, nullable=True)
     auto_tag_rules = Column(JSON, nullable=True)
     source_ids = Column(JSON, nullable=True)
+    collection_model_ids = Column(JSON, nullable=True)
 
     schedule_cron = Column(String(100), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
@@ -42,7 +43,9 @@ class Topic(Base):
 
     auto_report = Column(Boolean, default=False)
     auto_report_model_id = Column(String(80), nullable=True)
+    auto_report_type = Column(String(20), default="analytical")
     description_prompt = Column(Text, nullable=True)
+    ai_research_model_id = Column(String(80), nullable=True)
 
     last_run_at = Column(DateTime(timezone=True), nullable=True)
     last_collection_run_id = Column(String(80), nullable=True)
@@ -111,6 +114,7 @@ class Report(Base):
     id = Column(String(80), primary_key=True)
     topic_id = Column(String(80), ForeignKey("topics.id"), nullable=False)
     title = Column(String(500), nullable=False)
+    report_type = Column(String(20), default="analytical")
     content = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     status = Column(String(20), default="pending")

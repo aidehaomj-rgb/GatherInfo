@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Rocket, ExternalLink, CheckCircle, AlertTriangle, Loader2, FileSearch } from "lucide-react";
-import type { Topic, ModelConfig, YmgAnalyzeResponse, YmgHealthResponse } from "../types";
-import { ymgHealth, ymgAnalyze } from "../api";
+import { Rocket, ExternalLink, CheckCircle, AlertTriangle, Loader2, FileSearch, Archive } from "lucide-react";
+import type { Topic, ModelConfig, Report, MaterialSet, YmgAnalyzeResponse, YmgHealthResponse } from "../types";
+import { archiveMaterialSet, fetchMaterialSets, ymgHealth, ymgAnalyze } from "../api";
 
 interface Props {
   topics: Topic[];
   models: ModelConfig[];
+  reports: Report[];
 }
 
 /**
@@ -15,9 +16,12 @@ interface Props {
  * analysis topic from the local knowledge base and forwards it + the evidence
  * digest to the YMG-Deep backend to start a deep research session.
  */
-export function YmgDeepPanel({ topics, models }: Props) {
+export function YmgDeepPanel({ topics, models, reports }: Props) {
   const [health, setHealth] = useState<YmgHealthResponse | null>(null);
   const [topicId, setTopicId] = useState("");
+  const [materialSetId, setMaterialSetId] = useState("");
+  const [materialSets, setMaterialSets] = useState<MaterialSet[]>([]);
+  const [reportId, setReportId] = useState("");
   const [modelId, setModelId] = useState("");
   const [depth, setDepth] = useState<"standard" | "deep">("standard");
   const [mode, setMode] = useState<"swarm" | "solo">("swarm");
@@ -34,22 +38,31 @@ export function YmgDeepPanel({ topics, models }: Props) {
     return () => { active = false; };
   }, []);
 
+  const loadMaterialSets = () =>
+    fetchMaterialSets().then(setMaterialSets).catch(() => setMaterialSets([]));
+
+  useEffect(() => { void loadMaterialSets(); }, []);
+
   const usableModels = models.filter((m) => m.is_active && (typeof m.is_configured === "boolean" ? m.is_configured : Boolean(m.model_name)));
 
   const handleAnalyze = async () => {
-    if (!topicId) { setError("请先选择一个主题"); return; }
+    if (!topicId && !materialSetId) { setError("请选择主题或复用一个素材集"); return; }
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const res = await ymgAnalyze({
-        topic_id: topicId,
+        topic_id: topicId || undefined,
+        material_set_id: materialSetId || undefined,
+        report_id: reportId || undefined,
         model_id: modelId || undefined,
         ymg_depth: depth,
         ymg_mode: mode,
         extra_requirements: extra || undefined,
       });
       setResult(res);
+      setMaterialSetId(res.material_set_id);
+      void loadMaterialSets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "分析失败");
     }
@@ -59,6 +72,18 @@ export function YmgDeepPanel({ topics, models }: Props) {
   const statusIcon = health?.reachable
     ? <CheckCircle size={14} style={{ color: "var(--green)" }} />
     : <AlertTriangle size={14} style={{ color: "var(--orange)" }} />;
+  const selectedMaterialSet = materialSets.find((item) => item.id === materialSetId);
+  const effectiveTopicId = topicId || selectedMaterialSet?.topic_id || "";
+  const availableReports = reports.filter(
+    (report) => report.status === "completed" && (!effectiveTopicId || report.topic_id === effectiveTopicId),
+  );
+
+  const handleArchive = async () => {
+    if (!materialSetId) return;
+    await archiveMaterialSet(materialSetId);
+    setMaterialSetId("");
+    await loadMaterialSets();
+  };
 
   return (
     <div className="panel" style={{ marginTop: 16, padding: 16, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--surface-card)" }}>
@@ -71,15 +96,48 @@ export function YmgDeepPanel({ topics, models }: Props) {
       </div>
 
       <p className="text-muted small" style={{ marginBottom: 12 }}>
-        选择主题与信息集，系统初步分析后生成研究主题（≤200字），连同采集信息摘要发送到 YMG-Deep 启动深度分析。
+        每次发送都会保存为可复用素材集；相同条目不会重复建集，每次深度分析会单独保留交接记录。
       </p>
 
       <div className="form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <label className="form-group" style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>复用素材集（可选）</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              value={materialSetId}
+              onChange={(e) => {
+                setMaterialSetId(e.target.value);
+                const selected = materialSets.find((item) => item.id === e.target.value);
+                if (selected?.topic_id) setTopicId(selected.topic_id);
+              }}
+              style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)" }}
+            >
+              <option value="">新建：按下方主题范围生成素材集</option>
+              {materialSets.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {item.item_count} 条 · 已分析 {item.handoff_runs.length} 次
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-ghost" title="归档所选素材集" onClick={handleArchive} disabled={!materialSetId}>
+              <Archive size={14} />
+            </button>
+          </div>
+        </label>
         <label className="form-group" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>主题</span>
           <select value={topicId} onChange={(e) => setTopicId(e.target.value)} style={{ padding: "8px 10px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)" }}>
             <option value="">选择主题…</option>
             {topics.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.total_items_collected}条)</option>)}
+          </select>
+        </label>
+        <label className="form-group" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>阶段性报告素材（可选）</span>
+          <select value={reportId} onChange={(e) => setReportId(e.target.value)} style={{ padding: "8px 10px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)" }}>
+            <option value="">不附加报告</option>
+            {availableReports.map((report) => (
+              <option key={report.id} value={report.id}>{report.title}</option>
+            ))}
           </select>
         </label>
         <label className="form-group" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -116,7 +174,7 @@ export function YmgDeepPanel({ topics, models }: Props) {
       </div>
 
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <button type="button" className="btn btn-primary" onClick={handleAnalyze} disabled={loading || !topicId}>
+        <button type="button" className="btn btn-primary" onClick={handleAnalyze} disabled={loading || (!topicId && !materialSetId)}>
           {loading ? <Loader2 size={14} className="spin" /> : <FileSearch size={14} />}
           {loading ? "分析中…" : "生成分析主题并发送到 YMG-Deep"}
         </button>
@@ -136,7 +194,7 @@ export function YmgDeepPanel({ topics, models }: Props) {
             </p>
           </div>
           <div className="text-muted small" style={{ marginBottom: 8 }}>
-            基于本地知识库 {result.evidence_count} 条采集信息
+            基于素材集 {result.material_set_id}，共 {result.evidence_count} 条采集信息
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span className={`badge ${result.ymg_status === "started" ? "badge--green" : result.ymg_status === "unreachable" ? "badge--yellow" : "badge--gray"}`}>

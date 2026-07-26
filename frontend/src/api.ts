@@ -138,6 +138,7 @@ export interface ItemFilters {
   status?: string;
   language?: string;
   run_id?: string;
+  batch_id?: string;
   q?: string;
   page?: number;
   page_size?: number;
@@ -151,6 +152,8 @@ export const fetchItems = (filters: ItemFilters = {}) =>
     ...(filters.tag ? { tag: filters.tag } : {}),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.language ? { language: filters.language } : {}),
+    ...(filters.run_id ? { run_id: filters.run_id } : {}),
+    ...(filters.batch_id ? { batch_id: filters.batch_id } : {}),
     ...(filters.q ? { q: filters.q } : {}),
     page: String(filters.page ?? 1),
     page_size: String(filters.page_size ?? 50),
@@ -161,6 +164,11 @@ export const translateItems = (itemIds: string[]) =>
     "/items/translate",
     { item_ids: itemIds },
   );
+export const reviewItemQuality = (itemIds: string[], limit = 100) =>
+  post<{ reviewed: number; curated: number; deleted: number; retained: number }>(
+    "/items/quality-review",
+    { item_ids: itemIds, limit },
+  );
 export const fetchItemIds = (filters: ItemFilters) =>
   get<{ids: string[]; total: number; matching: number}>("/items/ids", {
     ...(filters.topic_id ? { topic_id: filters.topic_id } : {}),
@@ -170,6 +178,7 @@ export const fetchItemIds = (filters: ItemFilters) =>
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.language ? { language: filters.language } : {}),
     ...(filters.run_id ? { run_id: filters.run_id } : {}),
+    ...(filters.batch_id ? { batch_id: filters.batch_id } : {}),
     ...(filters.q ? { q: filters.q } : {}),
   } as Record<string, string>);
 
@@ -218,10 +227,11 @@ export const fetchReports = (topicId?: string, days?: number) =>
 export const fetchReport = (id: string) => get<import("./types").Report>(`/reports/${id}`);
 export const generateReport = (
   topicId: string,
-  opts: { modelId?: string; modelNameOverride?: string; title?: string; collectionRunId?: string; collectionRunIds?: string[]; dateFrom?: string; dateTo?: string } = {},
+  opts: { reportType?: "analytical" | "archive"; modelId?: string; modelNameOverride?: string; title?: string; collectionRunId?: string; collectionRunIds?: string[]; dateFrom?: string; dateTo?: string } = {},
 ) =>
   post<import("./types").Report>("/reports/generate", {
     topic_id: topicId,
+    report_type: opts.reportType || "analytical",
     ...(opts.modelId ? { model_id: opts.modelId } : {}),
     ...(opts.modelNameOverride ? { model_name_override: opts.modelNameOverride } : {}),
     ...(opts.title ? { title: opts.title } : {}),
@@ -236,9 +246,11 @@ export const batchGenerateReports = (
   collectionRunIds?: (string | null)[],
   modelNameOverride?: string,
   collectionRunIdsList?: string[][],
+  reportType: "analytical" | "archive" = "analytical",
 ) =>
   post<import("./types").BatchGenerateResult>("/reports/batch-generate", {
     topic_ids: topicIds,
+    report_type: reportType,
     ...(modelId ? { model_id: modelId } : {}),
     ...(modelNameOverride ? { model_name_override: modelNameOverride } : {}),
     ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
@@ -357,10 +369,26 @@ export const ymgHealth = () =>
 
 export const ymgAnalyze = (body: {
   topic_id?: string;
+  material_set_id?: string;
   item_ids?: string[];
   collection_run_ids?: string[];
+  report_id?: string;
   model_id?: string;
   ymg_depth?: string;
   ymg_mode?: string;
   extra_requirements?: string;
 }) => post<import("./types").YmgAnalyzeResponse>("/ymg-deep/analyze", body);
+
+export const haiseeHealth = () =>
+  get<import("./types").HaiSeeHealthResponse>("/haisee/health");
+
+export const pushItemsToHaiSee = (itemIds: string[]) =>
+  post<import("./types").HaiSeePushResponse>("/haisee/push", { item_ids: itemIds });
+
+export const pushReportToHaiSee = (reportId: string) =>
+  post<import("./types").HaiSeePushResponse>("/haisee/push", { report_id: reportId });
+
+export const fetchMaterialSets = (topicId?: string) =>
+  get<import("./types").MaterialSet[]>("/material-sets", topicId ? { topic_id: topicId } : {});
+
+export const archiveMaterialSet = (id: string) => del(`/material-sets/${id}`);

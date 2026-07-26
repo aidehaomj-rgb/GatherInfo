@@ -20,7 +20,7 @@ from app._schemas.topic import (
 )
 from app._schemas.collection import (
     CollectRequest, RunOut, CollectResultOut,
-    ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest,
+    ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest, ItemQualityReviewRequest,
     BatchRunOut, BatchOut, ActiveRunOut,
 )
 from app._schemas.tag import (
@@ -52,7 +52,7 @@ __all__ = [
     "CategoryCreate", "CategoryUpdate", "CategoryOut",
     # collection
     "CollectRequest", "RunOut", "CollectResultOut",
-    "ItemOut", "ItemListOut", "ItemDeleteRequest",
+    "ItemOut", "ItemListOut", "ItemDeleteRequest", "ItemTranslateRequest", "ItemQualityReviewRequest",
     "BatchRunOut", "BatchOut", "ActiveRunOut",
     # tag
     "TagUpdateIn", "TagUpdateSchema", "TagOut",

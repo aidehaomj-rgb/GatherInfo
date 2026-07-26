@@ -154,13 +154,15 @@ async def run_collection(data: CollectRequest, db: Session = Depends(get_db)):
             raise HTTPException(400, str(e))
         try:
             topic = db.query(Topic).filter(Topic.id == data.topic_id).first()
-            if topic and topic.auto_report:
+            total_new = sum(result.items_new for result in results)
+            if topic and topic.auto_report and total_new > 0:
                 from app.report_engine import generate_report as auto_gen
                 logger.info("Auto-report triggered for topic %s after manual collection", data.topic_id)
                 run_ids = [result.run_id for result in results if getattr(result, "run_id", None)]
                 asyncio.ensure_future(auto_gen(
                     topic_id=data.topic_id,
                     model_id=topic.auto_report_model_id,
+                    report_type=topic.auto_report_type or "analytical",
                     collection_run_ids=run_ids,
                 ))
         except Exception as exc:

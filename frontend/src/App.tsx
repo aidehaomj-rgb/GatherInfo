@@ -56,7 +56,7 @@ const views: ViewDef[] = [
   { id: "reports", label: "智能报告", icon: FileText },
   { id: "models", label: "模型配置", icon: Cpu },
   { id: "schedules", label: "周期调度", icon: Clock },
-  { id: "history", label: "采集历史", icon: History },
+  { id: "history", label: "任务查看", icon: History },
   { id: "notifications", label: "通知管理", icon: Bell },
   { id: "settings", label: "系统配置", icon: Settings },
 ];
@@ -110,8 +110,12 @@ function AppInner() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchDashboard().then((d) => { if (!cancelled) setDashData(d); }).catch(() => {});
-    return () => { cancelled = true; };
+    const refreshDashboard = () => {
+      fetchDashboard().then((d) => { if (!cancelled) setDashData(d); }).catch(() => {});
+    };
+    refreshDashboard();
+    window.addEventListener("dashboard-refresh", refreshDashboard);
+    return () => { cancelled = true; window.removeEventListener("dashboard-refresh", refreshDashboard); };
   }, []);
 
   const toggleSidebar = useCallback(() => {

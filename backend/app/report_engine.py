@@ -48,6 +48,7 @@ def _effective_model(model: ModelConfig, model_name_override: str | None):
 async def generate_report(
     topic_id: str,
     model_id: str | None = None,
+    report_type: str = "analytical",
     title_override: str | None = None,
     collection_run_id: str | None = None,
     collection_run_ids: list[str] | None = None,
@@ -56,6 +57,8 @@ async def generate_report(
     model_name_override: str | None = None,
 ) -> Report:
     """Main entry point: generate a report for a topic using the specified model."""
+    if report_type not in {"analytical", "archive"}:
+        raise ValueError(f"Unsupported report type: {report_type}")
     db = SessionLocal()
     try:
         topic = db.query(Topic).filter(Topic.id == topic_id).first()
@@ -69,14 +72,18 @@ async def generate_report(
             ).first()
             if not model:
                 raise ValueError(f"Model not found or inactive: {model_id}")
-        else:
+        elif report_type == "analytical":
             model = db.query(ModelConfig).filter(
                 ModelConfig.is_default == True, ModelConfig.is_active == True
             ).first()
             if not model:
                 raise ValueError("No default active model configured.")
+        else:
+            model = db.query(ModelConfig).filter(
+                ModelConfig.is_default == True, ModelConfig.is_active == True
+            ).first()
 
-        effective_model = _effective_model(model, model_name_override)
+        effective_model = _effective_model(model, model_name_override) if model else None
 
         dt_from = _parse_iso(date_from)
         dt_to = _parse_iso(date_to)
@@ -100,7 +107,11 @@ async def generate_report(
         range_start = dt_from or (min(published_times) if published_times else None)
         range_end = dt_to or (max(published_times) if published_times else None)
 
-        item_context = _build_item_context(items)
+        item_context = _build_item_context(
+            items,
+            content_limit=None if report_type == "archive" else 2_000,
+            max_items=None if report_type == "archive" else 50,
+        )
 
         # Translate non-Chinese items to Chinese
         if model and item_context:
@@ -117,14 +128,13 @@ async def generate_report(
                 logger.warning("Translation step failed (non-blocking): %s", exc,
                                exc_info=True)
 
-        prompt = _build_report_prompt(topic, item_context, range_start, range_end)
-
         report = Report(
             id=f"rpt-{uuid4().hex[:12]}",
             topic_id=topic_id,
-            title=title_override or f"{topic.name} 综合分析报告",
+            title=title_override or _default_report_title(topic.name, report_type),
+            report_type=report_type,
             status="generating",
-            model_id=model.id,
+            model_id=model.id if model else None,
             item_count=len(items),
             item_ids=[it.id for it in items],
             collection_run_id=collection_run_id,
@@ -135,22 +145,32 @@ async def generate_report(
         db.commit()
         db.refresh(report)
 
-        try:
-            llm_result = await _call_llm(effective_model, prompt)
-            report.content = llm_result["content"]
-            report.summary = llm_result["summary"]
-            report.tokens_used = llm_result["tokens_used"]
-            report.status = "completed"
-        except Exception as exc:
-            logger.error("LLM call failed for report %s: %s", report.id, exc)
-            report.content = _build_fallback_report(
-                topic, item_context, range_start, range_end, str(exc)
+        if report_type == "archive":
+            report.content = _build_archive_report(
+                topic, item_context, range_start, range_end
             )
-            report.summary = "模型生成不稳定，已基于采集条目生成本地规则兜底报告。"
+            report.summary = f"逐条归类整理 {len(items)} 条独立信息，保留中文标题、正文与原文链接。"
             report.tokens_used = 0
             report.status = "completed"
-            report.error_log = f"LLM 生成失败，已使用本地规则兜底：{exc}"
+        else:
+            prompt = _build_report_prompt(topic, item_context, range_start, range_end)
+            try:
+                llm_result = await _call_llm(effective_model, prompt)
+                report.content = llm_result["content"]
+                report.summary = llm_result["summary"]
+                report.tokens_used = llm_result["tokens_used"]
+                report.status = "completed"
+            except Exception as exc:
+                logger.error("LLM call failed for report %s: %s", report.id, exc)
+                report.content = _build_fallback_report(
+                    topic, item_context, range_start, range_end, str(exc)
+                )
+                report.summary = "模型生成不稳定，已基于采集条目生成本地规则兜底报告。"
+                report.tokens_used = 0
+                report.status = "completed"
+                report.error_log = f"LLM 生成失败，已使用本地规则兜底：{exc}"
 
+        report.generated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(report)
 
@@ -191,16 +211,32 @@ def _export_report_files(db: Session, report: Report, topic: Topic | None) -> No
         logger.warning("report_export module not available, skipping export")
 
 
-def _build_item_context(items: list[CollectedItem]) -> list[dict]:
+def _build_item_context(
+    items: list[CollectedItem],
+    content_limit: int | None = 2_000,
+    max_items: int | None = 50,
+) -> list[dict]:
     """Build structured item context dict from ORM objects for prompt building."""
     context = []
-    for idx, it in enumerate(items[:50], 1):
+    selected_items = items if max_items is None else items[:max_items]
+    for idx, it in enumerate(selected_items, 1):
+        metadata = it.raw_metadata if isinstance(it.raw_metadata, dict) else {}
+        translation = (
+            metadata.get("translation_zh")
+            if isinstance(metadata.get("translation_zh"), dict)
+            else {}
+        )
+        translated_content = str(translation.get("content_zh") or it.content or "")
         context.append({
             "id": it.id,
             "index": idx,
-            "title": it.title or "",
-            "content": (it.content or "")[:2000],
-            "summary": (it.summary or "")[:500],
+            "title": str(translation.get("title_zh") or it.title or ""),
+            "content": (
+                translated_content
+                if content_limit is None
+                else translated_content[:content_limit]
+            ),
+            "summary": str(translation.get("summary_zh") or it.summary or "")[:500],
             "url": it.url or "",
             "language": it.language or "unknown",
             "category": it.category or "unknown",
@@ -208,11 +244,57 @@ def _build_item_context(items: list[CollectedItem]) -> list[dict]:
             "published_at": it.published_at.isoformat() if it.published_at else "",
             "tags": [{"namespace": t.namespace, "value": t.value}
                      for t in it.tags] if it.tags else [],
-            "published_at": it.published_at.isoformat() if it.published_at else "",
             "quality_score": it.quality_score or 0.0,
             "relevance_score": it.relevance_score or 0.0,
         })
     return context
+
+
+def _default_report_title(topic_name: str, report_type: str) -> str:
+    suffix = "逐条信息归档" if report_type == "archive" else "综合分析报告"
+    return f"{topic_name} {suffix}"
+
+
+def _build_archive_report(
+    topic: Topic,
+    items: list[dict],
+    range_start: datetime | None,
+    range_end: datetime | None,
+) -> str:
+    """Package curated items without blending their independent facts."""
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        category = str(item.get("category") or "未分类")
+        grouped = {**grouped, category: [*grouped.get(category, []), item]}
+
+    start = range_start.strftime("%Y-%m-%d") if range_start else "待核验"
+    end = range_end.strftime("%Y-%m-%d") if range_end else "待核验"
+    sections = [
+        f"# {topic.name} 逐条信息归档",
+        "",
+        f"- 信息数量：{len(items)} 条",
+        f"- 信息时间范围：{start} 至 {end}",
+        "- 编排原则：每条信息独立保留，不合并事实，不生成跨条目推断。",
+    ]
+    for category, category_items in grouped.items():
+        sections.extend(["", f"## {category}"])
+        for item in category_items:
+            title = str(item.get("title") or "无标题").strip()
+            body = str(item.get("content") or item.get("summary") or "正文待核验").strip()
+            published_at = str(item.get("published_at") or "待核验")
+            source = str(item.get("source") or "未知来源")
+            url = str(item.get("url") or "").strip()
+            sections.extend([
+                "",
+                f"### {title}",
+                "",
+                body,
+                "",
+                f"- 发布时间：{published_at}",
+                f"- 来源：{source}",
+                f"- 原文链接：{url or '无'}",
+            ])
+    return "\n".join(sections).strip()
 
 
 def _build_collection_summary_context(items: list[dict]) -> str:
@@ -319,6 +401,14 @@ def _build_report_prompt(
 4. **详细分析** — 按主题或类别深入分析关键条目
 5. **趋势研判** — 对重要信号的趋势判断
 6. **建议行动** — 基于发现的可操作建议
+
+海关风险研判方法：
+- 严格区分来源事实、分析推断和待核验事项，不把推断写成既成事实
+- 识别申报品名或掩体货物、实际风险货物、数量级、运输方式、路线、港口和集装箱号
+- 提取境外企业、中国关联企业、交易对手及关联公司，分析供应链和物流链上的中国关联
+- 不把所有风险条件机械地用 AND 组合；应从企业、商品、港口、路线、共船箱号等不同角度形成多个可核验数据集
+- 数量筛选关注合理区间和数量级，不仅限于完全相等
+- 建议应服务于中国海关后续数据核查、风险布控和查验，并说明证据依据与不确定性
 
 格式要求：
 - 使用 Markdown 格式，每个部分以 "## " 标题开头

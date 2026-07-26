@@ -49,6 +49,7 @@ class ItemOut(BaseModel):
     language: str | None = None
     translation_status: str | None = None
     enforcement_review: dict | None = None
+    quality_review: dict | None = None
     category: str | None = None
     tags: list[dict] = []
     entities: dict | None = None
@@ -74,6 +75,11 @@ class ItemDeleteRequest(BaseModel):
 
 class ItemTranslateRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ItemQualityReviewRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=500)
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 class BatchRunOut(BaseModel):

@@ -1,13 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
-import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2 } from "lucide-react";
-import { fetchActiveRuns, fetchBatches } from "../api";
-import type { ActiveRunOut, BatchOut } from "../types";
+import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2, FileText, Square } from "lucide-react";
+import { fetchActiveRuns, fetchBatches, fetchReports, stopRun } from "../api";
+import type { ActiveRunOut, BatchOut, Report } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { formatBeijingDateTime, formatBeijingTime } from "../utils/date";
 
 type ViewMode = "cards" | "timeline";
+type TaskCategory = "all" | "collection" | "report";
+
+function formatReportTime(report: Report): string {
+  const timestamp = report.generated_at ?? report.created_at;
+  return timestamp ? formatBeijingDateTime(timestamp) : "未记录时间";
+}
 
 function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded: boolean; onToggle: () => void }) {
   const dotClass = batch.status === "completed" ? "timeline-dot--completed"
@@ -57,6 +63,7 @@ function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded
 export function HistoryPage() {
   const [activeRuns, setActiveRuns] = useState<ActiveRunOut[]>([]);
   const [batches, setBatches] = useState<BatchOut[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
@@ -64,17 +71,21 @@ export function HistoryPage() {
   const [timelineExpanded, setTimelineExpanded] = useState<Set<string>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [taskCategory, setTaskCategory] = useState<TaskCategory>("all");
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [ar, b] = await Promise.all([
+      const [ar, b, reportList] = await Promise.all([
         fetchActiveRuns().catch(() => []),
         fetchBatches(undefined, 30).catch(() => []),
+        fetchReports().then((result) => result.reports).catch(() => []),
       ]);
       setActiveRuns(ar);
       setBatches(b);
+      setReports(reportList);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     }
@@ -108,15 +119,31 @@ export function HistoryPage() {
     });
   };
 
-  if (loading) return <div className="loading">加载采集历史...</div>;
+  const handleStopRun = async (runId: string) => {
+    setStoppingRunId(runId);
+    try {
+      await stopRun(runId);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "停止任务失败");
+    }
+    setStoppingRunId(null);
+  };
+
+  const activeReports = reports.filter((report) => report.status === "pending" || report.status === "generating");
+  const completedReports = reports.filter((report) => report.status !== "pending" && report.status !== "generating");
+  const showCollections = taskCategory !== "report";
+  const showReports = taskCategory !== "collection";
+
+  if (loading) return <div className="loading">加载任务...</div>;
   if (error) return <div className="error-banner">{error}</div>;
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h2>采集历史</h2>
-          <p className="text-muted">查看正在执行和已完成的采集任务。</p>
+          <h2>任务查看</h2>
+          <p className="text-muted">集中查看采集与报告任务的进行状态、结果和历史。</p>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button
@@ -125,7 +152,7 @@ export function HistoryPage() {
             onClick={() => setShowClearConfirm(true)}
             disabled={batches.length === 0}
           >
-            <Trash2 size={12} /> 清空历史
+            <Trash2 size={12} /> 清空采集历史
           </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
             <RefreshCw size={12} className={loading ? "spin" : ""} />
@@ -133,8 +160,19 @@ export function HistoryPage() {
         </div>
       </div>
 
-      {/* View mode tabs */}
       <div className="view-tabs">
+        {(["all", "collection", "report"] as TaskCategory[]).map((category) => (
+          <button
+            type="button"
+            key={category}
+            className={`view-tab ${taskCategory === category ? "view-tab--active" : ""}`}
+            onClick={() => setTaskCategory(category)}
+          >{category === "all" ? "全部任务" : category === "collection" ? "采集任务" : "报告任务"}</button>
+        ))}
+      </div>
+
+      {showCollections && (
+      <div className="view-tabs" style={{ marginTop: 10 }}>
         <button
           type="button"
           className={`view-tab ${viewMode === "cards" ? "view-tab--active" : ""}`}
@@ -146,9 +184,9 @@ export function HistoryPage() {
           onClick={() => setViewMode("timeline")}
         >时间线视图</button>
       </div>
+      )}
 
-      {/* Active runs */}
-      {activeRuns.length > 0 && (
+      {showCollections && activeRuns.length > 0 && (
         <div className="history-active-section" style={{ marginBottom: 20 }}>
           <h3><span className="pulse-dot" /> 正在执行 ({activeRuns.length})</h3>
           {activeRuns.map((run) => (
@@ -165,22 +203,58 @@ export function HistoryPage() {
               <div className="run-status">
                 {run.items_found > 0 && <span className="chip chip--blue">{run.items_found} 条</span>}
                 <StatusBadge status={run.status as any} />
+                <button type="button" className="btn btn-sm btn-danger" onClick={() => void handleStopRun(run.id)} disabled={stoppingRunId === run.id}>
+                  <Square size={12} /> {stoppingRunId === run.id ? "停止中..." : "停止"}
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {activeRuns.length === 0 && batches.length === 0 && (
+      {showReports && activeReports.length > 0 && (
+        <div className="history-active-section" style={{ marginBottom: 20 }}>
+          <h3><span className="pulse-dot" /> 正在生成报告 ({activeReports.length})</h3>
+          {activeReports.map((report) => (
+            <div key={report.id} className="active-run-card">
+              <div className="run-info">
+                <h4>{report.title || report.topic_name || "智能报告"}</h4>
+                <p>{report.topic_name || report.topic_id} · 已使用 {report.item_count} 条采集信息 · {report.created_at && `创建于 ${formatBeijingTime(report.created_at)}`}</p>
+              </div>
+              <div className="run-status"><StatusBadge status={report.status as any} /></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showReports && completedReports.length > 0 && (
+        <section style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 }}><FileText size={14} style={{ verticalAlign: "middle" }} /> 报告任务 ({completedReports.length})</h3>
+          <div className="card-list">
+            {completedReports.map((report) => (
+              <article key={report.id} className="history-batch-card">
+                <div className="batch-header">
+                  <div>
+                    <h4 style={{ display: "flex", alignItems: "center", gap: 6 }}>{report.title}<StatusBadge status={report.status as any} /></h4>
+                    <div className="batch-meta">{report.topic_name || report.topic_id} · 使用 {report.item_count} 条信息</div>
+                  </div>
+                  <div className="batch-meta">{formatReportTime(report)}</div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeRuns.length === 0 && batches.length === 0 && reports.length === 0 && (
         <EmptyState
           icon={<Clock size={32} style={{ opacity: 0.3 }} />}
-          title="暂无采集历史"
-          description="执行一次采集后，历史记录会显示在这里"
+          title="暂无任务"
+          description="执行采集或生成报告后，任务进度和历史会显示在这里"
         />
       )}
 
-      {/* Card view */}
-      {viewMode === "cards" && batches.length > 0 && (
+      {showCollections && viewMode === "cards" && batches.length > 0 && (
         <div>
           <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 }}>
             已完成批次 ({batches.length})
@@ -222,8 +296,7 @@ export function HistoryPage() {
         </div>
       )}
 
-      {/* Timeline view */}
-      {viewMode === "timeline" && batches.length > 0 && (
+      {showCollections && viewMode === "timeline" && batches.length > 0 && (
         <div className="timeline">
           {batches.map((batch) => (
             <TimelineNode

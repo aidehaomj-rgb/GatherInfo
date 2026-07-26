@@ -1,5 +1,5 @@
 """
-TradeRadar — 全球贸易风险情报中枢 v0.5.3
+TradeRadar — 全球贸易风险情报中枢 v0.6.0
 
 后端优化版本：
 - 完善的 OpenAPI 文档
@@ -36,6 +36,8 @@ from app.routes.settings import router as settings_router
 from app.routes.seed import router as seed_router
 from app.routes.notifications import router as notifications_router
 from app.routes.ymg_deep import router as ymg_router
+from app.routes.haisee import router as haisee_router
+from app.routes.material_sets import router as material_sets_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
@@ -166,7 +168,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TradeRadar",
-        version="0.5.3",
+        version="0.6.0",
         description="全球贸易风险情报中枢 — 主题驱动的多源采集、标签结构化入库、统计与分析。",
         contact={
             "name": "TradeRadar Team",
@@ -216,7 +218,7 @@ def create_app() -> FastAPI:
         health = {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "0.5.3",
+            "version": "0.6.0",
             "environment": os.getenv("ENV", "production"),
             "components": {},
         }
@@ -278,6 +280,8 @@ def create_app() -> FastAPI:
     app.include_router(stats_router)
     app.include_router(notifications_router)
     app.include_router(ymg_router)
+    app.include_router(haisee_router)
+    app.include_router(material_sets_router)
 
     return app
 

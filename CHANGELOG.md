@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0] - 2026-07-26
+
+### Added
+- Added immutable, reusable material sets with independent YMG-Deep and HaiSee handoff history.
+- Added two report types: summary reasoning analysis and per-item categorized archival packaging.
+- Added one-click archival-report delivery to HaiSee, with large selections split into independent task batches.
+- Added structured evidence delivery to YMG-Deep, including optional stage reports and reusable material-set selection.
+
+### Changed
+- Keyword topics now produce semantic multilingual search plans instead of requiring literal keyword matches.
+- AI model sources can launch broad prompt-led collection independently of the explicitly selected websites.
+- Tavily and other search results are rejected when their publication date is missing or outside the topic collection window.
+- Analytical report prompts now distinguish sourced facts, analytical inferences, and verification gaps, and apply customs risk reasoning across entities, goods, routes, quantities, and logistics.
+- Automatic and batch reports now use bounded backend orchestration and support a configured report type.
+
+### Fixed
+- Fixed the nested topic source picker so first-level categories reliably expand and collapse their second-level sources.
+- Fixed archival reports to retain every selected item and its complete Chinese body instead of inheriting the analytical report context limit.
+
 ## [0.5.3] - 2026-07-25
 
 ### Added

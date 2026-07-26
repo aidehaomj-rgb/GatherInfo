@@ -15,12 +15,49 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.report_engine import (
     _parse_iso,
     _build_item_context,
+    _build_archive_report,
     _build_collection_summary_context,
     _build_report_prompt,
     _effective_model,
     _auto_summary,
 )
 from app.models import CollectedItem, ModelConfig, Topic
+
+
+def test_archive_report_keeps_each_item_as_independent_title_and_body():
+    topic = MagicMock(spec=Topic)
+    topic.name = "境外查发案件"
+    items = [
+        {
+            "id": "item-1",
+            "title": "海防港查获伪报货物",
+            "content": "越南海关检查集装箱后，查获申报为废铜的军用弹药。",
+            "summary": "",
+            "url": "https://example.test/item-1",
+            "source": "official-source",
+            "category": "走私案件",
+            "published_at": "2026-07-25T08:00:00+00:00",
+        },
+        {
+            "id": "item-2",
+            "title": "海关发布监管新规",
+            "content": "监管机关公布新规全文及生效日期。",
+            "summary": "",
+            "url": "https://example.test/item-2",
+            "source": "policy-source",
+            "category": "政策法规",
+            "published_at": "2026-07-24T08:00:00+00:00",
+        },
+    ]
+
+    content = _build_archive_report(topic, items, None, None)
+
+    assert "## 走私案件" in content
+    assert "### 海防港查获伪报货物" in content
+    assert "越南海关检查集装箱后" in content
+    assert "## 政策法规" in content
+    assert "### 海关发布监管新规" in content
+    assert "https://example.test/item-2" in content
 
 
 def test_effective_model_uses_override_without_mutating_saved_config():
@@ -140,6 +177,30 @@ class TestBuildItemContext:
         assert result[0]["id"] == "item-0"
         assert result[2]["id"] == "item-2"
 
+    def test_archive_context_keeps_all_items_and_full_body(self):
+        items = []
+        for i in range(51):
+            item = MagicMock(spec=CollectedItem)
+            item.id = f"item-{i}"
+            item.title = f"Title {i}"
+            item.summary = ""
+            item.content = "A" * 9000
+            item.url = ""
+            item.source_id = "src-1"
+            item.language = "zh"
+            item.category = "case"
+            item.tags = []
+            item.published_at = None
+            item.quality_score = 0.9
+            item.relevance_score = 0.9
+            item.raw_metadata = {}
+            items.append(item)
+
+        result = _build_item_context(items, content_limit=None, max_items=None)
+
+        assert len(result) == 51
+        assert len(result[-1]["content"]) == 9000
+
     def test_tags_conversion(self):
         tag1 = MagicMock()
         tag1.namespace = "region"
@@ -238,6 +299,8 @@ class TestBuildReportPrompt:
         prompt = _build_report_prompt(topic, self._make_item_ctx(2))
         assert "关税分析" in prompt
         assert "## " in prompt  # markdown headings
+        assert "不把所有风险条件机械地用 AND 组合" in prompt
+        assert "来源事实、分析推断和待核验事项" in prompt
 
     def test_prompt_contains_item_count(self):
         topic = self._make_topic()

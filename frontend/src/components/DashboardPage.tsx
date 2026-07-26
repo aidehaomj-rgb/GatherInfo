@@ -6,6 +6,7 @@ import { fetchDashboard, collectTopic, fetchTopics } from "../api";
 import type { DashboardData, Topic } from "../types";
 import type { EChartsOption } from "echarts";
 import { useApi } from "../hooks/useApi";
+import { formatBeijingDateTime } from "../utils/date";
 
 const EChart = lazy(() => import("./EChart").then(m => ({ default: m.EChart })));
 
@@ -22,6 +23,18 @@ export function DashboardPage() {
     fetchTopics().then(setTopics).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const refreshDashboard = () => { void refresh(); };
+    const timer = window.setInterval(refreshDashboard, 30_000);
+    window.addEventListener("focus", refreshDashboard);
+    window.addEventListener("dashboard-refresh", refreshDashboard);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshDashboard);
+      window.removeEventListener("dashboard-refresh", refreshDashboard);
+    };
+  }, [refresh]);
+
   const triggerCollect = useCallback(async (topicId: string) => {
     setRefreshing(topicId);
     setCollectMsg(null);
@@ -31,6 +44,7 @@ export function DashboardPage() {
       const failed = results.filter((r) => r.errors?.length).length;
       setCollectMsg(`采集完成：新增 ${total} 条${failed > 0 ? `，${failed} 个来源失败` : ""}`);
       await refresh();
+      window.dispatchEvent(new Event("dashboard-refresh"));
     } catch (err) {
       setCollectMsg(`采集失败：${err instanceof Error ? err.message : "未知错误"}`);
     }
@@ -75,7 +89,7 @@ export function DashboardPage() {
   if (error) return <div className="error-banner">{error}</div>;
   if (!data) return null;
 
-  const { summary, top_tags, source_health, daily_trend, categories } = data;
+  const { summary, top_tags, source_health, daily_trend, categories, topic_stats } = data;
 
   // Compute day-over-day and week-over-week comparisons from daily_trend
   const trendLen = daily_trend.length;
@@ -124,9 +138,22 @@ export function DashboardPage() {
     }],
   };
 
+  const topicBarOption: EChartsOption = {
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    grid: { left: 160, right: 42, top: 8, bottom: 10 },
+    xAxis: { type: "value", axisLabel: { fontSize: 10, color: "#7e93b0" }, splitLine: { lineStyle: { color: "#1e3a5f", type: "dashed" } } },
+    yAxis: { type: "category", inverse: true, data: topic_stats.map((topic) => topic.topic_name), axisLabel: { fontSize: 11, color: "#cbd5e1", width: 150, overflow: "truncate" }, axisLine: { show: false }, axisTick: { show: false } },
+    series: [{ type: "bar", data: topic_stats.map((topic) => ({ value: topic.item_count, itemStyle: { color: "#22c55e", borderRadius: [0, 4, 4, 0] } })), barWidth: 16, label: { show: true, position: "right", fontSize: 10, color: "#7e93b0" } }],
+  };
+
 
   return (
     <div className="dashboard">
+      <div className="dashboard-actions">
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => void refresh()}>
+          <RefreshCw size={14} /> 刷新数据
+        </button>
+      </div>
       {/* Stat cards */}
       <div className="stat-grid">
         {statCards.map((sc) => {
@@ -147,6 +174,27 @@ export function DashboardPage() {
             </article>
           );
         })}
+      </div>
+
+      <div className="chart-row">
+        <div className="chart-card">
+          <h3>主题采集成效</h3>
+          {topic_stats.length > 0 ? (
+            <Suspense fallback={<div className="chart-loading" style={{ height: 220 }}>加载图表...</div>}><EChart option={topicBarOption} style={{ height: 220 }} /></Suspense>
+          ) : <p className="text-muted" style={{ padding: 40, textAlign: "center" }}>暂无主题采集结果</p>}
+        </div>
+        <div className="chart-card">
+          <h3>主题最近入库</h3>
+          <div className="dashboard-topic-list">
+            {topic_stats.slice(0, 8).map((topic) => (
+              <div key={topic.topic_id} className="dashboard-topic-row">
+                <span>{topic.topic_name}</span>
+                <strong>{topic.item_count} 条</strong>
+                <small>{topic.last_collected_at ? formatBeijingDateTime(topic.last_collected_at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "尚未入库"}</small>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Charts row */}

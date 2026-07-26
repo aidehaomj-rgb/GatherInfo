@@ -13,6 +13,7 @@ YMG-Deep project lives at /Users/m4max/Documents/YMG-Deep and exposes:
   POST /api/research { topic, requirements, model_id?, depth?, mode? } -> { session_id }
 """
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -21,14 +22,26 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.handoff_service import (
+    YMG_BASE_URL,
+    build_material_bundle,
+    check_service_health,
+    start_ymg_research,
+)
 from app.llm_client import call_llm
-from app.models import CollectedItem, ModelConfig, Topic
+from app.material_set_service import (
+    create_material_set,
+    record_handoff_run,
+    resolve_material_items,
+)
+from app.models import CollectedItem, MaterialSet, ModelConfig, Report, Topic
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/ymg-deep", tags=["ymg-deep"])
 
 # YMG-Deep backend default endpoint (local dev).
-YMG_DEEP_BASE_URL = "http://127.0.0.1:8000"
+YMG_DEEP_BASE_URL = YMG_BASE_URL
+YMG_DEEP_WEB_URL = os.getenv("YMG_DEEP_WEB_URL", "http://127.0.0.1:5401").rstrip("/")
 YMG_DEEP_TIMEOUT = 30
 
 
@@ -38,8 +51,10 @@ YMG_DEEP_TIMEOUT = 30
 class YmgAnalyzeRequest(BaseModel):
     """Request to bridge a GatherInfo item set into a YMG-Deep research session."""
     topic_id: str | None = Field(default=None, description="主题ID（用于取条目）")
+    material_set_id: str | None = Field(default=None, description="复用已保存的素材集")
     item_ids: list[str] | None = Field(default=None, description="显式条目ID列表（优先于 topic_id）")
     collection_run_ids: list[str] | None = Field(default=None, description="限定采集批次")
+    report_id: str | None = Field(default=None, description="作为阶段性分析素材一并发送的报告ID")
     model_id: str | None = Field(default=None, description="用于生成分析主题的 GatherInfo 模型ID")
     ymg_depth: str = Field(default="standard", description="YMG-Deep 深度: standard|deep")
     ymg_mode: str = Field(default="swarm", description="YMG-Deep 模式: swarm|solo")
@@ -64,7 +79,9 @@ class YmgAnalyzeResponse(BaseModel):
     ymg_session_id: str | None = None
     ymg_status: str = "pending"
     ymg_message: str | None = None
-    ymg_base_url: str = YMG_DEEP_BASE_URL
+    ymg_base_url: str = YMG_DEEP_WEB_URL
+    material_set_id: str
+    handoff_run_id: str
 
 
 class YmgHealthResponse(BaseModel):
@@ -105,8 +122,7 @@ def _build_evidence_digest(items: list[CollectedItem]) -> tuple[str, list[YmgEvi
     evidence_items: list[YmgEvidenceItem] = []
     lines: list[str] = [f"本地知识库信息集（共 {len(items)} 条）:", ""]
     for idx, it in enumerate(items[:80], 1):
-        title = it.title_zh or it.title or "无标题"
-        summary = (it.summary_zh or it.summary or (it.content or "")[:200]).strip()
+        title, summary, _ = _display_content(it)
         evidence_items.append(YmgEvidenceItem(
             id=it.id, title=title[:200], url=it.url,
             summary=summary[:300] or None,
@@ -145,7 +161,7 @@ def _pick_model(db: Session, model_id: str | None) -> ModelConfig:
 
 def _build_topic_prompt(items: list[CollectedItem], topic: Topic | None) -> str:
     """Prompt the local model to generate a <=200 char analysis topic."""
-    titles = "\n".join(f"- {(it.title_zh or it.title or '').strip()}" for it in items[:30])
+    titles = "\n".join(f"- {_display_content(it)[0]}" for it in items[:30])
     topic_name = topic.name if topic else "（未指定主题）"
     topic_kw = ""
     if topic and topic.keywords:
@@ -168,6 +184,7 @@ async def _forward_to_ymg(
     extra_requirements: str | None,
     depth: str,
     mode: str,
+    materials: dict[str, Any],
 ) -> dict[str, Any]:
     """Start a YMG-Deep research session with the analysis topic + evidence."""
     requirements_parts = [
@@ -179,27 +196,19 @@ async def _forward_to_ymg(
         requirements_parts.append("")
         requirements_parts.append(f"附加要求: {extra_requirements}")
 
-    payload = {
-        "topic": analysis_topic,
-        "requirements": "\n".join(requirements_parts),
-        "depth": depth,
-        "mode": mode,
-    }
     try:
-        async with httpx.AsyncClient(timeout=YMG_DEEP_TIMEOUT) as client:
-            resp = await client.post(f"{YMG_DEEP_BASE_URL}/api/research", json=payload)
-            if resp.status_code != 200:
-                return {
-                    "session_id": None,
-                    "status": "failed",
-                    "message": f"YMG-Deep 返回 {resp.status_code}: {resp.text[:300]}",
-                }
-            data = resp.json()
-            return {
-                "session_id": data.get("session_id"),
-                "status": "started",
-                "message": None,
-            }
+        data = await start_ymg_research(
+            analysis_topic,
+            materials,
+            "\n".join(requirements_parts),
+            depth,
+            mode,
+        )
+        return {
+            "session_id": data.get("session_id"),
+            "status": "started",
+            "message": None,
+        }
     except httpx.ConnectError:
         return {
             "session_id": None,
@@ -220,21 +229,8 @@ async def _forward_to_ymg(
 @router.get("/health", response_model=YmgHealthResponse)
 async def ymg_health():
     """Check whether the YMG-Deep backend is reachable."""
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{YMG_DEEP_BASE_URL}/api/health")
-            ok = resp.status_code == 200
-            return YmgHealthResponse(
-                reachable=ok,
-                base_url=YMG_DEEP_BASE_URL,
-                message="YMG-Deep 服务在线" if ok else f"状态码 {resp.status_code}",
-            )
-    except Exception as exc:
-        return YmgHealthResponse(
-            reachable=False,
-            base_url=YMG_DEEP_BASE_URL,
-            message=f"YMG-Deep 未启动: {exc}",
-        )
+    health = await check_service_health(YMG_DEEP_BASE_URL, "/api/health")
+    return YmgHealthResponse(**health)
 
 
 @router.post("/analyze", response_model=YmgAnalyzeResponse)
@@ -244,12 +240,34 @@ async def ymg_analyze(data: YmgAnalyzeRequest, db: Session = Depends(get_db)):
     Steps: resolve items -> build evidence digest -> local model generates
     a <=200 char analysis topic -> forward to YMG-Deep /api/research.
     """
-    items = _resolve_items(db, data.topic_id, data.item_ids, data.collection_run_ids)
+    saved_set = db.get(MaterialSet, data.material_set_id) if data.material_set_id else None
+    if data.material_set_id and not saved_set:
+        raise HTTPException(404, "所选素材集不存在")
+    items = (
+        resolve_material_items(db, saved_set)[:80]
+        if saved_set
+        else _resolve_items(db, data.topic_id, data.item_ids, data.collection_run_ids)
+    )
     if not items:
         raise HTTPException(400, "所选信息集没有采集条目，请先采集或在条目页选择。")
 
-    topic = db.query(Topic).filter(Topic.id == data.topic_id).first() if data.topic_id else None
+    topic_id = data.topic_id or (saved_set.topic_id if saved_set else None)
+    topic = db.query(Topic).filter(Topic.id == topic_id).first() if topic_id else None
+    report_id = data.report_id or (saved_set.report_id if saved_set else None)
+    report = db.query(Report).filter(Report.id == report_id).first() if report_id else None
+    if report_id and report is None:
+        raise HTTPException(404, "所选报告不存在")
     evidence_digest, evidence_items = _build_evidence_digest(items)
+    materials = build_material_bundle(items, topic=topic, report=report)
+    material_set = saved_set or create_material_set(
+        db,
+        items,
+        name=f"{topic.name if topic else '已选信息'} · 深度分析素材",
+        topic_id=topic_id,
+        source_type=_material_source_type(data),
+        source_ref_id=report_id or topic_id,
+        report_id=report_id,
+    )
 
     model = _pick_model(db, data.model_id)
     prompt = _build_topic_prompt(items, topic)
@@ -262,12 +280,26 @@ async def ymg_analyze(data: YmgAnalyzeRequest, db: Session = Depends(get_db)):
     except Exception as exc:
         logger.warning("analysis topic generation failed: %s", exc)
         # Fallback: synthesize a topic from the first few item titles.
-        head = "; ".join((it.title_zh or it.title or "").strip() for it in items[:5] if it.title)
+        head = "; ".join(_display_content(it)[0] for it in items[:5] if it.title)
         analysis_topic = f"基于本地知识库信息集的深度分析：{head}"[:200]
 
     forward = await _forward_to_ymg(
         analysis_topic, evidence_digest, data.extra_requirements,
-        data.ymg_depth, data.ymg_mode,
+        data.ymg_depth, data.ymg_mode, materials,
+    )
+    handoff = record_handoff_run(
+        db,
+        material_set,
+        "ymg_deep",
+        forward.get("status", "pending"),
+        remote_session_id=forward.get("session_id"),
+        request_summary={
+            "analysis_topic": analysis_topic,
+            "depth": data.ymg_depth,
+            "mode": data.ymg_mode,
+            "evidence_count": len(items),
+        },
+        error_message=forward.get("message"),
     )
 
     return YmgAnalyzeResponse(
@@ -278,5 +310,28 @@ async def ymg_analyze(data: YmgAnalyzeRequest, db: Session = Depends(get_db)):
         ymg_session_id=forward.get("session_id"),
         ymg_status=forward.get("status", "pending"),
         ymg_message=forward.get("message"),
-        ymg_base_url=YMG_DEEP_BASE_URL,
+        ymg_base_url=YMG_DEEP_WEB_URL,
+        material_set_id=material_set.id,
+        handoff_run_id=handoff.id,
     )
+
+
+def _material_source_type(data: YmgAnalyzeRequest) -> str:
+    if data.report_id:
+        return "report"
+    if data.item_ids:
+        return "selection"
+    if data.collection_run_ids:
+        return "batch"
+    return "topic"
+
+
+def _display_content(item: CollectedItem) -> tuple[str, str, str]:
+    metadata = item.raw_metadata if isinstance(item.raw_metadata, dict) else {}
+    translation = metadata.get("translation_zh") if isinstance(metadata.get("translation_zh"), dict) else {}
+    title = str(translation.get("title_zh") or item.title or "无标题").strip()
+    summary = str(
+        translation.get("summary_zh") or item.summary or (item.content or "")[:200]
+    ).strip()
+    content = str(translation.get("content_zh") or item.content or "").strip()
+    return title, summary, content

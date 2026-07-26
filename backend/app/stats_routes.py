@@ -35,6 +35,26 @@ def dashboard(db: Session = Depends(get_db)):
         CollectedItem.category, func.count(CollectedItem.id)
     ).group_by(CollectedItem.category).order_by(func.count(CollectedItem.id).desc()).all()
 
+    # Theme results must be derived from the items actually persisted for that
+    # topic. Topic.total_items_collected is a lifetime counter and may include
+    # entries later removed or deduplicated across sources.
+    topic_rows = db.query(
+        CollectedItem.topic_id,
+        func.count(CollectedItem.id),
+        func.max(CollectedItem.collected_at),
+    ).filter(CollectedItem.topic_id.isnot(None)).group_by(CollectedItem.topic_id).all()
+    topic_counts = {topic_id: (count, latest) for topic_id, count, latest in topic_rows}
+    topic_stats = []
+    for topic in db.query(Topic).filter(Topic.is_active == True).all():
+        count, latest = topic_counts.get(topic.id, (0, None))
+        topic_stats.append({
+            "topic_id": topic.id,
+            "topic_name": topic.name,
+            "item_count": count,
+            "last_collected_at": latest.isoformat() if latest else None,
+        })
+    topic_stats.sort(key=lambda row: (row["item_count"], row["last_collected_at"] or ""), reverse=True)
+
     # Language breakdown
     lang_rows = db.query(
         CollectedItem.language, func.count(CollectedItem.id)
@@ -44,6 +64,12 @@ def dashboard(db: Session = Depends(get_db)):
     top_tags = db.query(Tag).order_by(Tag.item_count.desc()).limit(15).all()
 
     # Source health
+    source_rows = db.query(
+        CollectedItem.source_id,
+        func.count(CollectedItem.id),
+        func.max(CollectedItem.collected_at),
+    ).group_by(CollectedItem.source_id).all()
+    source_counts = {source_id: (count, latest) for source_id, count, latest in source_rows}
     sources = db.query(SourceConfig).all()
     source_health = []
     for s in sources:
@@ -51,10 +77,11 @@ def dashboard(db: Session = Depends(get_db)):
             CollectionRun.source_id == s.id,
             CollectionRun.status.in_(["completed", "partial"]),
         ).order_by(CollectionRun.created_at.desc()).first()
+        actual_count, latest_item_at = source_counts.get(s.id, (0, None))
         source_health.append({
             "id": s.id, "name": s.name, "is_active": s.is_active,
-            "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
-            "items_collected": s.items_collected,
+            "last_sync_at": (latest_item_at or s.last_sync_at).isoformat() if (latest_item_at or s.last_sync_at) else None,
+            "items_collected": actual_count,
             "last_run_status": last_run.status if last_run else None,
         })
 
@@ -79,7 +106,8 @@ def dashboard(db: Session = Depends(get_db)):
             "total_topics": db.query(Topic).count(),
             "total_tags": db.query(Tag).count(),
         },
-        "categories": [{"category": c or "unknown", "count": n} for c, n in cat_rows if c],
+        "categories": [{"category": c or "未分类", "count": n} for c, n in cat_rows],
+        "topic_stats": topic_stats,
         "languages": [{"language": l or "unknown", "count": n} for l, n in lang_rows],
         "top_tags": [{"id": t.id, "namespace": t.namespace, "value": t.value, "count": t.item_count}
                      for t in top_tags],

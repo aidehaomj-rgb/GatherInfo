@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import { FileText, Trash2, Eye, Download, BrainCircuit } from "lucide-react";
-import { fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, exportReport, downloadReportUrl, listAvailableModels } from "../api";
+import { FileText, Trash2, Eye, Download, BrainCircuit, Send } from "lucide-react";
+import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, exportReport, downloadReportUrl, listAvailableModels, pushReportToHaiSee } from "../api";
 import type { Report, Topic, ModelConfig } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
@@ -10,6 +10,7 @@ import { formatBeijingDateTime } from "../utils/date";
 
 type GenMode = "single" | "multi";
 type SingleSubMode = "merged" | "perBatch";
+type ReportType = "analytical" | "archive";
 
 interface BatchOption { batch_id: string; label: string; run_id: string; }
 
@@ -21,11 +22,13 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [genMode, setGenMode] = useState<GenMode>("single");
+  const [reportType, setReportType] = useState<ReportType>("analytical");
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Report | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; message: string } | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [sendingReportId, setSendingReportId] = useState<string | null>(null);
 
   // single-topic state
   const [selectedTopic, setSelectedTopic] = useState("");
@@ -109,16 +112,21 @@ export function ReportsPage() {
       if (singleSubMode === "merged") {
         const runIds = runIdsOf(selectedBatchIds);
         const report = await generateReport(selectedTopic, {
-          modelId, modelNameOverride,
+          reportType, modelId, modelNameOverride,
           collectionRunIds: runIds.length ? runIds : undefined,
         });
         setGenMsg(`报告生成${statusText(report.status)}：${report.title}`);
       } else {
-        const tasks = runIdsOf(selectedBatchIds).map((rid) =>
-          generateReport(selectedTopic, { modelId, modelNameOverride, collectionRunId: rid }));
-        const results = await Promise.all(tasks);
-        const ok = results.filter((r) => r.status !== "failed").length;
-        setGenMsg(`按批次分别生成完成：成功 ${ok} 份，失败 ${results.length - ok} 份`);
+        const runIds = runIdsOf(selectedBatchIds);
+        const result = await batchGenerateReports(
+          runIds.map(() => selectedTopic),
+          modelId,
+          runIds,
+          modelNameOverride,
+          undefined,
+          reportType,
+        );
+        setGenMsg(`按批次分别生成完成：成功 ${result.results.length - result.failed} 份，失败 ${result.failed} 份`);
       }
       await load();
     } catch (e) {
@@ -146,6 +154,17 @@ export function ReportsPage() {
       alert(e instanceof Error ? e.message : "导出失败");
     }
     setExportingId(null);
+  };
+
+  const handleSendReport = async (report: Report) => {
+    setSendingReportId(report.id);
+    try {
+      const result = await pushReportToHaiSee(report.id);
+      setGenMsg(`已拆分为 ${result.task_ids.length} 个 HaiSee 转译分析任务`);
+    } catch (e) {
+      setGenMsg(`推送失败：${e instanceof Error ? e.message : "未知错误"}`);
+    }
+    setSendingReportId(null);
   };
 
   if (loading) return <div className="loading">加载报告列表...</div>;
@@ -176,6 +195,22 @@ export function ReportsPage() {
       </div>
 
       <div className="gen-controls" style={{ background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 20, marginBottom: 16 }}>
+        <div style={{ marginBottom: 16 }}>
+          <span className="gen-label">报告类型</span>
+          <div className="segmented-control" style={{ marginTop: 6 }}>
+            <button type="button" className={`seg-btn${reportType === "analytical" ? " seg-btn--active" : ""}`} onClick={() => setReportType("analytical")}>
+              总结推理分析型
+            </button>
+            <button type="button" className={`seg-btn${reportType === "archive" ? " seg-btn--active" : ""}`} onClick={() => setReportType("archive")}>
+              逐条信息归档型
+            </button>
+          </div>
+          <p className="text-muted small" style={{ marginTop: 6 }}>
+            {reportType === "analytical"
+              ? "综合多条证据形成关键发现、趋势研判与行动建议。"
+              : "按类别保留每条信息的独立标题、完整正文和原文链接，可批量送至 HaiSee。"}
+          </p>
+        </div>
         {genMode === "single" ? (
           <SingleTopicPanel
             topics={topics}
@@ -194,6 +229,7 @@ export function ReportsPage() {
             generating={generating}
             disabled={singleDisabled}
             onGenerate={handleSingleGenerate}
+            reportType={reportType}
           />
         ) : (
           <ReportBatchPanel
@@ -205,6 +241,7 @@ export function ReportsPage() {
             onGenerated={load}
             genMsg={genMsg}
             onGenMsg={setGenMsg}
+            reportType={reportType}
           />
         )}
 
@@ -216,7 +253,7 @@ export function ReportsPage() {
       </div>
 
       {/* YMG-Deep panel */}
-      <YmgDeepPanel topics={topics} models={models} />
+      <YmgDeepPanel topics={topics} models={models} reports={reports} />
 
       {/* Report list */}
       <div className="card-list">
@@ -234,6 +271,9 @@ export function ReportsPage() {
                 <span className="text-muted small">
                   {topics.find((t) => t.id === r.topic_id)?.name || r.topic_id}
                   {r.model_id && ` · 模型: ${models.find((m) => m.id === r.model_id)?.name || r.model_id}`}
+                </span>
+                <span className="badge badge--gray" style={{ marginLeft: 8 }}>
+                  {r.report_type === "archive" ? "逐条归档" : "总结研判"}
                 </span>
               </div>
               <div className="card-item-actions">
@@ -267,6 +307,11 @@ export function ReportsPage() {
               <button type="button" className="btn btn-sm btn-primary" onClick={() => setViewing(r)} disabled={r.status !== "completed"}>
                 <Eye size={12} /> 查看报告
               </button>
+              {r.status === "completed" && r.report_type === "archive" && (
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleSendReport(r)} disabled={sendingReportId === r.id}>
+                  <Send size={12} /> {sendingReportId === r.id ? "发送中…" : "批量送至 HaiSee"}
+                </button>
+              )}
               {r.status === "completed" && r.output_files && Object.keys(r.output_files).length > 0 ? (
                 Object.keys(r.output_files).map((fmt) => (
                   <a key={fmt} className="btn btn-sm btn-ghost" href={downloadReportUrl(r.id, fmt)} download>
@@ -325,6 +370,7 @@ interface SingleTopicPanelProps {
   generating: boolean;
   disabled: boolean;
   onGenerate: () => void;
+  reportType: ReportType;
 }
 
 function SingleTopicPanel(props: SingleTopicPanelProps) {
@@ -332,7 +378,7 @@ function SingleTopicPanel(props: SingleTopicPanelProps) {
     topics, activeModels, ollamaModels, defaultModelName,
     selectedTopic, onTopicChange, selectedModel, onModelChange,
     batchOptions, selectedBatchIds, onToggleBatch, subMode, onSubModeChange,
-    generating, disabled, onGenerate,
+    generating, disabled, onGenerate, reportType,
   } = props;
 
   const allBatchSelected = batchOptions.length > 0 && selectedBatchIds.length === batchOptions.length;
@@ -372,6 +418,9 @@ function SingleTopicPanel(props: SingleTopicPanelProps) {
               );
             })}
           </select>
+          {reportType === "archive" && (
+            <span className="text-muted small">归档型报告不做综合改写，模型仅用于必要的中文转译。</span>
+          )}
         </div>
       </div>
 

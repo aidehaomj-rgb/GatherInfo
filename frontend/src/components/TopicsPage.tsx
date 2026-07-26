@@ -1,28 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Square, Clock } from "lucide-react";
-import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories, fetchActiveRuns, stopRun } from "../api";
+import { Plus, RefreshCw, Trash2, Edit3, Globe, Target, FileText, BrainCircuit, Clock } from "lucide-react";
+import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import type { Topic, CollectResult, ModelConfig, Source, ActiveRunOut } from "../types";
+import type { Topic, CollectResult, ModelConfig, Source } from "../types";
 import { TopicForm } from "./TopicForm";
 import { formatBeijingDateTime } from "../utils/date";
 
-const TOPIC_COLLECT_PENDING_KEY = "gatherinfo.topicCollect.pending";
 const WEEKLY_ENFORCEMENT_RESEARCH_PROMPT =
   "请检索近一周境外海关、边境执法、港口监管、警察、检察或司法机关，以及可靠区域媒体公开发布的进出口执法案例，形成类似360执法信息周报的线索来源。纳入三类信息：一是香港、台湾、澳门海关或执法机关查获的具体案件，不要求另行证明中国大陆关联；二是其他国家和地区发布的涉中国大陆案件，重点核验中国产、中国籍、中国企业、中国目的地、经中国转运等关联；三是各国境外执法机关查获的重大跨境案件，包括枪支、弹药、爆炸物、武器、暴力犯罪、毒品、野生动物、濒危物种、烟草、假冒侵权和其他违禁品，这类案件可以不涉中国。重点关注走私、查获、扣押、没收、逮捕、调查、起诉、处罚等具体执法行为。使用英语、西班牙语、葡萄牙语，并适当补充法语、阿拉伯语、印尼语、泰语、日语、韩语等检索式。候选信息由大模型自动审核，必须核验原文日期、具体执法行为、来源可信度和纳入依据；不确定或无法核验的信息不得正式入库。排除中国大陆执法案件、普通政策解读、无执法动作或纯转载内容。";
-
-function readPendingTopicIds() {
-  try {
-    const raw = window.localStorage.getItem(TOPIC_COLLECT_PENDING_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writePendingTopicIds(ids: string[]) {
-  window.localStorage.setItem(TOPIC_COLLECT_PENDING_KEY, JSON.stringify(Array.from(new Set(ids))));
-}
 
 /** Humanize a 5-field cron expression into a Chinese description (best-effort). */
 function humanizeCron(cron: string | null): string {
@@ -49,9 +34,6 @@ export function TopicsPage() {
   const [editing, setEditing] = useState<Topic | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [collecting, setCollecting] = useState<string | null>(null);
-  const [pendingCollectIds, setPendingCollectIds] = useState<string[]>(() => readPendingTopicIds());
-  const [activeRuns, setActiveRuns] = useState<ActiveRunOut[]>([]);
-  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
   const [collectMsg, setCollectMsg] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -59,6 +41,10 @@ export function TopicsPage() {
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [expandedKeywordTopics, setExpandedKeywordTopics] = useState<string[]>([]);
+  const [aiPromptTopic, setAiPromptTopic] = useState<Topic | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiPromptModelId, setAiPromptModelId] = useState("");
+  const [savingAiPrompt, setSavingAiPrompt] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,31 +69,6 @@ export function TopicsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const refreshActiveRuns = useCallback(async () => {
-    try {
-      const runs = await fetchActiveRuns();
-      setActiveRuns(runs);
-      const activeTopicIds = new Set(runs.map((run) => run.topic_id).filter(Boolean) as string[]);
-      setPendingCollectIds((prev) => {
-        const next = prev.filter((id) => activeTopicIds.has(id) || collecting === id);
-        if (prev.length > 0 && next.length === 0 && prev.some((id) => !activeTopicIds.has(id))) {
-          void load();
-          setCollectMsg("采集任务已结束，可查看累计采集或采集历史。");
-        }
-        writePendingTopicIds(next);
-        return next;
-      });
-    } catch {
-      // Active-run status is best effort; the collection request itself still reports errors.
-    }
-  }, [collecting, load]);
-
-  useEffect(() => {
-    void refreshActiveRuns();
-    const timer = window.setInterval(() => { void refreshActiveRuns(); }, 3000);
-    return () => window.clearInterval(timer);
-  }, [refreshActiveRuns]);
-
   const handleDelete = (id: string) => {
     setConfirmDelete({ id, message: `删除主题 "${id}"？` });
   };
@@ -124,51 +85,48 @@ export function TopicsPage() {
     setConfirmDelete(null);
   };
 
-  const handleCollect = async (id: string, researchPrompt?: string) => {
+  const handleCollect = async (id: string, researchPrompt?: string, researchModelId?: string) => {
     setCollecting(id);
-    setPendingCollectIds((prev) => {
-      const next = Array.from(new Set([...prev, id]));
-      writePendingTopicIds(next);
-      return next;
-    });
     setCollectMsg(null);
     try {
       setCollectMsg(researchPrompt
         ? "AI 正在生成检索式并启动采集，页面会自动刷新运行状态。"
         : "采集任务已启动，页面会自动刷新运行状态。");
-      const results: CollectResult[] = await collectTopic(id, { researchPrompt });
+      const results: CollectResult[] = await collectTopic(id, { researchPrompt, researchModelId });
       const total = results.reduce((s, r) => s + r.items_new, 0);
       const fails = results.filter((r) => r.errors?.length).length;
-      setCollectMsg(`采集完成: ${total} 条新增${fails > 0 ? `, ${fails} 源失败` : ""}`);
-      setPendingCollectIds((prev) => {
-        const next = prev.filter((topicId) => topicId !== id);
-        writePendingTopicIds(next);
-        return next;
-      });
+      setCollectMsg(`采集完成: ${total} 条新增${fails > 0 ? `, ${fails} 源失败` : ""}。详细进度和历史请在“任务查看”中查看。`);
       await load();
-      await refreshActiveRuns();
+      window.dispatchEvent(new Event("dashboard-refresh"));
     } catch (e) {
       setCollectMsg(`采集失败: ${e instanceof Error ? e.message : "未知错误"}`);
-      setPendingCollectIds((prev) => {
-        const next = prev.filter((topicId) => topicId !== id);
-        writePendingTopicIds(next);
-        return next;
-      });
     }
     setCollecting(null);
   };
 
-  const handlePromptCollect = async (topic: Topic) => {
+  const openPromptCollect = (topic: Topic) => {
     const defaultPrompt = topic.id === "weekly-enforcement-intelligence"
       ? ((topic as any).description_prompt || WEEKLY_ENFORCEMENT_RESEARCH_PROMPT)
       : ((topic as any).description_prompt || "围绕本主题检索最近一周高价值公开信息，优先官方公告、监管动态、可靠新闻和行业报告。");
-    const prompt = window.prompt(
-      `请输入“${topic.name}”本次智能检索提示词`,
-      defaultPrompt,
-    );
-    const value = (prompt || "").trim();
-    if (!value) return;
-    await handleCollect(topic.id, value);
+    setAiPromptTopic(topic);
+    setAiPrompt(defaultPrompt);
+    setAiPromptModelId(topic.ai_research_model_id || topic.collection_model_ids?.[0] || models.find((model) => model.is_default)?.id || "");
+  };
+
+  const saveAndCollectAiPrompt = async () => {
+    if (!aiPromptTopic || !aiPrompt.trim()) return;
+    setSavingAiPrompt(true);
+    try {
+      await updateTopic(aiPromptTopic.id, {
+        description_prompt: aiPrompt.trim(),
+        ai_research_model_id: aiPromptModelId || null,
+      });
+      setAiPromptTopic(null);
+      await handleCollect(aiPromptTopic.id, aiPrompt.trim(), aiPromptModelId || undefined);
+    } catch (e) {
+      setCollectMsg(`保存 AI 采集策略失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    }
+    setSavingAiPrompt(false);
   };
 
   const handleGenerateReport = async (topicId: string, topicName: string) => {
@@ -186,29 +144,7 @@ export function TopicsPage() {
     setGenerating(null);
   };
 
-  const handleStopRun = async (run: ActiveRunOut) => {
-    setStoppingRunId(run.id);
-    try {
-      await stopRun(run.id);
-      if (run.topic_id) {
-        setPendingCollectIds((prev) => {
-          const next = prev.filter((id) => id !== run.topic_id);
-          writePendingTopicIds(next);
-          return next;
-        });
-      }
-      setCollectMsg("采集任务已停止。");
-      await refreshActiveRuns();
-      await load();
-    } catch (e) {
-      setCollectMsg(`停止失败: ${e instanceof Error ? e.message : "未知错误"}`);
-    } finally {
-      setStoppingRunId(null);
-    }
-  };
-
-  const activeTopicIds = new Set(activeRuns.map((run) => run.topic_id).filter(Boolean) as string[]);
-  const runningTopicIds = new Set([...pendingCollectIds, ...activeTopicIds]);
+  const runningTopicIds = new Set(collecting ? [collecting] : []);
   const toggleKeywordTopic = (topicId: string) => {
     setExpandedKeywordTopics((prev) => (
       prev.includes(topicId) ? prev.filter((id) => id !== topicId) : [...prev, topicId]
@@ -248,33 +184,6 @@ export function TopicsPage() {
       {collectMsg && (
         <div className="toast" onClick={() => setCollectMsg(null)}>
           {collectMsg}
-        </div>
-      )}
-
-      {activeRuns.length > 0 && (
-        <div className="history-active-section" style={{ marginBottom: 16 }}>
-          <h3><span className="pulse-dot" /> 正在执行采集 ({activeRuns.length})</h3>
-          {activeRuns.map((run) => (
-            <div key={run.id} className="active-run-card">
-              <div className="run-info">
-                <h4>{run.topic_name || run.topic_id || run.source_name || run.source_id}</h4>
-                <p>{run.source_name || run.source_id} · 新增 {run.items_new} 条 · 已运行 {run.duration_seconds ?? 0} 秒</p>
-              </div>
-              <div className="run-status">
-                <span className="chip chip--blue">{run.status}</span>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-danger"
-                  onClick={() => void handleStopRun(run)}
-                  disabled={stoppingRunId === run.id}
-                  style={{ marginLeft: 8 }}
-                >
-                  <Square size={12} />
-                  {stoppingRunId === run.id ? "停止中..." : "停止"}
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       )}
 
@@ -359,7 +268,7 @@ export function TopicsPage() {
                   : <span className="text-muted">无</span>}
               {(t as any).description_prompt && (
                 <div className="text-muted small" style={{ marginTop: 4 }}>
-                  <strong>描述提示:</strong> {(t as any).description_prompt}
+                <strong>AI 采集提示词:</strong> 已配置
                 </div>
               )}
               </div>
@@ -383,9 +292,9 @@ export function TopicsPage() {
               <button
                 type="button"
                 className="btn btn-sm btn-secondary"
-                onClick={() => void handlePromptCollect(t)}
-                disabled={runningTopicIds.has(t.id) || !models.some((m) => m.is_active && m.is_default)}
-                title={!models.some((m) => m.is_active && m.is_default) ? "请先启用一个默认AI模型" : "输入提示词，由AI生成检索式后采集"}
+                onClick={() => openPromptCollect(t)}
+                disabled={runningTopicIds.has(t.id) || !models.some((m) => m.is_active && m.is_configured)}
+                title={!models.some((m) => m.is_active && m.is_configured) ? "请先在模型配置中启用一个有效模型" : "保存主题的 AI 提示词并启动采集"}
               >
                 <BrainCircuit size={12} />
                 AI提示采集
@@ -429,9 +338,76 @@ export function TopicsPage() {
           onClose={() => { setShowCreate(false); setEditing(null); }}
         />
       )}
+      {aiPromptTopic && (
+        <AiPromptCollectDialog
+          topic={aiPromptTopic}
+          prompt={aiPrompt}
+          modelId={aiPromptModelId}
+          models={models.filter((model) => model.is_active && model.is_configured)}
+          saving={savingAiPrompt}
+          onPromptChange={setAiPrompt}
+          onModelChange={setAiPromptModelId}
+          onClose={() => setAiPromptTopic(null)}
+          onSubmit={() => void saveAndCollectAiPrompt()}
+        />
+      )}
+    </div>
+  );
+}
+
+function AiPromptCollectDialog({
+  topic,
+  prompt,
+  modelId,
+  models,
+  saving,
+  onPromptChange,
+  onModelChange,
+  onClose,
+  onSubmit,
+}: {
+  topic: Topic;
+  prompt: string;
+  modelId: string;
+  models: ModelConfig[];
+  saving: boolean;
+  onPromptChange: (value: string) => void;
+  onModelChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <section className="modal ai-prompt-modal" role="dialog" aria-modal="true" aria-labelledby="ai-prompt-title" onClick={(event) => event.stopPropagation()}>
+        <header className="modal-header-with-actions">
+          <div>
+            <h3 id="ai-prompt-title">AI 提示采集</h3>
+            <p className="text-muted small">{topic.name} · 提示词会保存为本主题的长期采集要求。</p>
+          </div>
+        </header>
+        <div className="ai-prompt-form">
+          <label>
+            采集提示词
+            <textarea rows={12} value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="说明信息范围、地区、时间窗口、重点风险、排除条件和优先来源" autoFocus />
+          </label>
+          <label>
+            AI 采集模型
+            <select value={modelId} onChange={(event) => onModelChange(event.target.value)}>
+              <option value="">使用主题采集模型或默认模型</option>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.name} · {model.model_name}</option>)}
+            </select>
+          </label>
+          <p className="text-muted small">主题关联“AI 提示采集”信息源后，手动采集和定时采集都会加载这份提示词；模型凭据继续使用模型配置中的已有设置。</p>
+        </div>
+        <footer className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={saving || !prompt.trim()}>
+            <BrainCircuit size={16} /> {saving ? "保存中..." : "保存并启动采集"}
+          </button>
+        </footer>
+      </section>
     </div>
   );
 }
 
 // ── Topic form ───────────────────────────────────────────────────────────────
-

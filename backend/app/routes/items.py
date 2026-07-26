@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
     ActiveRunOut, BatchOut, BatchRunOut,
-    ItemDeleteRequest, ItemListOut, ItemOut, ItemTranslateRequest,
+    ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
     RunOut,
 )
 from app.database import get_db
@@ -194,6 +194,7 @@ def list_items(
     status: str | None = None,
     language: str | None = None,
     run_id: str | None = None,
+    batch_id: str | None = None,
     q: str | None = Query(default=None, description="Full-text search in title/content"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -213,6 +214,10 @@ def list_items(
         query = query.filter(CollectedItem.language == language)
     if run_id:
         query = query.filter(CollectedItem.run_id == run_id)
+    if batch_id:
+        query = query.filter(CollectedItem.run_id.in_(
+            db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
+        ))
     if tag:
         query = query.filter(CollectedItem.tags.any(Tag.id == tag))
     if q:
@@ -234,10 +239,11 @@ def list_items(
 
     return ItemListOut(
         items=[ItemOut(
-            id=it.id, source_id=it.source_id,
+            id=it.id, source_id=it.source_id, run_id=it.run_id,
             title=it.title, content=it.content, summary=it.summary, url=it.url,
             **item_translation_fields(it),
             enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
+            quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -281,6 +287,23 @@ async def translate_items(
     )
 
 
+@router.post("/items/quality-review")
+async def quality_review_items(
+    data: ItemQualityReviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Curate historical entries and remove low-value, non-article pages."""
+    from app.content_quality import review_persisted_items
+
+    model = db.query(ModelConfig).filter(
+        ModelConfig.is_default == True,
+        ModelConfig.is_active == True,
+    ).first()
+    return await review_persisted_items(
+        db, model, item_ids=data.item_ids or None, limit=data.limit,
+    )
+
+
 @router.get("/items/ids")
 def list_item_ids(
     topic_id: str | None = None,
@@ -290,6 +313,7 @@ def list_item_ids(
     status: str | None = None,
     language: str | None = None,
     run_id: str | None = None,
+    batch_id: str | None = None,
     q: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -297,7 +321,7 @@ def list_item_ids(
     ids, total = get_item_ids(
         db,
         topic_id=topic_id, source_id=source_id, category=category,
-        tag=tag, status=status, language=language, run_id=run_id, q=q,
+        tag=tag, status=status, language=language, run_id=run_id, batch_id=batch_id, q=q,
     )
     return {"ids": ids, "total": total, "matching": len(ids)}
 
@@ -369,6 +393,7 @@ def search_items(
             title=it.title, content=it.content, summary=it.summary, url=it.url,
             **item_translation_fields(it),
             enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
+            quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
             language=it.language, category=it.category, tags=_item_tags(it),
             entities=it.entities,
             quality_score=it.quality_score or 0,
@@ -388,6 +413,7 @@ def get_item(item_id: str, db: Session = Depends(get_db)):
         title=it.title, content=it.content, summary=it.summary, url=it.url,
         **item_translation_fields(it),
         enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
+        quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
         language=it.language, category=it.category, tags=_item_tags(it),
         entities=it.entities,
         quality_score=it.quality_score or 0,
