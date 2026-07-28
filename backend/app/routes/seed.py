@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/v1", tags=["seed"])
 from ._seed_data import (
     _DEFAULT_CATEGORIES,
     _default_topics,
-    _default_models,
     _default_search_tools,
     _default_tags,
     _default_keyword_tags,
@@ -48,11 +47,9 @@ def seed_defaults(db: Session = Depends(get_db)):
             db.add(t)
             created_topics += 1
 
+    # Model configurations are private user settings. Seeding content must not
+    # silently add, replace, or select an AI model.
     created_models = 0
-    for cfg in _default_models():
-        if not db.query(ModelConfig).filter(ModelConfig.id == cfg["id"]).first():
-            db.add(ModelConfig(**cfg))
-            created_models += 1
 
     created_tools = 0
     for cfg in _default_search_tools():

@@ -173,7 +173,7 @@ def _startup_diagnostics():
             )
             try:
                 from app.routes.seed import (
-                    _default_sources, _default_topics, _default_models,
+                    _default_sources, _default_topics,
                     _default_search_tools, _default_keyword_tags, _default_description_prompt,
                     _DEFAULT_CATEGORIES,
                 )
@@ -182,9 +182,6 @@ def _startup_diagnostics():
                 for cfg in _default_sources():
                     if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
                         db.add(SourceConfig(**cfg))
-                for cfg in _default_models():
-                    if not db.query(ModelConfig).filter(ModelConfig.id == cfg["id"]).first():
-                        db.add(ModelConfig(**cfg))
                 for cfg in _default_topics():
                     if not db.query(Topic).filter(Topic.id == cfg["id"]).first():
                         t = Topic(**cfg)

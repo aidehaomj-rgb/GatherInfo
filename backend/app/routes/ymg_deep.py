@@ -146,11 +146,8 @@ def _pick_model(db: Session, model_id: str | None) -> ModelConfig:
         m = db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
         if m and m.is_active:
             return m
-    default = (
-        db.query(ModelConfig)
-        .filter(ModelConfig.is_active == True, ModelConfig.is_default == True)
-        .first()
-    )
+    from app.model_defaults import get_default_model
+    default = get_default_model(db)
     if default:
         return default
     any_active = db.query(ModelConfig).filter(ModelConfig.is_active == True).first()

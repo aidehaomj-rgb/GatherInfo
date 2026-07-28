@@ -128,7 +128,7 @@ export function YmgDeepPanel({ topics, models, reports }: Props) {
           <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>主题</span>
           <select value={topicId} onChange={(e) => setTopicId(e.target.value)} style={{ padding: "8px 10px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)" }}>
             <option value="">选择主题…</option>
-            {topics.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.total_items_collected}条)</option>)}
+            {topics.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.current_item_count}条)</option>)}
           </select>
         </label>
         <label className="form-group" style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -12,12 +12,14 @@ interface SourceSelectorProps {
   onModelChange: (selected: string[]) => void;
 }
 
-type SourceTreeLeaf = Source;
+/** 受控树：一层 = 信息源分类，二层 = 该分类下的信息源条目 */
 type SourceTreeGroup = {
   id: string;
   label: string;
-  sources: SourceTreeLeaf[];
+  sources: Source[];
 };
+
+const MODELS_GROUP_ID = "__models__";
 
 const PRIMARY_CATEGORY_LABELS: Record<string, string> = {
   commodity: "商品与大宗商品",
@@ -62,52 +64,8 @@ function primaryCategory(source: Source): string {
   return source.default_categories?.[0] || "未分类";
 }
 
-function secondaryCategory(source: Source): string {
-  return source.default_categories?.[1] || "—";
-}
-
 function primaryLabel(category: string): string {
   return PRIMARY_CATEGORY_LABELS[category] || "其他信息源";
-}
-
-const SECONDARY_CATEGORY_LABELS: Record<string, string> = {
-  trade: "贸易",
-  enforcement: "执法",
-  regulation: "法规",
-  crime: "犯罪",
-  customs: "海关",
-  fraud: "欺诈",
-  sanction: "制裁",
-  commodity: "商品",
-  policy: "政策",
-  export_control: "出口管制",
-  market: "市场",
-  tariff: "关税",
-  economy: "经济",
-  logistics: "物流",
-  compliance: "合规",
-  energy: "能源",
-  food: "食品",
-  futures: "期货",
-  metal: "金属",
-  shipping: "航运",
-  price: "价格行情",
-  fta: "自贸协定",
-  ip: "知识产权",
-  risk: "风险情报",
-  tbt_sps: "技术贸易措施",
-  social: "社交媒体",
-  web: "网页信息",
-  专业类网站: "专业类网站",
-  政府官网: "政府官网",
-  新闻媒体: "新闻媒体",
-  其他: "其他",
-  "—": "未细分",
-};
-
-function secondaryLabel(category: string): string {
-  if (!category || category === "—") return "未细分";
-  return SECONDARY_CATEGORY_LABELS[category] || category;
 }
 
 function sourceUrl(source: Source): string {
@@ -147,8 +105,77 @@ function TreeCheckbox({
       type="checkbox"
       checked={checked}
       aria-label={label}
+      onClick={(event) => event.stopPropagation()}
       onChange={onChange}
     />
+  );
+}
+
+function SourceLeaf({
+  source,
+  selected,
+  onToggle,
+}: {
+  source: Source;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <label className={`source-tree-leaf ${selected ? "source-tree-leaf--selected" : ""}`}>
+      <TreeCheckbox checked={selected} label={`选择信息源：${source.name}`} onChange={onToggle} />
+      <span className="source-tree-leaf-copy">
+        <strong>{source.name}</strong>
+        <span title={sourceMeta(source)}>{sourceMeta(source)}</span>
+      </span>
+      <span className="source-tree-channel">{channelLabel(source.channel)}</span>
+    </label>
+  );
+}
+
+function TreeGroupHeader({
+  label,
+  expanded,
+  selectedCount,
+  totalCount,
+  checkboxLabel,
+  onToggleExpand,
+  onToggleSelect,
+}: {
+  label: string;
+  expanded: boolean;
+  selectedCount: number;
+  totalCount: number;
+  checkboxLabel: string;
+  onToggleExpand: () => void;
+  onToggleSelect: () => void;
+}) {
+  const allSelected = selectedCount === totalCount && totalCount > 0;
+  return (
+    <div
+      className="source-tree-root"
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      onClick={onToggleExpand}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onToggleExpand();
+        }
+      }}
+    >
+      <TreeCheckbox
+        checked={allSelected}
+        mixed={selectedCount > 0 && !allSelected}
+        label={checkboxLabel}
+        onChange={onToggleSelect}
+      />
+      <span className="source-tree-toggle">
+        <ChevronDown size={16} className={`source-tree-chevron ${expanded ? "" : "source-tree-chevron--closed"}`} />
+        <span>{label}</span>
+      </span>
+      <span className="source-tree-count">{selectedCount}/{totalCount}</span>
+    </div>
   );
 }
 
@@ -164,14 +191,14 @@ export function SourceSelector({
   const [draft, setDraft] = useState<string[]>(selected);
   const [modelDraft, setModelDraft] = useState<string[]>(selectedModelIds);
   const [search, setSearch] = useState("");
-  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  /** 收起状态的分类 id 集合；默认全部展开，二层信息源立即可见 */
+  const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
 
   const tree = useMemo<SourceTreeGroup[]>(() => {
     const query = search.trim().toLowerCase();
     const buckets: Record<string, Source[]> = {};
     for (const source of sources) {
       const category = primaryCategory(source);
-      const sub = secondaryCategory(source);
       const searchable = [
         source.name,
         source.id,
@@ -179,7 +206,6 @@ export function SourceSelector({
         sourceUrl(source),
         source.default_categories?.join(" ") || "",
         primaryLabel(category),
-        secondaryLabel(sub),
       ].join(" ").toLowerCase();
       if (query && !searchable.includes(query)) continue;
       buckets[category] = [...(buckets[category] || []), source];
@@ -193,14 +219,26 @@ export function SourceSelector({
       .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
   }, [search, sources]);
 
+  const configuredModels = models.filter((model) => model.is_active && model.is_configured && Boolean(model.model_name));
+  const configuredModelIds = configuredModels.map((model) => model.id);
+  const allGroupIds = useMemo(
+    () => (configuredModels.length > 0 ? [MODELS_GROUP_ID, ...tree.map((group) => group.id)] : tree.map((group) => group.id)),
+    [configuredModels.length, tree],
+  );
+
+  /** 搜索时强制展开，保证匹配的二层条目直接可见 */
+  const isSearching = search.trim().length > 0;
+  const isGroupExpanded = (id: string) => isSearching || !collapsedIds.includes(id);
+  const toggleExpanded = (id: string) => {
+    setCollapsedIds((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
+  };
+  const setAllExpanded = (expanded: boolean) => setCollapsedIds(expanded ? [] : allGroupIds);
+
   const openPicker = () => {
     setDraft([...selected]);
     setModelDraft([...selectedModelIds]);
     setSearch("");
-    // Keep the first level visible when the dialog opens. Each second-level
-    // branch still has its own explicit toggle, so source selection never
-    // depends on event bubbling through nested rows.
-    setExpandedGroups(Array.from(new Set(sources.map(primaryCategory))));
+    setCollapsedIds([]);
     setOpen(true);
   };
   const closePicker = () => setOpen(false);
@@ -235,23 +273,10 @@ export function SourceSelector({
         : Array.from(new Set([...current, ...ids]));
     });
   };
-  const toggleExpanded = (id: string) => {
-    setExpandedGroups((current) => current.includes(id)
-      ? current.filter((value) => value !== id)
-      : [...current, id]);
-  };
   const selectVisibleSources = () => {
     const visibleIds = tree.flatMap((group) => group.sources.map((source) => source.id));
     setDraft((current) => Array.from(new Set([...current, ...visibleIds])));
   };
-  const configuredModels = models.filter((model) => model.is_active && model.is_configured && Boolean(model.model_name));
-  const configuredModelIds = configuredModels.map((model) => model.id);
-  const allGroupIds = [
-    ...(configuredModels.length > 0 ? ["__ai_models__"] : []),
-    ...tree.map((group) => group.id),
-  ];
-  const expandedAll = allGroupIds.length > 0 && allGroupIds.every((id) => expandedGroups.includes(id));
-  const setAllExpanded = (expanded: boolean) => setExpandedGroups(expanded ? allGroupIds : []);
 
   return (
     <>
@@ -266,8 +291,7 @@ export function SourceSelector({
         <div
           className="modal-overlay source-picker-overlay"
           onClick={(event) => {
-            event.stopPropagation();
-            closePicker();
+            if (event.target === event.currentTarget) closePicker();
           }}
         >
           <section
@@ -300,9 +324,11 @@ export function SourceSelector({
               <button type="button" className="btn btn-ghost btn-sm" onClick={selectVisibleSources}>
                 选择当前结果
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAllExpanded(!expandedAll)}>
-                {expandedAll ? <ChevronsDownUp size={14} /> : <ChevronsUpDown size={14} />}
-                {expandedAll ? "收起分类" : "展开分类"}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAllExpanded(true)}>
+                <ChevronsUpDown size={14} /> 展开分类
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAllExpanded(false)}>
+                <ChevronsDownUp size={14} /> 收起分类
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft([]); setModelDraft([]); }}>
                 清空选择
@@ -310,104 +336,68 @@ export function SourceSelector({
             </div>
 
             <div className="source-tree" role="tree" aria-label="信息源分类树">
-              {configuredModels.length > 0 && (() => {
-                const selectedCount = configuredModelIds.filter((id) => modelDraft.includes(id)).length;
-                const allSelected = selectedCount === configuredModelIds.length;
-                const isExpanded = expandedGroups.includes("__ai_models__");
-                return (
-                  <section className="source-tree-group source-tree-group--models" role="treeitem" aria-expanded={isExpanded}>
-                    <div className="source-tree-root">
-                      <TreeCheckbox
-                        checked={allSelected}
-                        mixed={selectedCount > 0 && !allSelected}
-                        label="选择全部 AI 模型"
-                        onChange={() => toggleModelIds(configuredModelIds)}
-                      />
-                      <button
-                        type="button"
-                        className="source-tree-toggle"
-                        aria-expanded={isExpanded}
-                        aria-controls="source-tree-ai-children"
-                        onClick={() => toggleExpanded("__ai_models__")}
-                      >
-                        <ChevronDown size={16} className={isExpanded ? "" : "source-tree-chevron--closed"} />
-                        <span>AI 模型信息源</span>
-                      </button>
-                      <span className="source-tree-count">{selectedCount}/{configuredModelIds.length}</span>
+              {configuredModels.length > 0 && (
+                <section
+                  className="source-tree-group source-tree-group--models"
+                  role="treeitem"
+                  aria-expanded={isGroupExpanded(MODELS_GROUP_ID)}
+                >
+                  <TreeGroupHeader
+                    label="AI 模型信息源"
+                    expanded={isGroupExpanded(MODELS_GROUP_ID)}
+                    selectedCount={configuredModelIds.filter((id) => modelDraft.includes(id)).length}
+                    totalCount={configuredModelIds.length}
+                    checkboxLabel="选择全部 AI 模型"
+                    onToggleExpand={() => toggleExpanded(MODELS_GROUP_ID)}
+                    onToggleSelect={() => toggleModelIds(configuredModelIds)}
+                  />
+                  {isGroupExpanded(MODELS_GROUP_ID) && (
+                    <div className="source-tree-children" role="group">
+                      {configuredModels.map((model) => {
+                        const isSelected = modelDraft.includes(model.id);
+                        return (
+                          <label key={model.id} className={`source-tree-leaf ${isSelected ? "source-tree-leaf--selected" : ""}`}>
+                            <TreeCheckbox checked={isSelected} label={`选择 AI 模型：${model.name}`} onChange={() => toggleModel(model.id)} />
+                            <span className="source-tree-leaf-copy">
+                              <strong>{model.name}</strong>
+                              <span>{model.provider} · {model.model_name}</span>
+                            </span>
+                            <span className="source-tree-channel">已配置</span>
+                          </label>
+                        );
+                      })}
                     </div>
-                      {isExpanded && <div
-                        id="source-tree-ai-children"
-                        className="source-tree-children"
-                        role="group"
-                      >
-                        {configuredModels.map((model) => {
-                          const isSelected = modelDraft.includes(model.id);
-                          return (
-                            <label key={model.id} className={`source-tree-leaf ${isSelected ? "source-tree-leaf--selected" : ""}`}>
-                              <TreeCheckbox checked={isSelected} label={`选择 AI 模型：${model.name}`} onChange={() => toggleModel(model.id)} />
-                              <span className="source-tree-leaf-copy">
-                                <strong>{model.name}</strong>
-                                <span>{model.provider} · {model.model_name}</span>
-                              </span>
-                              <span className="source-tree-channel">已配置</span>
-                            </label>
-                          );
-                        })}
-                      </div>}
-                  </section>
-                );
-              })()}
+                  )}
+                </section>
+              )}
               {tree.length === 0 && <div className="text-muted small">无匹配信息源</div>}
               {tree.map((group) => {
                 const groupIds = group.sources.map((source) => source.id);
                 const groupSelected = groupIds.filter((id) => draft.includes(id)).length;
-                const groupAll = groupSelected === groupIds.length && groupIds.length > 0;
-                const groupExpanded = expandedGroups.includes(group.id);
+                const expanded = isGroupExpanded(group.id);
                 return (
-                  <section key={group.id} className="source-tree-group" role="treeitem" aria-expanded={groupExpanded}>
-                    <div className="source-tree-root">
-                      <TreeCheckbox
-                        checked={groupAll}
-                        mixed={groupSelected > 0 && !groupAll}
-                        label={`选择分类：${group.label}`}
-                        onChange={() => toggleIds(groupIds)}
-                      />
-                      <button
-                        type="button"
-                        className="source-tree-toggle"
-                        aria-expanded={groupExpanded}
-                        aria-controls={`source-tree-${encodeURIComponent(group.id)}-children`}
-                        onClick={() => toggleExpanded(group.id)}
-                      >
-                        <ChevronDown size={16} className={groupExpanded ? "" : "source-tree-chevron--closed"} />
-                        <span>{group.label}</span>
-                      </button>
-                      <span className="source-tree-count">{groupSelected}/{groupIds.length}</span>
-                    </div>
-
-                      {groupExpanded && <div
-                        id={`source-tree-${encodeURIComponent(group.id)}-children`}
-                        className="source-tree-children"
-                        role="group"
-                      >
-                        {group.sources.map((source) => {
-                          const isSelected = draft.includes(source.id);
-                          return (
-                            <label key={source.id} className={`source-tree-leaf ${isSelected ? "source-tree-leaf--selected" : ""}`}>
-                              <TreeCheckbox
-                                checked={isSelected}
-                                label={`选择信息源：${source.name}`}
-                                onChange={() => toggleSource(source.id)}
-                              />
-                              <span className="source-tree-leaf-copy">
-                                <strong>{source.name}</strong>
-                                <span title={sourceMeta(source)}>{sourceMeta(source)}</span>
-                              </span>
-                              <span className="source-tree-channel">{channelLabel(source.channel)}</span>
-                            </label>
-                          );
-                        })}
-                      </div>}
+                  <section key={group.id} className="source-tree-group" role="treeitem" aria-expanded={expanded}>
+                    <TreeGroupHeader
+                      label={group.label}
+                      expanded={expanded}
+                      selectedCount={groupSelected}
+                      totalCount={groupIds.length}
+                      checkboxLabel={`选择分类：${group.label}`}
+                      onToggleExpand={() => toggleExpanded(group.id)}
+                      onToggleSelect={() => toggleIds(groupIds)}
+                    />
+                    {expanded && (
+                      <div className="source-tree-children" role="group">
+                        {group.sources.map((source) => (
+                          <SourceLeaf
+                            key={source.id}
+                            source={source}
+                            selected={draft.includes(source.id)}
+                            onToggle={() => toggleSource(source.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </section>
                 );
               })}

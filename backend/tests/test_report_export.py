@@ -24,6 +24,7 @@ from app.report_export import (
     _write_html,
     _write_docx,
     _write_pdf,
+    normalize_report_output_dir,
     SUPPORTED_FORMATS,
 )
 from app.models import Report, SystemConfig, Topic
@@ -106,6 +107,12 @@ class TestResolveFormats:
         system.report_formats = None
         result = _resolve_formats(system)
         assert sorted(result) == sorted(SUPPORTED_FORMATS)
+
+
+class TestOutputDirectory:
+    def test_strips_copied_shell_quotes(self):
+        path = normalize_report_output_dir("'/tmp/report output'")
+        assert path == "/tmp/report output"
 
 
 # ── _resolve_title ──────────────────────────────────────────────────────────

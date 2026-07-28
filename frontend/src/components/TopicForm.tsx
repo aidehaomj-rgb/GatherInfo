@@ -4,6 +4,7 @@ import {
   DESCRIPTION_PROMPT_TEMPLATES,
   KEYWORD_WEIGHT_TEMPLATES,
 } from "../templates";
+import { formatKeywordInput, parseKeywordInput } from "../utils/keywords";
 import { SourceSelector } from "./SourceSelector";
 
 /** Score templates against current keywords; return top-3 recommendations (for ★ marking). */
@@ -54,7 +55,7 @@ export function TopicForm({
   const [name, setName] = useState(topic?.name ?? "");
   const [desc, setDesc] = useState(topic?.description ?? "");
   const [categoryId, setCategoryId] = useState(topic?.category_id ?? "");
-  const [keywords, setKeywords] = useState((topic?.keywords ?? []).join(", "));
+  const [keywords, setKeywords] = useState(formatKeywordInput(topic?.keywords ?? []));
   const [keywordTags, setKeywordTags] = useState(
     ((topic as any)?.keyword_tags ?? [])
       .map((kt: any) => `${kt.keyword}:${kt.weight}`)
@@ -99,10 +100,7 @@ export function TopicForm({
         name,
         category_id: categoryId || null,
         description: desc || null,
-        keywords: keywords
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
+        keywords: parseKeywordInput(keywords),
         keyword_tags: keywordTags
           ? keywordTags
               .split(/\r?\n/)
@@ -152,7 +150,7 @@ export function TopicForm({
   const activeSources = sources.filter(
     (source) => source.is_active && (source.is_configured || selectedSourceIds.includes(source.id)),
   );
-  const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
+  const kwList = parseKeywordInput(keywords);
   const recs = recommendTemplates(kwList);
   const recLabels = new Set(recs.map((r) => r.label));
 
@@ -195,13 +193,14 @@ export function TopicForm({
             </select>
           </label>
           <label className="span-2">
-            <span className="field-label-row">关键词 (逗号分隔) <span className="required-mark" aria-hidden="true">*</span></span>
+            <span className="field-label-row">关键词 <span className="required-mark" aria-hidden="true">*</span></span>
             <input
               required
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
-              placeholder="例如：tariffs, trade war, semiconductor sanctions, export control"
+              placeholder={'例如：关税；走私、出口管制 或 "trade war", "export control"'}
             />
+            <span className="text-muted small">支持中英文逗号、分号、顿号和空格；英文多词短语请使用引号保留。</span>
             {recs.length > 0 && (
               <div style={{ fontSize: "0.75rem", marginTop: 4 }}>
                 <span className="text-muted">推荐模板：</span>
@@ -212,12 +211,8 @@ export function TopicForm({
                       className="chip-link"
                       onClick={(e) => {
                         e.preventDefault();
-                        const existing = keywords
-                          .split(/[,，\s]+/)
-                          .filter(Boolean);
-                        const recKws = r.value
-                          .split(/[,\s]+/)
-                          .filter(Boolean);
+                        const existing = parseKeywordInput(keywords);
+                        const recKws = parseKeywordInput(r.value);
                         const merged = [
                           ...new Set([
                             ...existing,
@@ -226,7 +221,7 @@ export function TopicForm({
                             ),
                           ]),
                         ];
-                        setKeywords(merged.join(", "));
+                        setKeywords(formatKeywordInput(merged));
                       }}
                       title={`匹配度: ${r.score} — 点击添加关键词`}
                     >

@@ -28,7 +28,7 @@ export function ReportViewerModal({ report, onClose }: Props) {
           </div>
         </div>
         <div className="report-meta" style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginBottom: 16, padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
-          基于 {report.item_count} 条采集信息
+          报告快照：生成时基于 {report.item_count} 条采集信息
           {report.generated_at && <> · {formatBeijingDateTime(report.generated_at)}</>}
           {report.tokens_used > 0 && <> · 使用 {report.tokens_used} tokens</>}
         </div>

@@ -48,7 +48,12 @@ class TestNormalizeKeywords:
     def test_normalizes_punctuation(self):
         from app.services.topic_service import _normalize_keywords
         result = _normalize_keywords(["政策，法规", "关税：进口"])
-        assert result == ["政策,法规", "关税:进口"]
+        assert result == ["政策", "法规", "关税:进口"]
+
+    def test_splits_common_keyword_separators(self):
+        from app.services.topic_service import _normalize_keywords
+        result = _normalize_keywords(["关税；走私、出口管制;贸易救济"])
+        assert result == ["关税", "走私", "出口管制", "贸易救济"]
 
 
 class TestTopicServiceCRUD:
@@ -113,7 +118,7 @@ class TestTopicServiceCRUD:
             create_topic(db, {"id": tid, "name": "KW Norm", "keywords": ["a"]})
             _created_ids.append(tid)
             updated = update_topic(db, tid, {"keywords": ["关税，进口", ""]})
-            assert updated.keywords == ["关税,进口"]
+            assert updated.keywords == ["关税", "进口"]
         finally:
             db.close()
 

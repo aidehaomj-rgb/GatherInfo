@@ -3,6 +3,7 @@ import type {
   Source, Topic, Schedule, Tag, TagStats, Stats,
   DashboardData, CollectedItem, ItemList, NotificationConfig,
   CollectResult, ConnectorInfo, CollectRun, RunFailure,
+  ItemInventory,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -171,6 +172,7 @@ export const fetchItems = (filters: ItemFilters = {}) =>
     page: String(filters.page ?? 1),
     page_size: String(filters.page_size ?? 50),
   } as Record<string, string>);
+export const fetchItemInventory = () => get<ItemInventory>("/items/inventory");
 export const fetchFeaturedItems = () => get<CollectedItem[]>("/items/featured");
 export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
 export const translateItems = (itemIds: string[]) =>
@@ -278,6 +280,17 @@ export const exportReport = (id: string) =>
   post<import("./types").Report>(`/reports/${id}/export`, {});
 export const downloadReportUrl = (id: string, format: string) =>
   `${BASE}/reports/${id}/download?format=${encodeURIComponent(format)}`;
+export async function downloadReportFile(id: string, format: string): Promise<{ blob: Blob; filename: string }> {
+  const resp = await fetch(downloadReportUrl(id, format));
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? resp.statusText);
+  }
+  const disposition = resp.headers.get("content-disposition") ?? "";
+  const matched = disposition.match(/filename\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
+  const filename = decodeURIComponent(matched?.[1] ?? matched?.[2] ?? `report.${format}`);
+  return { blob: await resp.blob(), filename };
+}
 
 // ── System settings ────────────────────────────────────────────────
 

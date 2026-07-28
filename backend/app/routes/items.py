@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
-    ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut,
+    ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut, ItemInventoryOut,
     ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
     RunOut,
 )
@@ -111,13 +111,16 @@ def list_batches(
             ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
             batch_label = f"{runs[0].source_id}_{ts}"
 
+        current_item_count = db.query(CollectedItem).filter(
+            CollectedItem.run_id.in_([run.id for run in runs]),
+        ).count()
         batches.append(BatchOut(
             batch_id=batch_id,
             topic_id=runs[0].topic_id,
             topic_name=topic.name if topic else None,
             batch_label=batch_label,
             status=status,
-            total_items=sum(r.items_found or 0 for r in runs),
+            total_items=current_item_count,
             total_new=sum(r.items_new or 0 for r in runs),
             started_at=started_at.isoformat() if started_at else None,
             completed_at=completed_at.isoformat() if completed_at else None,
@@ -330,6 +333,68 @@ def list_items(
     )
 
 
+@router.get("/items/inventory", response_model=ItemInventoryOut)
+def item_inventory(db: Session = Depends(get_db)):
+    """Return a live inventory built only from currently persisted items."""
+    now = datetime.now(timezone.utc)
+
+    def grouped_rows(column, labels: dict[str, str], fallback_id: str, fallback_label: str):
+        rows = db.query(
+            column, func.count(CollectedItem.id), func.max(CollectedItem.collected_at),
+        ).group_by(column).all()
+        result = []
+        for value, count, latest_at in rows:
+            key = str(value) if value else fallback_id
+            label = labels.get(key, str(value) if value else fallback_label)
+            result.append({"id": key, "label": label, "count": int(count), "latest_at": latest_at})
+        return sorted(result, key=lambda row: (-row["count"], row["label"]))
+
+    topic_names = dict(db.query(Topic.id, Topic.name).all())
+    source_names = dict(db.query(SourceConfig.id, SourceConfig.name).all())
+    topics = grouped_rows(CollectedItem.topic_id, topic_names, "__unassigned__", "未关联主题")
+    for row in topics:
+        row["topic_id"] = row["id"] if row["id"] != "__unassigned__" else None
+
+    categories = grouped_rows(
+        CollectedItem.category, {}, "__uncategorized__", "未分类",
+    )
+    sources = grouped_rows(CollectedItem.source_id, source_names, "__unknown_source__", "未知信息源")
+    statuses = grouped_rows(CollectedItem.status, {}, "__unknown_status__", "未知状态")
+
+    batch_rows = db.query(
+        CollectionRun.batch_id,
+        CollectionRun.topic_id,
+        func.count(CollectedItem.id),
+        func.max(CollectedItem.collected_at),
+    ).join(
+        CollectedItem, CollectedItem.run_id == CollectionRun.id,
+    ).filter(
+        CollectionRun.batch_id.isnot(None),
+    ).group_by(CollectionRun.batch_id, CollectionRun.topic_id).all()
+    batches = []
+    for batch_id, topic_id, count, latest_at in batch_rows:
+        label = topic_names.get(topic_id, topic_id or "未关联主题")
+        batches.append({
+            "id": batch_id,
+            "label": f"{label} · {batch_id}",
+            "count": int(count),
+            "latest_at": latest_at,
+            "topic_id": topic_id,
+        })
+    min_utc = datetime.min.replace(tzinfo=timezone.utc)
+    batches.sort(key=lambda row: row["latest_at"] or min_utc, reverse=True)
+
+    return ItemInventoryOut(
+        total_items=db.query(CollectedItem).count(),
+        topics=topics,
+        categories=categories,
+        batches=batches,
+        sources=sources,
+        statuses=statuses,
+        generated_at=now,
+    )
+
+
 @router.get("/items/featured", response_model=list[ItemOut])
 def list_featured_items(db: Session = Depends(get_db)):
     from app.services.featured_intelligence import get_featured_items
@@ -372,10 +437,8 @@ async def translate_items(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    model = db.query(ModelConfig).filter(
-        ModelConfig.is_default == True,
-        ModelConfig.is_active == True,
-    ).first()
+    from app.model_defaults import get_default_model
+    model = get_default_model(db)
     item_ids = data.item_ids if data and data.item_ids else None
     return await translate_existing_items(
         db,
@@ -393,10 +456,8 @@ async def quality_review_items(
     """Curate historical entries and remove low-value, non-article pages."""
     from app.content_quality import review_persisted_items
 
-    model = db.query(ModelConfig).filter(
-        ModelConfig.is_default == True,
-        ModelConfig.is_active == True,
-    ).first()
+    from app.model_defaults import get_default_model
+    model = get_default_model(db)
     return await review_persisted_items(
         db, model, item_ids=data.item_ids or None, limit=data.limit,
     )

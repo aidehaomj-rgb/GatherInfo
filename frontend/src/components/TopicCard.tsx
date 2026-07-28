@@ -96,7 +96,7 @@ export function TopicCard({ topic, onCollect, onGenerateReport, onEdit, onDelete
             : <span className="text-muted">关闭</span>}
         </div>
         <div className="text-muted small">
-          累计采集: {topic.total_items_collected} 条
+          当前条目: {topic.current_item_count} 条
           {topic.last_run_at && <> · 最后运行: {formatBeijingDateTime(topic.last_run_at)}</>}
         </div>
       </div>

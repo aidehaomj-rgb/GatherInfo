@@ -232,7 +232,8 @@ export function ModelForm({ model, onSave, onClose }: ModelFormProps) {
             try {
               await onSave({
                 id, name, provider, description: description || null,
-                base_url: baseUrl || null, api_key: apiKey || null,
+                base_url: baseUrl || null,
+                ...(apiKey ? { api_key: apiKey } : {}),
                 model_name: modelName, is_active: isActive, is_default: isDefault,
                 temperature: parseFloat(temperature), max_tokens: parseInt(maxTokens), top_p: parseFloat(topP),
               });

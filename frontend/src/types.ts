@@ -52,6 +52,7 @@ export interface Topic {
   last_collection_run_id: string | null;
   source_names: string[];
   total_items_collected: number;
+  current_item_count: number;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string | null;
@@ -230,6 +231,24 @@ export interface ItemList {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface InventoryRow {
+  id: string;
+  label: string;
+  count: number;
+  latest_at: string | null;
+  topic_id?: string | null;
+}
+
+export interface ItemInventory {
+  total_items: number;
+  topics: InventoryRow[];
+  categories: InventoryRow[];
+  batches: InventoryRow[];
+  sources: InventoryRow[];
+  statuses: InventoryRow[];
+  generated_at: string | null;
 }
 
 // ── Model Configuration ────────────────────────────────────────────────

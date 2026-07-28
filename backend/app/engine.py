@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
 from app.content_parser import parse_fetch_item
+from app.model_defaults import get_default_model
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     JobStatus, ModelConfig, SourceConfig, Tag, Topic,
@@ -47,7 +48,7 @@ async def _translate_persisted_items(item_ids: list[str], model_id: str | None) 
         try:
             model = (
                 db.query(ModelConfig).filter(ModelConfig.id == model_id).first()
-                if model_id else _web_translation_model()
+                if model_id else get_default_model(db) or _web_translation_model()
             )
             if model:
                 return await translate_existing_items(
@@ -215,10 +216,7 @@ class CollectionEngine:
             detail={"kept": len(retained_items), "rejected": window_rejected, "deferred": candidate_limited},
         )
         if model is None:
-            model = self.db.query(ModelConfig).filter(
-                ModelConfig.is_default == True,
-                ModelConfig.is_active == True,
-            ).first()
+            model = get_default_model(self.db)
 
         # A search result is only a lead. Before it reaches the local library,
         # reject listing/advertising pages and use the selected model to turn a
@@ -262,10 +260,7 @@ class CollectionEngine:
             # callers do not pass a model explicitly, so resolve the active
             # default here instead of silently queueing everything pending.
             if model is None or not model.is_active or not model.api_key:
-                model = self.db.query(ModelConfig).filter(
-                    ModelConfig.is_default == True,
-                    ModelConfig.is_active == True,
-                ).first()
+                model = get_default_model(self.db)
             result.items = await review_enforcement_candidates(result.items, model)
             result.items_new = len(result.items)
             run.items_new = result.items_new
@@ -353,9 +348,7 @@ class CollectionEngine:
         # Topic-selected models are existing model configs, so no provider
         # credentials need to be copied into a topic. Rotate them by source so
         # multiple selections participate in the collection pipeline.
-        default_model = self.db.query(ModelConfig).filter(
-            ModelConfig.is_default == True, ModelConfig.is_active == True
-        ).first()
+        default_model = get_default_model(self.db)
         selected_model_ids = topic.collection_model_ids if isinstance(topic.collection_model_ids, list) else []
         collection_models = self.db.query(ModelConfig).filter(
             ModelConfig.id.in_(selected_model_ids),

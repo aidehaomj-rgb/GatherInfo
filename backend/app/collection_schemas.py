@@ -21,6 +21,7 @@ from app._schemas.topic import (
 from app._schemas.collection import (
     CollectRequest, RunOut, CollectResultOut,
     ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest, ItemQualityReviewRequest,
+    InventoryRowOut, ItemInventoryOut,
     BatchRunOut, BatchOut, ActiveRunOut, RunFailureOut,
 )
 from app._schemas.tag import (
@@ -53,6 +54,7 @@ __all__ = [
     # collection
     "CollectRequest", "RunOut", "CollectResultOut",
     "ItemOut", "ItemListOut", "ItemDeleteRequest", "ItemTranslateRequest", "ItemQualityReviewRequest",
+    "InventoryRowOut", "ItemInventoryOut",
     "BatchRunOut", "BatchOut", "ActiveRunOut", "RunFailureOut",
     # tag
     "TagUpdateIn", "TagUpdateSchema", "TagOut",

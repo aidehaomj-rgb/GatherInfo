@@ -69,6 +69,25 @@ class ItemListOut(BaseModel):
     page_size: int = 50
 
 
+class InventoryRowOut(BaseModel):
+    id: str
+    label: str
+    count: int = 0
+    latest_at: IsoDT = None
+    topic_id: str | None = None
+
+
+class ItemInventoryOut(BaseModel):
+    """Current persisted-item counts; never uses lifetime collection counters."""
+    total_items: int = 0
+    topics: list[InventoryRowOut] = []
+    categories: list[InventoryRowOut] = []
+    batches: list[InventoryRowOut] = []
+    sources: list[InventoryRowOut] = []
+    statuses: list[InventoryRowOut] = []
+    generated_at: IsoDT = None
+
+
 class ItemDeleteRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=500)
 

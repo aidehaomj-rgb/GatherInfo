@@ -151,7 +151,7 @@ export function SchedulesPage() {
                   <strong>主题:</strong>{" "}
                   {s.topic_ids.map((tid) => {
                     const t = topics.find((x) => x.id === tid);
-                    return <span key={tid} className="chip">{t?.name || tid} ({t?.total_items_collected ?? 0}条)</span>;
+                    return <span key={tid} className="chip">{t?.name || tid} ({t?.current_item_count ?? 0}条)</span>;
                   })}
                 </div>
               ) : s.topic_ids?.length ? (
@@ -364,7 +364,7 @@ function ScheduleForm({ topics, onSave, onClose }: ScheduleFormProps) {
                   onClick={() => setSelectedTopics((prev) => prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id])}
                 >
                   <strong>{t.name}</strong>
-                  <span className="text-muted small">{t.total_items_collected} 条</span>
+                  <span className="text-muted small">{t.current_item_count} 条</span>
                 </button>
               ))}
               {topics.length === 0 && <span className="text-muted small">暂无主题，请先在主题管理中创建主题。</span>}

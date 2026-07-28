@@ -87,7 +87,7 @@
                <div style={{ flex: 1 }}>
                  <div style={{ fontWeight: 500 }}>{t.name}</div>
                  <div className="text-muted small" style={{ fontSize: "0.75rem" }}>
-                   {t.keywords.slice(0, 5).join(", ")} · 累计 {t.total_items_collected} 条
+                   {t.keywords.slice(0, 5).join(", ")} · 当前 {t.current_item_count} 条
                  </div>
                </div>
              </label>

@@ -1,16 +1,17 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { ExternalLink, BookOpenText, Languages, ShieldCheck, Send, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { ExternalLink, BookOpenText, Languages, ShieldCheck, Send, Layers3, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import {
   fetchItems, fetchTags, fetchSources, fetchTopics,
-  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems, reviewItemQuality,
+  fetchStatsBySource, fetchBatches, fetchItemIds, batchDeleteItems, reviewItemQuality, fetchItemInventory,
   translateItems, pushItemsToHaiSee,
 } from "../api";
-import type { BatchOut, CollectedItem, HaiSeePushResponse, ItemList, Tag, Source, Topic } from "../types";
+import type { BatchOut, CollectedItem, HaiSeePushResponse, ItemInventory, ItemList, Tag, Source, Topic } from "../types";
 import { cleanItemTitle, getDisplayTitle } from "../utils/title";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { ItemFilterBar } from "./ItemFilterBar";
 import { ItemDetailModal } from "./ItemDetailModal";
 import { formatBeijingDateTime } from "../utils/date";
+import { ItemInventoryPanel } from "./ItemInventoryPanel";
 
 const PAGE_SIZE = 40;
 
@@ -46,6 +47,20 @@ export function ItemsPage() {
   const requestedTranslationIds = useRef(new Set<string>());
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
+  const [showInventory, setShowInventory] = useState(false);
+  const [inventory, setInventory] = useState<ItemInventory | null>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    try {
+      setInventory(await fetchItemInventory());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "全面整理失败");
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchTags(undefined, 200).then(setTags).catch(() => {});
@@ -267,6 +282,18 @@ export function ItemsPage() {
         batchOptions={batchOptions}
         tags={tags}
       />
+
+      <div className="item-tools-row">
+        <button type="button" className="btn btn-sm btn-secondary" onClick={() => {
+          const next = !showInventory;
+          setShowInventory(next);
+          if (next && !inventory) void loadInventory();
+        }}>
+          <Layers3 size={14} /> {showInventory ? "收起全面整理" : "全面整理"}
+        </button>
+        <span className="text-muted small">按当前条目梳理主题、类别、批次和信息源数量</span>
+      </div>
+      {showInventory && <ItemInventoryPanel inventory={inventory} loading={inventoryLoading} onRefresh={() => void loadInventory()} />}
 
       {qualityNotice && <div className="info-banner" style={{ marginBottom: 12 }}>{qualityNotice}</div>}
       {haiseeError && <div className="error-banner" style={{ marginBottom: 12 }}>{haiseeError}</div>}

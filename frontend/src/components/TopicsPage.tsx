@@ -229,7 +229,7 @@ export function TopicsPage() {
                   : <span className="text-muted">关闭</span>}
               </div>
               <div className="text-muted small">
-                累计采集: {t.total_items_collected} 条
+                当前条目: {t.current_item_count} 条
                 {t.last_run_at && <> · 最后运行: {formatBeijingDateTime(t.last_run_at)}</>}
               </div>
             </div>

@@ -285,7 +285,7 @@ export function DashboardPage() {
                   </button>
                 </div>
                 <div className="card-item-meta card-item-meta--compact">
-                  <span className="meta-inline"><strong>累计采集:</strong> {t.total_items_collected} 条</span>
+                  <span className="meta-inline"><strong>当前条目:</strong> {t.current_item_count} 条</span>
                   {t.schedule_cron && (
                     <span className="meta-inline"><strong>调度:</strong> {t.schedule_cron}</span>
                   )}

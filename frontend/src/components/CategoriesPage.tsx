@@ -117,7 +117,7 @@ export function CategoriesPage() {
                 </div>
                 <div className="category-topic-row-stats">
                   <span className={topic.is_active ? "chip chip--green" : "chip"}>{topic.is_active ? "启用" : "停用"}</span>
-                  <strong>{topic.total_items_collected.toLocaleString()}</strong>
+                  <strong>{topic.current_item_count.toLocaleString()}</strong>
                   <span>已采集</span>
                 </div>
               </article>

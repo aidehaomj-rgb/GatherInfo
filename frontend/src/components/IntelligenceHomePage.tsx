@@ -289,7 +289,7 @@ export function IntelligenceHomePage() {
               {topics.filter((t) => t.is_active !== false).slice(0, 6).map((topic) => (
                 <div key={topic.id} className="topic-snapshot">
                   <strong>{topic.name}</strong>
-                  <span>{topic.total_items_collected.toLocaleString()} 条</span>
+                  <span>{topic.current_item_count.toLocaleString()} 条</span>
                 </div>
               ))}
             </div>

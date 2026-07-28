@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { FileText, Trash2, Eye, Download, BrainCircuit, Send } from "lucide-react";
-import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, exportReport, downloadReportUrl, listAvailableModels, pushReportToHaiSee } from "../api";
+import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, exportReport, downloadReportFile, listAvailableModels, pushReportToHaiSee } from "../api";
 import type { Report, Topic, ModelConfig } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
@@ -28,6 +28,8 @@ export function ReportsPage() {
   const [viewing, setViewing] = useState<Report | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; message: string } | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [sendingReportId, setSendingReportId] = useState<string | null>(null);
 
   // single-topic state
@@ -156,6 +158,24 @@ export function ReportsPage() {
     setExportingId(null);
   };
 
+  const handleDownload = async (reportId: string, format: string) => {
+    const key = `${reportId}:${format}`;
+    setDownloadingKey(key);
+    setDownloadError(null);
+    try {
+      const { blob, filename } = await downloadReportFile(reportId, format);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : "下载失败");
+    }
+    setDownloadingKey(null);
+  };
+
   const handleSendReport = async (report: Report) => {
     setSendingReportId(report.id);
     try {
@@ -251,6 +271,7 @@ export function ReportsPage() {
           </div>
         )}
       </div>
+      {downloadError && <div className="error-banner" style={{ marginBottom: 16 }}>{downloadError}</div>}
 
       {/* YMG-Deep panel */}
       <YmgDeepPanel topics={topics} models={models} reports={reports} />
@@ -291,7 +312,7 @@ export function ReportsPage() {
             <div className="card-item-meta">
               <div className="text-muted small">
                 {r.generated_at && <>生成于 {formatBeijingDateTime(r.generated_at)}</>}
-                {r.item_count > 0 && <> · 基于 {r.item_count} 条采集信息</>}
+                {r.item_count > 0 && <> · 生成时基于 {r.item_count} 条信息</>}
                 {r.tokens_used > 0 && <> · 约 {r.tokens_used} tokens</>}
               </div>
               {r.summary && (
@@ -314,9 +335,9 @@ export function ReportsPage() {
               )}
               {r.status === "completed" && r.output_files && Object.keys(r.output_files).length > 0 ? (
                 Object.keys(r.output_files).map((fmt) => (
-                  <a key={fmt} className="btn btn-sm btn-ghost" href={downloadReportUrl(r.id, fmt)} download>
-                    <Download size={12} /> {fmt.toUpperCase()}
-                  </a>
+                  <button key={fmt} type="button" className="btn btn-sm btn-ghost" onClick={() => void handleDownload(r.id, fmt)} disabled={downloadingKey === `${r.id}:${fmt}`}>
+                    <Download size={12} /> {downloadingKey === `${r.id}:${fmt}` ? "准备中..." : fmt.toUpperCase()}
+                  </button>
                 ))
               ) : (
                 r.status === "completed" && (
@@ -396,7 +417,7 @@ function SingleTopicPanel(props: SingleTopicPanelProps) {
           <select value={selectedTopic} onChange={(e) => onTopicChange(e.target.value)} style={{ flex: 1 }}>
             <option value="">-- 请选择 --</option>
             {topics.map((t) => (
-              <option key={t.id} value={t.id}>{t.name} ({t.total_items_collected} 条)</option>
+              <option key={t.id} value={t.id}>{t.name} ({t.current_item_count} 条)</option>
             ))}
           </select>
         </div>

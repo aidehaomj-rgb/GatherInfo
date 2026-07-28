@@ -183,6 +183,7 @@ def test_connectors() -> None:
 def test_seed_defaults() -> None:
     resp = client.post("/api/v1/seed-defaults")
     assert resp.status_code == 200
+    assert resp.json()["models_created"] == 0
 
 
 # ── Auto-ID (信息员 / 主题) ──────────────────────────────────────────
@@ -481,6 +482,18 @@ def test_topic_chinese_punctuation_normalized() -> None:
     kt_keywords = [k["keyword"] for k in data.get("keyword_tags", [])]
     assert "缉私" in kt_keywords or "执法" in kt_keywords
     client.delete("/api/v1/topics/punct-topic")
+
+
+def test_topic_keyword_list_accepts_semicolons_and_enumeration_marks() -> None:
+    """Topic keywords may use common Chinese and English list separators."""
+    resp = client.post("/api/v1/topics", json={
+        "id": "keyword-separator-topic",
+        "name": "关键词间隔测试",
+        "keywords": ["关税；走私、出口管制;贸易救济"],
+    })
+    assert resp.status_code in (200, 201)
+    assert resp.json()["keywords"] == ["关税", "走私", "出口管制", "贸易救济"]
+    client.delete("/api/v1/topics/keyword-separator-topic")
 
 
 # ── Source homepage_url roundtrip ───────────────────────────────────

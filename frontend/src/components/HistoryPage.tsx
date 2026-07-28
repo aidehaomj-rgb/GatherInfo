@@ -219,7 +219,7 @@ export function HistoryPage() {
             <div key={report.id} className="active-run-card">
               <div className="run-info">
                 <h4>{report.title || report.topic_name || "智能报告"}</h4>
-                <p>{report.topic_name || report.topic_id} · 已使用 {report.item_count} 条采集信息 · {report.created_at && `创建于 ${formatBeijingTime(report.created_at)}`}</p>
+                <p>{report.topic_name || report.topic_id} · 报告生成时使用 {report.item_count} 条采集信息 · {report.created_at && `创建于 ${formatBeijingTime(report.created_at)}`}</p>
               </div>
               <div className="run-status"><StatusBadge status={report.status as any} /></div>
             </div>

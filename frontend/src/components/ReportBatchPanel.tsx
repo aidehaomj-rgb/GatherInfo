@@ -139,7 +139,7 @@ export function ReportBatchPanel({
                   toggleTopic(t.id);
                   if (needsBatch && !checked) void ensureMeta(t.id);
                 }} style={s.accent} />
-                <span>{t.name}<span className="text-muted small" style={{ marginLeft: 6 }}>({t.total_items_collected} 条)</span></span>
+                <span>{t.name}<span className="text-muted small" style={{ marginLeft: 6 }}>({t.current_item_count} 条)</span></span>
               </label>
               {needsBatch && checked && topicBatchMeta[t.id] && (
                 <div style={{ marginLeft: 24, marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>

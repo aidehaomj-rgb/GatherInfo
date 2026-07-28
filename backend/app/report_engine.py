@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.model_defaults import get_default_model
 from app.models import CollectedItem, Topic, ModelConfig, Report
 
 logger = logging.getLogger(__name__)
@@ -73,15 +74,11 @@ async def generate_report(
             if not model:
                 raise ValueError(f"Model not found or inactive: {model_id}")
         elif report_type == "analytical":
-            model = db.query(ModelConfig).filter(
-                ModelConfig.is_default == True, ModelConfig.is_active == True
-            ).first()
+            model = get_default_model(db)
             if not model:
                 raise ValueError("No default active model configured.")
         else:
-            model = db.query(ModelConfig).filter(
-                ModelConfig.is_default == True, ModelConfig.is_active == True
-            ).first()
+            model = get_default_model(db)
 
         effective_model = _effective_model(model, model_name_override) if model else None
 

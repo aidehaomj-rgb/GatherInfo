@@ -3,6 +3,7 @@ Test report service layer using real database.
 """
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -159,17 +160,45 @@ class TestReportService:
         finally:
             db.close()
 
-    def test_download_nonexistent_format(self):
+    def test_download_rejects_unknown_format(self):
         from app.services.report_service import download_report_file
         db = SessionLocal()
         try:
             tid = _create_test_topic(db)
             rid = _create_test_report(db, tid, "# Has Content")
             try:
-                download_report_file(rid, "pdf", db)
+                download_report_file(rid, "exe", db)
                 assert False, "Expected HTTPException"
             except HTTPException as e:
-                assert e.status_code == 404
+                assert e.status_code == 400
+        finally:
+            db.close()
+
+    def test_download_rebuilds_missing_export_file(self, tmp_path, monkeypatch):
+        import app.services.report_service as report_service
+
+        db = SessionLocal()
+        try:
+            tid = _create_test_topic(db)
+            rid = _create_test_report(db, tid, "# Rebuild Export")
+            report = db.get(Report, rid)
+            assert report is not None
+            report.output_files = {"html": "'/missing/report.html'"}
+            db.commit()
+            config = SimpleNamespace(
+                report_output_dir=str(tmp_path),
+                report_dir_pattern="%Y-%m-%d",
+                report_formats=["md"],
+                report_title_format="{topic}_{date}",
+            )
+            monkeypatch.setattr(report_service, "get_system_config", lambda _: config)
+
+            path, media_type, _ = report_service.download_report_file(rid, "html", db)
+
+            assert path.endswith(".html")
+            assert Path(path).is_file()
+            assert str(path).startswith(str(tmp_path))
+            assert media_type == "text/html"
         finally:
             db.close()
 

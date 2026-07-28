@@ -178,6 +178,15 @@ def init_db():
     # Apply schema additions (new models, column alterations)
     from app.models_additions import migrate_schema
     migrate_schema(engine)
+    # Older releases could seed a second built-in default model. Keep all
+    # existing records, but restore the user's effective default deterministically.
+    from app.model_defaults import reconcile_default_model
+    db = SessionLocal()
+    try:
+        if reconcile_default_model(db):
+            db.commit()
+    finally:
+        db.close()
     logger.info("Database ready at %s", _db_file_path() or DATABASE_URL)
 
 

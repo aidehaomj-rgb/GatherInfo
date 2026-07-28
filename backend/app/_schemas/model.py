@@ -1,5 +1,5 @@
 """Model config schemas."""
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_serializer
 from .common import IsoDT
 
 
@@ -48,6 +48,11 @@ class ModelConfigOut(BaseModel):
     created_at: IsoDT = None
     updated_at: IsoDT = None
     model_config = {"from_attributes": True}
+
+    @field_serializer("api_key")
+    def hide_api_key(self, _value: str | None) -> None:
+        """Credentials stay server-side; callers only receive is_configured."""
+        return None
 
     @computed_field
     @property

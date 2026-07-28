@@ -81,6 +81,7 @@ class TopicOut(BaseModel):
     last_collection_run_id: str | None = None
     source_names: list[str] = []
     total_items_collected: int = 0
+    current_item_count: int = 0
     last_run_at: IsoDT = None
     next_run_at: IsoDT = None
     created_at: IsoDT = None

@@ -19,6 +19,13 @@ def get_system_config(db: Session) -> SystemConfig:
         db.add(cfg)
         db.commit()
         db.refresh(cfg)
+    from app.report_export import normalize_report_output_dir
+
+    normalized_dir = normalize_report_output_dir(cfg.report_output_dir)
+    if cfg.report_output_dir != normalized_dir:
+        cfg.report_output_dir = normalized_dir
+        db.commit()
+        db.refresh(cfg)
     return cfg
 
 
@@ -33,6 +40,16 @@ def list_reports(db: Session, topic_id: Optional[str] = None, days: Optional[int
         q = q.filter(Report.created_at >= cutoff)
     total = q.count()
     reports = q.order_by(Report.created_at.desc()).limit(limit).all()
+    from app.report_export import valid_output_files
+
+    changed = False
+    for report in reports:
+        available = valid_output_files(report.output_files)
+        if report.output_files != available:
+            report.output_files = available
+            changed = True
+    if changed:
+        db.commit()
     return reports, total
 
 
@@ -90,7 +107,9 @@ def export_report_files(db: Session, report_id: str) -> Report:
     system = get_system_config(db)
     topic = db.query(Topic).filter(Topic.id == r.topic_id).first()
     try:
-        _export(r, system, topic)
+        output_files = _export(r, system, topic)
+        if not output_files:
+            raise RuntimeError("未能生成任何导出格式，请检查报告输出目录和本地导出依赖。")
         db.commit()
         db.refresh(r)
     except Exception as exc:
@@ -100,12 +119,31 @@ def export_report_files(db: Session, report_id: str) -> Report:
 
 
 def download_report_file(report_id: str, format: str, db: Session) -> tuple[str, str, str]:
-    """Validate download request, return (file_path, media_type, filename)."""
+    """Return an export file, regenerating a missing requested format once."""
+    from app.report_export import SUPPORTED_FORMATS, export_report, valid_output_files
+
+    format = format.strip().lower()
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(400, f"不支持的报告格式: {format}")
     r = get_report(db, report_id)
-    files = r.output_files or {}
+    files = valid_output_files(r.output_files)
     path = files.get(format)
+    if not path:
+        if not (r.content or "").strip():
+            raise HTTPException(400, "报告内容为空，无法重新生成下载文件")
+        try:
+            system = get_system_config(db)
+            topic = db.query(Topic).filter(Topic.id == r.topic_id).first()
+            files = export_report(r, system, topic, formats=[format])
+            db.commit()
+            db.refresh(r)
+            path = files.get(format)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Failed to restore report %s format %s", report_id, format)
+            raise HTTPException(500, f"无法重新生成 {format.upper()} 文件: {exc}")
     if not path or not os.path.isfile(path):
-        raise HTTPException(404, f"未找到 {format} 格式文件，请先导出")
+        raise HTTPException(409, f"未能生成 {format.upper()} 文件，请检查导出设置后重试")
 
     media = {
         "md": "text/markdown",

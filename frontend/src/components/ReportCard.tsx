@@ -41,7 +41,7 @@ export function ReportCard({
           {r.topic_name && <>主题: {r.topic_name}</>}
           {!r.topic_name && r.topic_id && <>主题: {r.topic_id}</>}
         </span>
-        <span>基于 {r.item_count} 条信息</span>
+        <span>生成时基于 {r.item_count} 条信息</span>
         {r.generated_at && (
           <span>{formatBeijingDateTime(r.generated_at)}</span>
         )}

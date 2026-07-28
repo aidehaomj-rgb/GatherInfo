@@ -32,6 +32,13 @@ def _get_system_config(db: Session) -> SystemConfig:
         db.add(cfg)
         db.commit()
         db.refresh(cfg)
+    from app.report_export import normalize_report_output_dir
+
+    normalized_dir = normalize_report_output_dir(cfg.report_output_dir)
+    if cfg.report_output_dir != normalized_dir:
+        cfg.report_output_dir = normalized_dir
+        db.commit()
+        db.refresh(cfg)
     return cfg
 
 # ── Stats ───────────────────────────────────────────────────────────────
@@ -67,8 +74,15 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/settings", response_model=SystemConfigOut)
 def update_settings(data: SystemConfigUpdate, db: Session = Depends(get_db)):
     cfg = _get_system_config(db)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    if "report_output_dir" in payload:
+        from app.report_export import normalize_report_output_dir
+
+        payload = {**payload, "report_output_dir": normalize_report_output_dir(payload["report_output_dir"])}
+    for k, v in payload.items():
         setattr(cfg, k, v)
+    from app.model_defaults import reconcile_default_model
+    reconcile_default_model(db)
     db.commit()
     db.refresh(cfg)
     return cfg
@@ -233,5 +247,7 @@ def import_config(data: dict, db: Session = Depends(get_db)):
             db.add(SearchToolConfig(**{k: v for k, v in item.items() if hasattr(SearchToolConfig, k)}))
         imported["search_tools"] += 1
 
+    from app.model_defaults import reconcile_default_model
+    reconcile_default_model(db)
     db.commit()
     return {"imported": imported, "conflicts": conflicts, "conflict_count": len(conflicts)}
