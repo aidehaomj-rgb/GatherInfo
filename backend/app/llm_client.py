@@ -41,7 +41,13 @@ def ollama_api_url(base_url: str, path: str) -> str:
     return f"{base}{path}"
 
 
-async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
+async def call_llm(
+    model: ModelConfig,
+    prompt: str,
+    *,
+    max_tokens_override: int | None = None,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
     """Call the LLM and return content, summary, tokens_used."""
     base_url = model.base_url or default_model_base_url(model.provider)
     model_name = model.model_name
@@ -61,10 +67,10 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
             "think": False,
             "options": {
                 "temperature": model.temperature or 0.7,
-                "num_predict": model.max_tokens or 4096,
+                "num_predict": max_tokens_override or model.max_tokens or 4096,
             },
         }
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -83,10 +89,10 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             "temperature": model.temperature or 0.7,
-            "max_tokens": model.max_tokens or 4096,
+            "max_tokens": max_tokens_override or model.max_tokens or 4096,
             "top_p": model.top_p or 0.9,
         }
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()

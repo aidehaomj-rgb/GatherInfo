@@ -12,6 +12,46 @@ from app.models import ModelConfig, Topic
 
 logger = logging.getLogger(__name__)
 
+ENFORCEMENT_SEARCH_MISSIONS = (
+    # jurisdiction, Tavily country boost, local-language discovery query
+    ("Hong Kong", "", "Hong Kong Customs seizure arrest smuggling drugs wildlife counterfeit"),
+    ("Taiwan", "", "台灣 關務署 海關 查獲 走私 毒品 槍械 涉中國"),
+    ("Macao", "", "Alfândega Macau apreensão contrabando droga tabaco mercadoria"),
+    ("United States", "united states", "CBP customs seizure arrest smuggling China-origin Chinese national shipment"),
+    ("Canada", "canada", "CBSA customs seizure arrest smuggling drugs counterfeit shipment from China"),
+    ("Australia", "australia", "Australian Border Force seizure arrest smuggling Chinese national China shipment"),
+    ("New Zealand", "new zealand", "New Zealand Customs seizure smuggling drugs wildlife shipment from China"),
+    ("United Kingdom", "united kingdom", "UK Border Force seizure smuggling tobacco counterfeit shipment China"),
+    ("Spain", "spain", "aduanas incautación contrabando drogas armas mercancía procedente de China"),
+    ("Portugal", "portugal", "alfandega apreensão contrabando droga mercadoria proveniente da China"),
+    ("France", "france", "douane saisie contrebande drogue armes marchandises en provenance de Chine"),
+    ("Germany", "germany", "Zoll Beschlagnahme Schmuggel Drogen Waffen Waren aus China"),
+    ("Italy", "italy", "Guardia di Finanza dogana sequestro contrabbando droga merce dalla Cina"),
+    ("Netherlands", "netherlands", "douane onderschept smokkel drugs wapens goederen uit China"),
+    ("Singapore", "singapore", "Singapore Customs CNB seizure arrest smuggling Chinese national China shipment"),
+    ("Malaysia", "malaysia", "kastam rampasan penyeludupan dadah rokok barangan dari China"),
+    ("Thailand", "thailand", "ศุลกากร จับกุม ยึด ของกลาง ลักลอบ ยาเสพติด สินค้าจากจีน"),
+    ("Indonesia", "indonesia", "Bea Cukai penindakan penyelundupan narkotika barang dari Tiongkok warga China"),
+    ("Vietnam", "vietnam", "hải quan bắt giữ buôn lậu ma túy hàng hóa từ Trung Quốc"),
+    ("Philippines", "philippines", "Bureau of Customs seizure smuggling drugs counterfeit shipment from China"),
+    ("Japan", "japan", "税関 摘発 押収 密輸 薬物 金 偽ブランド 中国から"),
+    ("South Korea", "south korea", "세관 적발 압수 밀수 마약 위조품 중국산"),
+    ("India", "india", "India customs DRI seizure smuggling arrest Chinese national China-origin goods"),
+    ("Pakistan", "pakistan", "Pakistan Customs seizure smuggling arrest Chinese national China cargo"),
+    ("United Arab Emirates", "united arab emirates", "جمارك ضبط تهريب مخدرات أسلحة شحنة من الصين"),
+    ("South Africa", "south africa", "SARS customs seizure smuggling drugs counterfeit Chinese cargo"),
+    ("Nigeria", "nigeria", "Nigeria Customs seizure smuggling drugs weapons counterfeit Chinese goods"),
+    ("Kenya", "kenya", "Kenya Revenue Authority customs seizure smuggling drugs Chinese goods"),
+    ("Brazil", "brazil", "Receita Federal apreensão contrabando drogas armas carga da China"),
+    ("Argentina", "argentina", "Aduana Argentina incautación contrabando drogas ciudadano chino mercadería china"),
+    ("Chile", "chile", "Aduanas Chile incautación contrabando drogas cigarrillos mercancía china"),
+    ("Colombia", "colombia", "DIAN incautación contrabando drogas mercancía procedente de China"),
+    ("Peru", "peru", "SUNAT Aduanas incautación contrabando drogas mercancía procedente de China"),
+    ("Mexico", "mexico", "Aduanas México aseguramiento contrabando drogas armas mercancía china"),
+    ("Global", "", "customs enforcement seizure smuggling Chinese national China-origin shipment"),
+    ("Global", "", "customs border major seizure drugs firearms wildlife tobacco counterfeit organized crime"),
+)
+
 
 async def build_research_queries(
     topic: Topic,
@@ -35,18 +75,11 @@ async def build_research_queries(
     request = f"{request}\n\n{time_constraint}"
 
     if topic.id == "weekly-enforcement-intelligence":
-        request += (
-            "\n\nEnforcement-weekly constraints: generate a multilingual query set. "
-            "Prioritize overseas customs, border, prosecutorial, judicial, or "
-            "reputable news sources. Cover customs, border, seizure, smuggling, "
-            "Hong Kong Customs, Taiwan Customs, Macao Customs, China, Chinese-origin, "
-            "Chinese national, China destination, China route, China-linked logistics "
-            "and trade. Also cover firearms, ammunition, explosives, weapons, violent "
-            "crime, drugs, narcotics, wildlife, endangered species, tobacco, cigarettes, "
-            "counterfeit goods, and other serious contraband. Include English, Spanish, Portuguese "
-            "and, where useful, French, Arabic, Indonesian, Thai, Japanese, Korean "
-            "or local-language queries. Do not search mainland China Customs, Chinese "
-            "document sites, download sites, paper sites, or generic content farms."
+        # A fixed geographic mission matrix is more reliable than asking a
+        # sometimes-slow model to invent a new plan for every weekly run. The
+        # model remains authoritative at the evidence-review stage.
+        return _fallback_queries(
+            topic, current_date, safe_window_days, max_queries,
         )
 
     keywords = topic.keywords if isinstance(topic.keywords, list) else []
@@ -134,6 +167,25 @@ def _fallback_queries(
     """Build deterministic topic-specific queries when the model is unavailable."""
     start = today - timedelta(days=max(1, window_days))
     date_hint = f"since {start.isoformat()} through {today.isoformat()}"
+    if topic.id == "weekly-enforcement-intelligence":
+        exclusions = (
+            " -site:customs.gov.cn -site:*.customs.gov.cn"
+            " -site:renrendoc.com -site:doc88.com -site:wenku.baidu.com"
+            " -site:baike.baidu.com -site:baijiahao.baidu.com"
+        )
+        year_hint = str(today.year)
+        queries = []
+        for jurisdiction, country, query in ENFORCEMENT_SEARCH_MISSIONS:
+            directives = f"jurisdiction={jurisdiction}"
+            if country:
+                directives += f";country={country}"
+            queries.append(
+                (
+                    f"{directives} || {query} {year_hint}{exclusions}"
+                )[:420]
+            )
+        return queries[:max_queries]
+
     keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]
     directions = keywords[:4] or [topic.name]
     query_suffixes = [

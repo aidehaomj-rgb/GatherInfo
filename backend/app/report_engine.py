@@ -12,6 +12,7 @@ Supports:
 import asyncio
 import json
 import logging
+import re
 from types import SimpleNamespace
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -167,6 +168,15 @@ async def generate_report(
                 report.status = "completed"
                 report.error_log = f"LLM 生成失败，已使用本地规则兜底：{exc}"
 
+        if (
+            report_type == "analytical"
+            and topic.id == "weekly-enforcement-intelligence"
+        ):
+            report.content = _append_enforcement_case_appendix(
+                report.content or "",
+                item_context,
+            )
+
         report.generated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(report)
@@ -223,6 +233,11 @@ def _build_item_context(
             if isinstance(metadata.get("translation_zh"), dict)
             else {}
         )
+        enforcement_review = (
+            metadata.get("enforcement_review")
+            if isinstance(metadata.get("enforcement_review"), dict)
+            else {}
+        )
         translated_content = str(translation.get("content_zh") or it.content or "")
         context.append({
             "id": it.id,
@@ -243,8 +258,209 @@ def _build_item_context(
                      for t in it.tags] if it.tags else [],
             "quality_score": it.quality_score or 0.0,
             "relevance_score": it.relevance_score or 0.0,
+            "enforcement_review": enforcement_review,
         })
     return context
+
+
+def _append_enforcement_case_appendix(
+    report_content: str,
+    items: list[dict],
+) -> str:
+    """Append every reviewed enforcement case in a 360-style weekly digest format."""
+    sections = [
+        report_content.rstrip(),
+        "",
+        "## 附录：境外进出口执法案例汇编",
+        "",
+        f"本附录共收录{len(items)}个案例，按原文发布日期倒序排列。"
+        "案例内容根据执法机关或权威来源公开信息整理，原文链接附后备查。",
+    ]
+    for index, item in enumerate(items, 1):
+        review = item.get("enforcement_review") or {}
+        title = _clean_report_markers(str(item.get("title") or "未命名执法案例").strip())
+        source_name = str(
+            review.get("source_name")
+            or review.get("authority")
+            or item.get("source")
+            or "有关机构"
+        ).strip()
+        source_name = _source_label_zh(source_name)
+        authority = _source_label_zh(
+            str(review.get("authority") or source_name or "待核验").strip()
+        )
+        jurisdiction = _jurisdiction_label_zh(
+            str(review.get("jurisdiction") or "待核验").strip()
+        )
+        case_type = _case_type_label(review.get("case_type") or item.get("category") or "其他")
+        subject = _clean_report_markers(str(review.get("subject") or "待核验").strip())
+        mainland_nexus = str(review.get("mainland_nexus_evidence") or "").strip()
+        inclusion_basis = str(review.get("inclusion_basis") or "").strip()
+        relevance_label = str(
+            review.get("china_relevance_label") or ""
+        ).strip()
+        published_date = _format_case_date(item.get("published_at"))
+        body = _clean_case_narrative(
+            item.get("content") or item.get("summary") or "案件详情待核验。"
+        )
+        if not mainland_nexus:
+            mainland_nexus = (
+                "香港、台湾或澳门地区执法案例，按专题收录规则纳入。"
+                if jurisdiction in {"Hong Kong", "Taiwan", "Macau", "香港", "台湾", "澳门", "中国香港", "中国台湾", "中国澳门"}
+                else (
+                    "作为重大跨境执法案例纳入，不以涉中国大陆为必要条件。"
+                    if inclusion_basis == "major_enforcement"
+                    else "公开信息未显示明确的中国大陆关联。"
+                )
+            )
+        mainland_nexus = _nexus_label_zh(mainland_nexus, relevance_label, inclusion_basis)
+        numeral = _chinese_ordinal(index)
+        sections.extend([
+            "",
+            f"### 【{case_type}】（{numeral}）{title}",
+            "",
+            f"据{source_name}{published_date}消息：{body}",
+            "",
+            f"执法机关：{authority}。国家或地区：{jurisdiction}。涉案对象：{subject}。"
+            f"涉华等级：{relevance_label or '待核验'}。纳入依据：{mainland_nexus}",
+            "原文链接：见系统采集条目。",
+        ])
+    return "\n".join(sections).strip()
+
+
+def _format_case_date(value: Any) -> str:
+    if not value:
+        return "（发布日期待核验）"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return f"{parsed.year}年{parsed.month}月{parsed.day}日"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _clean_case_narrative(value: Any, limit: int = 900) -> str:
+    text = _clean_report_markers(" ".join(str(value or "").split()).strip())
+    if not text:
+        return "案件详情待核验。"
+    if len(text) > limit:
+        text = text[:limit].rstrip("，,；;。 ") + "。"
+    elif text[-1] not in "。！？.!?":
+        text += "。"
+    return text
+
+
+def _clean_report_markers(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"^\s*[-*]\s+", "", text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1（\2）", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _case_type_label(value: Any) -> str:
+    raw = str(value or "").strip().casefold()
+    labels = {
+        "drugs": "毒品",
+        "drug": "毒品",
+        "narcotics": "毒品",
+        "firearms": "枪爆",
+        "firearm": "枪爆",
+        "weapons": "枪爆",
+        "wildlife": "濒危",
+        "endangered species": "濒危",
+        "tobacco": "烟草",
+        "counterfeit": "侵权",
+        "intellectual property infringement": "侵权",
+        "trade compliance": "贸易合规",
+        "customs smuggling": "走私",
+        "smuggling": "走私",
+        "export control": "出口管制",
+        "origin fraud": "原产地",
+        "duty evasion": "税收",
+        "currency declaration violation": "现金",
+        "gold smuggling": "贵金属",
+        "illegal import network": "违规进口",
+        "transnational narcotics": "毒品",
+        "people smuggling": "偷渡",
+        "other": "其他",
+    }
+    return labels.get(raw, _clean_report_markers(str(value or "其他")))
+
+
+def _source_label_zh(value: Any) -> str:
+    raw = _clean_report_markers(str(value or ""))
+    labels = {
+        "U.S. Customs and Border Protection": "美国海关与边境保护局",
+        "Canada Border Services Agency": "加拿大边境服务局",
+        "Hong Kong Customs and Excise Department": "香港海关",
+        "Receita Federal": "巴西联邦税务局",
+        "Receita Federal do Brasil": "巴西联邦税务局",
+        "Singapore Customs": "新加坡海关",
+        "Pakistan Customs": "巴基斯坦海关",
+        "Mettis Global / Pakistan Customs": "Mettis Global网站",
+        "Thailand Government Public Relations Department": "泰国政府公共关系部",
+        "Thai Customs Department": "泰国海关",
+        "Portuguese Tax and Customs Authority": "葡萄牙税务和海关管理局",
+        "Alverca Customs": "葡萄牙阿尔韦卡海关",
+        "Australian Border Force": "澳大利亚边防局",
+        "Australian Border Force and Australian Federal Police": "澳大利亚边防局、联邦警察",
+        "Indonesian National Police": "印度尼西亚国家警察",
+        "Indonesia Customs": "印度尼西亚海关",
+        "NDTV / Press Trust of India": "NDTV网站",
+        "El Ancasti": "阿根廷El Ancasti网站",
+        "Antara News": "印度尼西亚安塔拉通讯社",
+    }
+    return labels.get(raw, raw or "有关机构")
+
+
+def _jurisdiction_label_zh(value: Any) -> str:
+    raw = _clean_report_markers(str(value or ""))
+    labels = {
+        "Argentina": "阿根廷",
+        "Australia": "澳大利亚",
+        "Brazil": "巴西",
+        "Canada": "加拿大",
+        "Hong Kong": "中国香港",
+        "India": "印度",
+        "Indonesia": "印度尼西亚",
+        "New Zealand": "新西兰",
+        "Pakistan": "巴基斯坦",
+        "Panama": "巴拿马",
+        "Portugal": "葡萄牙",
+        "Singapore": "新加坡",
+        "Thailand": "泰国",
+        "United States": "美国",
+        "Taiwan": "中国台湾",
+        "Macau": "中国澳门",
+    }
+    return labels.get(raw, raw or "待核验")
+
+
+def _nexus_label_zh(value: Any, relevance_label: str, inclusion_basis: str) -> str:
+    text = _clean_report_markers(str(value or ""))
+    if text and re.search(r"[\u4e00-\u9fff]", text):
+        return _clean_case_narrative(text, limit=180)
+    if "强" in relevance_label:
+        return "原文显示案件与中国来源、目的地、人员国籍、转运路线或关联主体存在明确关系。"
+    if "弱" in relevance_label:
+        return "原文显示案件存在中国方向、香港台湾澳门地区或中国商品等间接关联。"
+    if inclusion_basis == "major_enforcement" or "重大" in relevance_label:
+        return "作为重大跨境执法案例纳入，不以涉中国大陆为必要条件。"
+    return "公开信息未显示明确的中国大陆关联。"
+
+
+def _chinese_ordinal(value: int) -> str:
+    digits = "零一二三四五六七八九"
+    if value <= 10:
+        return "十" if value == 10 else digits[value]
+    if value < 20:
+        return "十" + digits[value % 10]
+    tens, ones = divmod(value, 10)
+    return digits[tens] + "十" + (digits[ones] if ones else "")
 
 
 def _default_report_title(topic_name: str, report_type: str) -> str:

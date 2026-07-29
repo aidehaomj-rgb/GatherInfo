@@ -18,10 +18,59 @@ from app.report_engine import (
     _build_archive_report,
     _build_collection_summary_context,
     _build_report_prompt,
+    _append_enforcement_case_appendix,
     _effective_model,
     _auto_summary,
 )
 from app.models import CollectedItem, ModelConfig, Topic
+
+
+def test_enforcement_appendix_keeps_every_case_and_review_fields():
+    items = [
+        {
+            "title": "海关查获未申报药品",
+            "content": "执法人员在机场货运渠道查获一批未申报药品",
+            "summary": "",
+            "url": "https://example.test/case-1",
+            "source": "official-source",
+            "category": "drugs",
+            "published_at": "2026-07-28T08:00:00+00:00",
+            "enforcement_review": {
+                "source_name": "某国海关",
+                "authority": "某国海关机场分局",
+                "jurisdiction": "Exampleland",
+                "case_type": "drugs",
+                "subject": "未申报药品",
+                "mainland_nexus_evidence": "货物原产于中国",
+            },
+        },
+        {
+            "title": "海关查获濒危物种",
+            "content": "海关在旅客行李中查获濒危物种",
+            "summary": "",
+            "url": "https://example.test/case-2",
+            "source": "official-source",
+            "category": "wildlife",
+            "published_at": "2026-07-27T08:00:00+00:00",
+            "enforcement_review": {
+                "authority": "香港海关",
+                "jurisdiction": "Hong Kong",
+                "case_type": "wildlife",
+                "subject": "濒危物种",
+            },
+        },
+    ]
+
+    content = _append_enforcement_case_appendix("## 综合分析\n正文", items)
+
+    assert "## 附录：境外进出口执法案例汇编" in content
+    assert "本附录共收录2个案例" in content
+    assert "### 【毒品】（一）海关查获未申报药品" in content
+    assert "### 【濒危】（二）海关查获濒危物种" in content
+    assert "据某国海关2026年7月28日消息" in content
+    assert "货物原产于中国" in content
+    assert "香港、台湾或澳门地区执法案例" in content
+    assert "原文链接：见系统采集条目" in content
 
 
 def test_archive_report_keeps_each_item_as_independent_title_and_body():

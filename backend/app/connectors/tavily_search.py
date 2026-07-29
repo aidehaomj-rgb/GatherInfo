@@ -5,6 +5,7 @@ import logging
 import os
 import asyncio
 from datetime import timedelta
+from urllib.parse import urlparse
 
 import httpx
 import re
@@ -76,8 +77,12 @@ class TavilyCollector(BaseCollector):
 
         include_domains = _build_domain_filter(self.config.default_categories)
         include_domains_param = include_domains if include_domains else None
+        exclude_domains = self.auth_config.get("exclude_domains") or []
         resolve_dates = self.auth_config.get("resolve_published_dates", True)
         max_date_resolutions = int(self.auth_config.get("max_date_resolutions", 40))
+        include_raw_content = self.auth_config.get("include_raw_content", False)
+        search_topic = self.auth_config.get("search_topic", "general")
+        search_depth = self.auth_config.get("search_depth", "advanced")
         resolved_dates = 0
 
         async with httpx.AsyncClient(
@@ -88,14 +93,22 @@ class TavilyCollector(BaseCollector):
                 if len(items) >= max_items:
                     break
                 try:
+                    query_text, directives = _parse_search_query(query)
                     payload = {
                         "api_key": self.api_key,
-                        "query": query,
-                        "search_depth": "advanced",
+                        "query": query_text,
+                        "search_depth": search_depth,
                         "max_results": per_query,
                         "include_answer": False,
-                        "include_raw_content": False,
+                        "include_raw_content": include_raw_content,
+                        "topic": search_topic,
                     }
+                    if (
+                        directives.get("country")
+                        and search_topic == "general"
+                        and self.auth_config.get("use_country_boost", False)
+                    ):
+                        payload["country"] = directives["country"]
                     if self.window_start:
                         payload["start_date"] = self.window_start.date().isoformat()
                     if self.window_end:
@@ -106,17 +119,25 @@ class TavilyCollector(BaseCollector):
                         ).isoformat()
                     if include_domains_param:
                         payload["include_domains"] = include_domains_param
+                    if exclude_domains:
+                        payload["exclude_domains"] = exclude_domains
                     resp = await client.post(self.BASE_URL, json=payload)
-                    if resp.status_code == 429:
-                        errors.append(f"Rate limited: {query}")
-                        logger.warning("Tavily rate limited for query: %s", query[:60])
-                        continue
+                    if resp.status_code in {429, 432}:
+                        errors.append(f"Rate limited: {query_text}")
+                        logger.warning("Tavily rate limited for query: %s", query_text[:60])
+                        break
                     resp.raise_for_status()
                     data = resp.json()
 
                     for r in data.get("results", []):
                         title = r.get("title", "")
-                        content = r.get("content", "")
+                        snippet = r.get("content", "")
+                        raw_content = r.get("raw_content", "")
+                        content = (
+                            raw_content
+                            if isinstance(raw_content, str) and len(raw_content.strip()) >= 120
+                            else snippet
+                        )
                         url = r.get("url", "")
 
                         pub_date = r.get("published_date", None)
@@ -138,7 +159,18 @@ class TavilyCollector(BaseCollector):
                             # explicitly labelled date first, then verify the
                             # page, and only use a bare snippet date last.
                             pub_date = _extract_date_hint(
-                                f"{title} {content}", labelled_only=True
+                                f"{title} {snippet}", labelled_only=True
+                            )
+                        if not pub_date and content:
+                            pub_date = _extract_date_hint(
+                                f"{title} {content[:4000]}", labelled_only=True
+                            )
+                        if not pub_date and content:
+                            # News search is already date-bounded by Tavily.
+                            # The first part of the extracted article commonly
+                            # contains its visible publication date.
+                            pub_date = _extract_date_hint(
+                                f"{title} {content[:1800]}"
                             )
                         if not pub_date and url and resolve_dates and resolved_dates < max_date_resolutions:
                             page_date = await _resolve_page_date(client, url)
@@ -146,30 +178,37 @@ class TavilyCollector(BaseCollector):
                                 pub_date = page_date
                             resolved_dates += 1
                         if not pub_date:
-                            pub_date = _extract_date_hint(f"{title} {content}")
+                            pub_date = _extract_date_hint(f"{title} {snippet}")
 
                         items.append(FetchItem(
                             title=title,
                             content=content,
                             url=url,
                             published_at=pub_date,
-                            summary=content[:500] if content else None,
+                            summary=snippet[:500] if snippet else (content[:500] if content else None),
                             language=detect_lang(f"{url} {content}"),
                             category=infer_category(title, content),
                             suggested_tags=build_tags(title, content),
                             quality_score=r.get("score", 0.5),
                             relevance_score=r.get("score", 0.5),
-                            raw_metadata={"engine": "tavily", "query": query,
-                                          "score": r.get("score"),
-                                          "allow_undated_results": False,
-                                          "allow_unfiltered_results": True},
+                            raw_metadata={
+                                "engine": "tavily",
+                                "query": query_text,
+                                "search_jurisdiction": directives.get("jurisdiction"),
+                                "search_country": directives.get("country"),
+                                "source_domain": urlparse(url).netloc.casefold(),
+                                "score": r.get("score"),
+                                "allow_undated_results": False,
+                                "allow_unfiltered_results": True,
+                            },
                         ))
 
                     await asyncio.sleep(
                         1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
 
                 except Exception as exc:
-                    msg = f"Query '{query[:40]}': {exc}"
+                    query_text, _ = _parse_search_query(query)
+                    msg = f"Query '{query_text[:40]}': {exc}"
                     errors.append(msg)
                     logger.error("Tavily fetch error for source %s: %s", self.config.id, exc)
 
@@ -205,8 +244,9 @@ class TavilyCollector(BaseCollector):
                 if len(items) >= max_items:
                     break
                 try:
+                    query_text, directives = _parse_search_query(query)
                     response = await client.post(url, headers=headers, json={
-                        "messages": [{"role": "user", "content": query}],
+                        "messages": [{"role": "user", "content": query_text}],
                         "search_source": self.auth_config.get("search_source", "baidu_search_v2"),
                         "resource_type_filter": self.auth_config.get(
                             "resource_type_filter", [{"type": "web", "top_k": 10}]
@@ -214,13 +254,13 @@ class TavilyCollector(BaseCollector):
                     })
                     if response.status_code == 401:
                         errors.append(f"Baidu authentication failed: {query}")
-                        continue
+                        break
                     if response.status_code == 429:
                         errors.append(f"Baidu rate limited: {query}")
-                        continue
+                        break
                     response.raise_for_status()
                     for record in _extract_baidu_records(response.json())[:per_query]:
-                        title = _first_text(record, ["title", "name", "doc_title"]) or query
+                        title = _first_text(record, ["title", "name", "doc_title"]) or query_text
                         content = _first_text(record, ["content", "summary", "snippet", "abstract", "description"])
                         item_url = _first_text(record, ["url", "link", "href", "source_url"])
                         published_at = _first_text(record, ["published_at", "publish_time", "date", "time"])
@@ -232,7 +272,10 @@ class TavilyCollector(BaseCollector):
                             suggested_tags=build_tags(title, content), quality_score=0.7,
                             relevance_score=0.7,
                             raw_metadata={
-                                "engine": "baidu_qianfan", "query": query,
+                                "engine": "baidu_qianfan", "query": query_text,
+                                "search_jurisdiction": directives.get("jurisdiction"),
+                                "search_country": directives.get("country"),
+                                "source_domain": urlparse(item_url or "").netloc.casefold(),
                                 # Each item originates from a single, already-scoped
                                 # search query; do not require it to contain every
                                 # keyword configured for the topic again.
@@ -242,7 +285,8 @@ class TavilyCollector(BaseCollector):
                         ))
                     await asyncio.sleep(1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
                 except Exception as exc:
-                    errors.append(f"Baidu search failed for '{query[:40]}': {exc}")
+                    query_text, _ = _parse_search_query(query)
+                    errors.append(f"Baidu search failed for '{query_text[:40]}': {exc}")
                     logger.error("Baidu Qianfan search error for source %s: %s", self.config.id, exc)
 
         return result(self._new_run_id(), self.config.id, items[:max_items], errors)
@@ -262,103 +306,50 @@ async def _resolve_page_date(client: httpx.AsyncClient, url: str) -> str | None:
                 str(parsed.get("content") or ""), labelled_only=True
             )
         if not published:
+            published = _extract_url_date_hint(url)
+        if not published:
             return None
         from datetime import datetime
         return datetime.fromisoformat(str(published).replace("Z", "+00:00")).isoformat()
     except Exception:
         return None
 
-    async def _fetch_baidu_qianfan(
-        self, keywords: list[str], max_items: int = 100
-    ) -> CollectResult:
-        if not self.api_key:
-            logger.warning("BAIDU_QIANFAN_API_KEY not set for source %s", self.config.id)
-            return CollectResult(
-                run_id=self._new_run_id(), source_id=self.config.id,
-                status=JobStatus.FAILED, items=[],
-                error_log=[
-                    "BAIDU_QIANFAN_API_KEY not set. 百度千帆搜索有免费额度，但仍需配置 API Key。"
-                ],
-            )
 
-        endpoint = (
-            self.config.api_endpoint
-            or self.auth_config.get("api_endpoint")
-            or "/v2/ai_search/web_search"
-        )
-        base = (self.config.base_url or "https://qianfan.baidubce.com").rstrip("/")
-        url = endpoint if endpoint.startswith("http") else base + "/" + endpoint.lstrip("/")
-        # Keep topic-specific search terms ahead of the source's generic defaults.
-        queries = keywords or self.config.default_keywords or ["进出口"]
+def _extract_url_date_hint(url: str) -> str | None:
+    """Extract dates encoded in common official-news URL paths."""
+    from datetime import datetime, timezone
 
-        items: list[FetchItem] = []
-        errors: list[str] = []
-        per_query = max(1, min(10, max_items // max(1, len(queries))))
+    for pattern in (
+        r"/(\d{4})/(\d{1,2})/(\d{1,2})(?:/|$)",
+        r"/(\d{4})(\d{2})/(\d{1,2})(?:/|$)",
+    ):
+        match = re.search(pattern, url or "")
+        if not match:
+            continue
+        try:
+            year, month, day = (int(value) for value in match.groups())
+            return datetime(year, month, day, tzinfo=timezone.utc).isoformat()
+        except ValueError:
+            continue
+    return None
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "GatherInfo/0.4 (Baidu Qianfan Search)",
-        }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
-            for query in queries:
-                if len(items) >= max_items:
-                    break
-                try:
-                    body = {
-                        "query": query,
-                        "search_source": self.auth_config.get("search_source", "baidu_search_v2"),
-                        "resource_type_filter": self.auth_config.get("resource_type_filter", []),
-                    }
-                    resp = await client.post(url, headers=headers, json=body)
-                    if resp.status_code == 401:
-                        errors.append(f"百度搜索认证失败，请检查 BAIDU_QIANFAN_API_KEY: {query}")
-                        continue
-                    if resp.status_code == 429:
-                        errors.append(f"百度搜索触发限流: {query}")
-                        continue
-                    resp.raise_for_status()
-                    data = resp.json()
-
-                    for rec in _extract_baidu_records(data)[:per_query]:
-                        title = _first_text(rec, ["title", "name", "doc_title"]) or query
-                        content = _first_text(
-                            rec, ["content", "summary", "snippet", "abstract", "description"]
-                        )
-                        url_value = _first_text(rec, ["url", "link", "href", "source_url"])
-                        published_at = _first_text(
-                            rec, ["published_at", "publish_time", "date", "time"]
-                        )
-                        if not published_at:
-                            published_at = _extract_date_hint(f"{title} {content}")
-                        text = f"{title} {content}"
-                        items.append(FetchItem(
-                            title=title,
-                            content=content or None,
-                            url=url_value or None,
-                            published_at=published_at or None,
-                            summary=(content or "")[:500] or None,
-                            language=detect_lang(text),
-                            category=infer_category(title, content),
-                            suggested_tags=build_tags(title, content),
-                            quality_score=0.7,
-                            relevance_score=0.7,
-                            raw_metadata={"engine": "baidu_qianfan", "query": query},
-                        ))
-
-                    await asyncio.sleep(
-                        1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
-                except Exception as exc:
-                    msg = f"百度搜索 query '{query[:40]}' 失败: {exc}"
-                    errors.append(msg)
-                    logger.error("Baidu Qianfan search error for source %s: %s",
-                                 self.config.id, exc)
-
-        logger.info("Baidu Qianfan: %d items, %d errors for source %s",
-                    len(items), len(errors), self.config.id)
-        return result(self._new_run_id(), self.config.id, items[:max_items], errors)
-
+def _parse_search_query(query: str) -> tuple[str, dict[str, str]]:
+    """Split optional research directives from the query sent to providers."""
+    raw = str(query or "").strip()
+    if "||" not in raw:
+        return raw, {}
+    directive_text, query_text = raw.split("||", 1)
+    directives: dict[str, str] = {}
+    for entry in directive_text.split(";"):
+        if "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        key = key.strip().casefold()
+        value = value.strip()
+        if key in {"country", "jurisdiction"} and value:
+            directives[key] = value
+    return query_text.strip(), directives
 
 def _build_domain_filter(categories: list | None) -> list[str] | None:
     if not categories:
@@ -394,10 +385,16 @@ def _extract_date_hint(text: str, labelled_only: bool = False) -> str | None:
         return None
     patterns = (
         r"\b(\d{4}-\d{1,2}-\d{1,2})\b",
+        r"\b(\d{4}/\d{1,2}/\d{1,2})\b",
         r"\b([A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4})\b",
+        r"\b([A-Z][a-z]{2,8}\s+\d{1,2}\s+\d{4})\b",
         r"\b(\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4})\b",
     )
-    formats = ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y")
+    formats = (
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y",
+        "%d %B %Y", "%d %b %Y",
+    )
     values = [labelled_value] if labelled_value else []
     if not labelled_value:
         for pattern in patterns:

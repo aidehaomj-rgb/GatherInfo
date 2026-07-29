@@ -8,6 +8,7 @@ Flow:
 import asyncio
 import logging
 import re
+from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
@@ -28,12 +29,35 @@ SEMANTIC_SEARCH_CHANNELS = frozenset({"ai_research", "api_search"})
 MAX_PROGRESS_EVENTS = 120
 MAX_ITEM_PROGRESS_EVENTS = 40
 MAX_CANDIDATES_PER_SOURCE = 9
+MAX_ENFORCEMENT_CANDIDATES_PER_SOURCE = 45
+MAX_ENFORCEMENT_SEARCH_RESULTS_PER_SOURCE = 120
 SOURCE_COLLECTION_CONCURRENCY = 4
 SOURCE_EXECUTION_TIMEOUT_SECONDS = 90
+SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS = 300
+ENFORCEMENT_DISCOVERY_KEYWORDS = (
+    "seiz", "intercept", "apprehend", "arrest", "charg", "detain",
+    "confiscat", "contraband", "counterfeit", "undeclared", "unreported",
+    "illegal import", "illegal export", "drug", "fentanyl", "cocaine",
+    "methamphetamine", "weapon", "firearm", "tobacco", "wildlife",
+)
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _topic_collection_keywords(topic: Topic) -> list[str]:
+    values = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
+    keywords = [str(value).strip() for value in values if str(value or "").strip()]
+    if topic.id != "weekly-enforcement-intelligence":
+        return keywords
+
+    seen = {keyword.casefold() for keyword in keywords}
+    for keyword in ENFORCEMENT_DISCOVERY_KEYWORDS:
+        if keyword.casefold() not in seen:
+            keywords.append(keyword)
+            seen.add(keyword.casefold())
+    return keywords
 
 
 async def _translate_persisted_items(item_ids: list[str], model_id: str | None) -> dict:
@@ -155,13 +179,24 @@ class CollectionEngine:
             run, "searching", f"正在“{source.name}”检索与主题相关的信息",
             detail={"query_count": len(keywords)},
         )
+        execution_timeout = (
+            SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS
+            if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS
+            else SOURCE_EXECUTION_TIMEOUT_SECONDS
+        )
         try:
+            runtime_max_items = (
+                max(source.max_items_per_run or 0, MAX_ENFORCEMENT_SEARCH_RESULTS_PER_SOURCE)
+                if topic_id == "weekly-enforcement-intelligence"
+                and _channel_value(source) in SEMANTIC_SEARCH_CHANNELS
+                else None
+            )
             result = await asyncio.wait_for(
-                connector.execute(run, keywords),
-                timeout=SOURCE_EXECUTION_TIMEOUT_SECONDS,
+                connector.execute(run, keywords, max_items=runtime_max_items),
+                timeout=execution_timeout,
             )
         except TimeoutError:
-            message = f"信息源处理超过 {SOURCE_EXECUTION_TIMEOUT_SECONDS} 秒，已停止以保护采集队列"
+            message = f"信息源处理超过 {execution_timeout} 秒，已停止以保护采集队列"
             run.status = JobStatus.FAILED
             run.completed_at = utc_now()
             run.error_log = [message]
@@ -196,7 +231,33 @@ class CollectionEngine:
         window_items, window_rejected = _filter_items_by_window(
             result.items, window_start, window_end
         )
-        retained_items = window_items[:MAX_CANDIDATES_PER_SOURCE]
+        existing_skipped = 0
+        if topic_id == "weekly-enforcement-intelligence":
+            window_items, existing_skipped = (
+                self._exclude_existing_enforcement_candidates(window_items)
+            )
+            if existing_skipped:
+                self._record_progress(
+                    run,
+                    "deduplicated",
+                    f"审核前已排除 {existing_skipped} 条数据库已有案例，避免重复占用模型额度",
+                    detail={"existing_skipped": existing_skipped},
+                )
+        if topic_id == "weekly-enforcement-intelligence":
+            from app.enforcement_review import prioritize_enforcement_candidates
+            existing_counts = self._enforcement_jurisdiction_counts(window_start)
+            # The library is cumulative. Existing items should influence
+            # geographic ordering, but must never close the review gate for a
+            # later collection run.
+            candidate_limit = MAX_ENFORCEMENT_CANDIDATES_PER_SOURCE
+            retained_items = prioritize_enforcement_candidates(
+                window_items,
+                candidate_limit,
+                existing_counts=existing_counts,
+            )
+        else:
+            candidate_limit = MAX_CANDIDATES_PER_SOURCE
+            retained_items = window_items[:candidate_limit]
         candidate_limited = max(0, len(window_items) - len(retained_items))
         result.items = retained_items
         result.items_failed += window_rejected + candidate_limited
@@ -215,6 +276,13 @@ class CollectionEngine:
             f"时间窗口与候选限额核验完成：保留 {len(retained_items)} 条，排除或延后 {window_rejected + candidate_limited} 条",
             detail={"kept": len(retained_items), "rejected": window_rejected, "deferred": candidate_limited},
         )
+        if topic_id == "weekly-enforcement-intelligence" and result.items:
+            self._record_progress(
+                run,
+                "hydrating",
+                f"正在并发读取 {len(result.items)} 个候选原网页，补充执法事实和来源证据",
+            )
+            result.items = await _hydrate_enforcement_candidates(result.items)
         if model is None:
             model = get_default_model(self.db)
 
@@ -229,11 +297,17 @@ class CollectionEngine:
         self._record_progress(
             run, "quality_review", f"正在对 {len(result.items)} 条信息进行价值、独立性和完整性审核",
         )
-        approved_items, rejected_items = await curate_article_candidates(
-            result.items,
-            model,
-            _topic_review_context(topic, semantic_prompt) if topic else None,
-        )
+        if topic_id == "weekly-enforcement-intelligence":
+            # The dedicated evidence gate below is authoritative for concise
+            # official enforcement releases and search-result leads.
+            approved_items = result.items
+            rejected_items = []
+        else:
+            approved_items, rejected_items = await curate_article_candidates(
+                result.items,
+                model,
+                _topic_review_context(topic, semantic_prompt) if topic else None,
+            )
         result.items = approved_items
         result.items_failed += len(rejected_items)
         if rejected_items:
@@ -248,7 +322,9 @@ class CollectionEngine:
             )
         for item in approved_items[:MAX_ITEM_PROGRESS_EVENTS]:
             self._record_progress(
-                run, "approved", f"审核通过：《{item.title or '未命名信息'}》",
+                run,
+                "quality_approved",
+                f"基础质量检查通过，等待执法语义审核：《{item.title or '未命名信息'}》",
                 item_title=item.title or None,
                 detail={"url": item.url or ""}, commit=False,
             )
@@ -262,6 +338,33 @@ class CollectionEngine:
             if model is None or not model.is_active or not model.api_key:
                 model = get_default_model(self.db)
             result.items = await review_enforcement_candidates(result.items, model)
+            for item in result.items[:MAX_ITEM_PROGRESS_EVENTS]:
+                review = (
+                    (item.raw_metadata or {}).get("enforcement_review", {})
+                    if isinstance(item.raw_metadata, dict) else {}
+                )
+                self._record_progress(
+                    run,
+                    "semantic_approved",
+                    f"执法语义审核通过：《{item.title or '未命名信息'}》",
+                    item_title=item.title or None,
+                    detail={
+                        "url": item.url or "",
+                        "jurisdiction": review.get("jurisdiction"),
+                        "case_type": review.get("case_type"),
+                    },
+                    commit=False,
+                )
+            self.db.commit()
+            result.items, portfolio_skipped = self._select_enforcement_portfolio(
+                result.items, window_start,
+            )
+            if portfolio_skipped:
+                result.items_failed += portfolio_skipped
+                result.error_log = [
+                    *(result.error_log or []),
+                    f"30天案例组合控制跳过 {portfolio_skipped} 条：优先补足低覆盖国家地区并限制单一地区集中",
+                ]
             result.items_new = len(result.items)
             run.items_new = result.items_new
         persisted_count = self._persist_items(
@@ -306,6 +409,86 @@ class CollectionEngine:
         )
         return result
 
+    def _exclude_existing_enforcement_candidates(
+        self, items: list[FetchItem],
+    ) -> tuple[list[FetchItem], int]:
+        """Remove known cases before costly model review."""
+        existing = self.db.query(
+            CollectedItem.url,
+            CollectedItem.title,
+            CollectedItem.content,
+        ).filter(
+            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+        ).all()
+        existing_keys = {
+            _dedupe_fingerprint(row.url, row.title or "", row.content)
+            for row in existing
+        }
+        retained: list[FetchItem] = []
+        seen: set[str] = set()
+        for item in items:
+            key = _dedupe_fingerprint(item.url, item.title, item.content)
+            if key in existing_keys or key in seen:
+                continue
+            seen.add(key)
+            retained.append(item)
+        return retained, len(items) - len(retained)
+
+    def _enforcement_jurisdiction_counts(
+        self, window_start: datetime | None,
+    ) -> Counter[str]:
+        from app.enforcement_review import infer_enforcement_jurisdiction
+
+        query = self.db.query(CollectedItem).filter(
+            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+        )
+        if window_start is not None:
+            query = query.filter(CollectedItem.published_at >= window_start)
+        counts: Counter[str] = Counter()
+        for stored in query.all():
+            metadata = (
+                stored.raw_metadata
+                if isinstance(stored.raw_metadata, dict)
+                else {}
+            )
+            counts[infer_enforcement_jurisdiction(FetchItem(
+                title=stored.title,
+                content=stored.content,
+                summary=stored.summary,
+                url=stored.url,
+                raw_metadata=metadata,
+            ))] += 1
+        return counts
+
+    def _backfill_enforcement_metadata(self) -> int:
+        from app.enforcement_review import enrich_enforcement_review_metadata
+
+        changed = 0
+        items = self.db.query(CollectedItem).filter(
+            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+        ).all()
+        for stored in items:
+            metadata = (
+                dict(stored.raw_metadata)
+                if isinstance(stored.raw_metadata, dict)
+                else {}
+            )
+            enriched = enrich_enforcement_review_metadata(FetchItem(
+                title=stored.title,
+                content=stored.content,
+                summary=stored.summary,
+                url=stored.url,
+                raw_metadata=metadata,
+            ))
+            if enriched is None or enriched == metadata.get("enforcement_review"):
+                continue
+            metadata["enforcement_review"] = enriched
+            stored.raw_metadata = metadata
+            changed += 1
+        if changed:
+            self.db.commit()
+        return changed
+
     # ── Topic-driven collection ─────────────────────────────────────────
 
     async def collect_topic(
@@ -319,13 +502,15 @@ class CollectionEngine:
         topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
         if not topic:
             raise ValueError(f"Topic not found: {topic_id}")
+        if topic.id == "weekly-enforcement-intelligence":
+            self._backfill_enforcement_metadata()
 
         sources = self._resolve_sources(topic)
         if only_source_ids:
             allowed = set(only_source_ids)
             sources = [source for source in sources if source.id in allowed]
         source_ids = [s.id for s in sources]
-        keywords = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
+        keywords = _topic_collection_keywords(topic)
 
         # Compute the publication time window from the topic configuration.
         # window_days <= 0 disables filtering (collect everything).
@@ -371,7 +556,7 @@ class CollectionEngine:
                     topic,
                     effective_research_prompt or "",
                     research_model,
-                    max_queries=12,
+                    max_queries=40 if topic.id == "weekly-enforcement-intelligence" else 12,
                     window_days=window_days or 7,
                 )
                 if semantic_queries:
@@ -694,9 +879,147 @@ class CollectionEngine:
         self.db.commit()
         return persisted_count
 
+    def _select_enforcement_portfolio(
+        self,
+        items: list[FetchItem],
+        window_start: datetime | None,
+        target_total: int = 30,
+    ) -> tuple[list[FetchItem], int]:
+        """Fill a 30-day portfolio while preventing one jurisdiction dominating."""
+        if not items:
+            return [], 0
+
+        from app.enforcement_review import (
+            infer_candidate_china_relevance,
+            infer_enforcement_jurisdiction,
+        )
+
+        query = self.db.query(CollectedItem).filter(
+            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+        )
+        if window_start is not None:
+            query = query.filter(CollectedItem.published_at >= window_start)
+        existing = query.all()
+        slots = max(1, target_total)
+
+        existing_counts: Counter[str] = Counter()
+        existing_keys: set[str] = set()
+        for stored in existing:
+            stored_key = (stored.url or stored.title or "").strip().casefold()
+            if stored_key:
+                existing_keys.add(stored_key)
+            metadata = stored.raw_metadata if isinstance(stored.raw_metadata, dict) else {}
+            review = metadata.get("enforcement_review")
+            jurisdiction = (
+                str(review.get("jurisdiction") or "").strip()
+                if isinstance(review, dict) else ""
+            )
+            if not jurisdiction:
+                jurisdiction = infer_enforcement_jurisdiction(FetchItem(
+                    title=stored.title,
+                    content=stored.content,
+                    summary=stored.summary,
+                    url=stored.url,
+                    raw_metadata=metadata,
+                ))
+            existing_counts[jurisdiction] += 1
+
+        relevance_rank = {"strong": 0, "weak": 1, "major_non_china": 2}
+        ranked = sorted(
+            items,
+            key=lambda item: (
+                relevance_rank[infer_candidate_china_relevance(item)],
+                existing_counts[infer_enforcement_jurisdiction(item)],
+                infer_enforcement_jurisdiction(item) == "Hong Kong",
+                -(item.relevance_score or 0),
+            ),
+        )
+        selected: list[FetchItem] = []
+        selected_counts: Counter[str] = Counter()
+        seen_urls: set[str] = set()
+        for item in ranked:
+            jurisdiction = infer_enforcement_jurisdiction(item)
+            relevance = infer_candidate_china_relevance(item)
+            if relevance == "strong":
+                jurisdiction_cap = 10
+            elif relevance == "weak":
+                jurisdiction_cap = 10 if jurisdiction == "Hong Kong" else 8
+            else:
+                jurisdiction_cap = (
+                    8 if jurisdiction == "Hong Kong"
+                    else 3 if jurisdiction == "Unknown"
+                    else 5
+                )
+            if selected_counts[jurisdiction] >= jurisdiction_cap:
+                continue
+            url_key = (item.url or item.title or "").strip().casefold()
+            if (
+                not url_key
+                or url_key in existing_keys
+                or url_key in seen_urls
+            ):
+                continue
+            seen_urls.add(url_key)
+            selected.append(item)
+            selected_counts[jurisdiction] += 1
+            if len(selected) >= slots:
+                break
+        return selected, max(0, len(items) - len(selected))
+
     def _update_source(self, source: SourceConfig, items_found: int):
         source.last_sync_at = utc_now()
         source.items_collected += items_found
+
+
+async def _hydrate_enforcement_candidates(
+    items: list[FetchItem],
+) -> list[FetchItem]:
+    """Fetch shortlisted source pages concurrently; search snippets remain fallback evidence."""
+    import httpx
+
+    from app.web_content_extractor import extract_article_text
+
+    semaphore = asyncio.Semaphore(6)
+    timeout = httpx.Timeout(12.0, connect=8.0)
+    limits = httpx.Limits(max_connections=8, max_keepalive_connections=4)
+
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        limits=limits,
+        follow_redirects=True,
+        headers={"User-Agent": "GatherInfo/0.8 (public-source verification)"},
+    ) as client:
+        async def hydrate(item: FetchItem) -> FetchItem:
+            if not item.url or len((item.content or "").strip()) >= 1200:
+                return item
+            metadata = dict(item.raw_metadata or {})
+            try:
+                async with semaphore:
+                    response = await client.get(item.url)
+                response.raise_for_status()
+                parsed = extract_article_text(response.text, str(response.url))
+                article = str(parsed.get("content") or "").strip()
+                if len(article) < 160:
+                    metadata["source_hydration"] = "insufficient_content"
+                    return replace(item, raw_metadata=metadata)
+                metadata["source_hydration"] = "completed"
+                metadata["resolved_url"] = str(response.url)
+                source_published_at = parsed.get("published_at")
+                if source_published_at:
+                    metadata["date_verification"] = "source_page"
+                return replace(
+                    item,
+                    content=article[:12000],
+                    summary=item.summary or article[:500],
+                    published_at=source_published_at or item.published_at,
+                    raw_metadata=metadata,
+                )
+            except Exception as exc:
+                metadata["source_hydration"] = "failed"
+                metadata["source_hydration_error"] = type(exc).__name__
+                return replace(item, raw_metadata=metadata)
+
+        return list(await asyncio.gather(*(hydrate(item) for item in items)))
 
 
 def _hash(s: str) -> str:
@@ -774,6 +1097,47 @@ def _is_out_of_range(
     if end is not None and pub > end:
         return True
     return False
+
+
+def _extract_date_from_text(text: str) -> datetime | None:
+    """Extract common publication-date formats used by official sources."""
+    if not text:
+        return None
+
+    for pattern in (
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+    ):
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            year, month, day = (int(value) for value in match.groups())
+            return datetime(year, month, day, tzinfo=timezone.utc)
+        except ValueError:
+            continue
+
+    month_patterns = (
+        (
+            r"\b([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b",
+            ("%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y"),
+        ),
+        (
+            r"\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",
+            ("%d %B %Y", "%d %b %Y"),
+        ),
+    )
+    for pattern, formats in month_patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = re.sub(r"\s+", " ", match.group(1)).strip()
+        for date_format in formats:
+            try:
+                return datetime.strptime(value, date_format).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+    return None
 
 
 def _filter_items_by_window(

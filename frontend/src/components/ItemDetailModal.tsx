@@ -18,6 +18,17 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
   const awaitingTranslation = needsChineseTranslation(item, hasTranslation);
   const displayTitle = awaitingTranslation ? "正在生成中文译文" : getDisplayTitle(item.title_zh || item.title);
   const originalTitle = cleanItemTitle(item.title);
+  const review = item.enforcement_review;
+  const reviewFields = review ? [
+    ["涉华等级", review.china_relevance_label],
+    ["国家/地区", review.jurisdiction],
+    ["执法机关", review.authority],
+    ["案件类型", review.case_type],
+    ["涉案对象", review.subject],
+    ["执法行为", review.enforcement_action],
+    ["关联依据", review.mainland_nexus_evidence],
+    ["原始来源", review.source_name || review.source_domain],
+  ].filter((entry) => entry[1] != null && String(entry[1]).trim()) : [];
 
   // 清洗内容：过滤导航菜单噪音
   const translatedSummary = cleanContent(item.summary_zh) || "";
@@ -73,6 +84,24 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
 
         {/* Body */}
         <div className="reading-modal-body">
+          {reviewFields.length > 0 && (
+            <section className="reading-summary" aria-label="执法案件要素">
+              <strong>执法案件要素</strong>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: "10px 18px",
+                marginTop: 10,
+              }}>
+                {reviewFields.map(([label, value]) => (
+                  <div key={String(label)} style={{ minWidth: 0 }}>
+                    <span className="text-muted small">{String(label)}</span>
+                    <div style={{ marginTop: 2, overflowWrap: "anywhere" }}>{String(value)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           {/* 摘要 */}
           {displaySummary && (
             <div className="reading-summary">

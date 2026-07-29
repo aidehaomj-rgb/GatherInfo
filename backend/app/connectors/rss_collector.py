@@ -111,13 +111,7 @@ def _parse_feed(root: ET.Element) -> list[FetchItem]:
         desc = _text(elem, "description")
         pub = _text(elem, "pubDate")
         cat = _text(elem, "category")
-        published = None
-        if pub:
-            try:
-                published = parsedate_to_datetime(pub).replace(
-                    tzinfo=timezone.utc).isoformat()
-            except Exception:
-                pass
+        published = _parse_published_at(pub)
         if title:
             items.append(FetchItem(
                 title=title, content=desc, url=link,
@@ -147,6 +141,20 @@ def _guess_lang(elem: ET.Element) -> str:
         if val:
             return val[:2]
     return "en"
+
+
+def _parse_published_at(value: str) -> str | None:
+    if not value:
+        return None
+    try:
+        published = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    else:
+        published = published.astimezone(timezone.utc)
+    return published.isoformat()
 
 
 def _filter_by_keywords(items: list[FetchItem], keywords: list[str]) -> list[FetchItem]:
