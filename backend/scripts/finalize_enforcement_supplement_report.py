@@ -187,7 +187,7 @@ def main(report_id: str) -> int:
         )
         analysis, summary = _build_analysis(items)
         context = _build_item_context(items, content_limit=None, max_items=None)
-        report.title = "执法信息周报 综合分析报告（2026年7月补充版）"
+        report.title = "执法信息采集 综合分析报告（2026年7月补充版）"
         report.content = _append_enforcement_case_appendix(analysis, context)
         report.summary = summary
         report.item_count = len(items)

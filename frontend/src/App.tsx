@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard, Network,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -26,6 +26,7 @@ const HistoryPage = lazy(() => import("./components/HistoryPage").then(m => ({ d
 const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m => ({ default: m.CategoriesPage })));
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
+const SupplyChainPage = lazy(() => import("./components/SupplyChainPage").then(m => ({ default: m.SupplyChainPage })));
 
 function PageLoader() {
   return (
@@ -38,7 +39,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "home" | "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -55,6 +56,7 @@ const views: ViewDef[] = [
   { id: "items", label: "采集条目", icon: Database },
   { id: "tags", label: "标签系统", icon: Tags },
   { id: "reports", label: "智能报告", icon: FileText },
+  { id: "supply-chain", label: "供应链穿透", icon: Network },
   { id: "models", label: "模型配置", icon: Cpu },
   { id: "schedules", label: "周期调度", icon: Clock },
   { id: "history", label: "任务查看", icon: History },
@@ -248,6 +250,7 @@ function AppInner() {
               {view === "items" && <ItemsPage />}
               {view === "tags" && <TagsPage />}
               {view === "reports" && <ReportsPage />}
+              {view === "supply-chain" && <SupplyChainPage />}
               {view === "models" && <ModelConfigPage />}
               {view === "history" && <HistoryPage />}
               {view === "notifications" && <NotificationsPage />}

@@ -8,7 +8,10 @@ import type {
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
-async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
+async function get<T>(
+  path: string,
+  params?: Record<string, string | undefined | null>,
+): Promise<T> {
   const url = new URL(`${BASE}${path}`, window.location.origin);
   if (params) {
     for (const [k, v] of Object.entries(params)) {
@@ -216,6 +219,38 @@ export const fetchStatsBySource = () => get<{ source_id: string; count: number }
 // ── Seed ────────────────────────────────────────────────────────────────
 
 export const seedDefaults = () => post<{ sources_created: number; topics_created: number }>("/seed-defaults");
+
+export const fetchSupplyChainInvestigations = (country = "United States") =>
+  get<import("./types").SupplyChainInvestigation[]>("/supply-chain/investigations", { country });
+export const createSupplyChainInvestigation = (data: { name: string; country: string; description?: string }) =>
+  post<import("./types").SupplyChainInvestigation>("/supply-chain/investigations", data);
+export const fetchSupplyChainDashboard = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainDashboard>("/supply-chain/dashboard", { country, investigation_id });
+export const fetchSupplyChainEntities = (country?: string, investigation_id?: string) =>
+  get<import("./types").SupplyChainEntity[]>("/supply-chain/entities", { country, investigation_id });
+export const createSupplyChainEntity = (data: Record<string, unknown>) =>
+  post<import("./types").SupplyChainEntity>("/supply-chain/entities", data);
+export const fetchSupplyChainCases = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainCase[]>("/supply-chain/cases", { country, investigation_id });
+export const createSupplyChainCase = (data: Record<string, unknown>) =>
+  post<import("./types").SupplyChainCase>("/supply-chain/cases", data);
+export const fetchSupplyChainShipments = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainShipment[]>("/supply-chain/shipments", { country, investigation_id });
+export const createSupplyChainShipment = (data: Record<string, unknown>) =>
+  post<import("./types").SupplyChainShipment>("/supply-chain/shipments", data);
+export const fetchSupplyChainEvidence = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainEvidence[]>("/supply-chain/evidence", { country, investigation_id });
+export const fetchSupplyChainOpenSourceEvidence = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainOpenSourceEvidence[]>("/supply-chain/open-source-evidence", { country, investigation_id });
+export const analyzeSupplyChain = (data: { case_id?: string; model_id?: string; country?: string; investigation_id?: string }) =>
+  post<{ evidence_created: number; cases_scanned: number; shipments_scanned: number }>(
+    "/supply-chain/analyze", data,
+  );
+export const fetchSupplyChainReports = (country = "United States", investigation_id?: string) =>
+  get<import("./types").SupplyChainReport[]>("/supply-chain/reports", { country, investigation_id });
+export const generateSupplyChainReport = (data: {
+  case_ids?: string[]; model_id?: string; title?: string; country?: string; investigation_id?: string;
+}) => post<import("./types").SupplyChainReport>("/supply-chain/reports/generate", data);
 
 // ── Connectors ──────────────────────────────────────────────────────────
 

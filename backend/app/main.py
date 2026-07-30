@@ -38,6 +38,7 @@ from app.routes.notifications import router as notifications_router
 from app.routes.ymg_deep import router as ymg_router
 from app.routes.haisee import router as haisee_router
 from app.routes.material_sets import router as material_sets_router
+from app.routes.supply_chain import router as supply_chain_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,7 @@ def create_app() -> FastAPI:
     app.include_router(ymg_router)
     app.include_router(haisee_router)
     app.include_router(material_sets_router)
+    app.include_router(supply_chain_router)
 
     return app
 

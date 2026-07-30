@@ -54,10 +54,70 @@ const GROUP_LABEL_L2: Record<string, string> = {
 };
 
 function displayGroupL1(name: string) {
-  return GROUP_LABEL_L1[name] || name;
+  return SOURCE_PRIMARY_LABELS[name] || GROUP_LABEL_L1[name] || name;
 }
 function displayGroupL2(name: string) {
-  return GROUP_LABEL_L2[name] || name;
+  return SOURCE_SECONDARY_LABELS[name] || GROUP_LABEL_L2[name] || name;
+}
+
+const SOURCE_PRIMARY_LABELS: Record<string, string> = {
+  "official-policy": "官方政策法规",
+  "customs-enforcement": "海关执法查发",
+  "export-control-sanctions": "出口管制与制裁",
+  "tbt-sps-regulation": "技术性贸易措施",
+  "critical-minerals-commodities": "关键矿产与大宗商品",
+  "trade-remedy-tariff": "关税税则与贸易救济",
+  "search-ai": "搜索与AI检索",
+  "commercial-data": "商业/API数据",
+  "news-enforcement": "新闻媒体-执法线索",
+  "news-hotspots": "新闻媒体-时政热点",
+  "social-osint": "社交媒体/公众号",
+  "manual-standby": "备用未配置",
+  "uncategorized": "其他未分类",
+};
+
+const SOURCE_SECONDARY_LABELS: Record<string, string> = {
+  official: "官方来源",
+  international: "国际组织",
+  government: "政府官网",
+  customs: "海关/边境机构",
+  enforcement: "执法查发",
+  "export-control": "出口管制",
+  sanctions: "制裁合规",
+  "tbt-sps": "TBT/SPS",
+  "critical-minerals": "关键矿产",
+  commodity: "商品价格/行业数据",
+  tariff: "关税税则",
+  "trade-remedy": "贸易救济",
+  "search-api": "搜索API",
+  "ai-research": "AI智能检索",
+  "data-api": "数据API",
+  rss: "RSS订阅",
+  media: "新闻媒体",
+  "public-account": "公众号/社媒",
+  manual: "手工维护",
+  "—": "未细分",
+};
+
+const SOURCE_PRIMARY_ORDER = [
+  "official-policy",
+  "customs-enforcement",
+  "export-control-sanctions",
+  "tbt-sps-regulation",
+  "critical-minerals-commodities",
+  "trade-remedy-tariff",
+  "search-ai",
+  "commercial-data",
+  "news-enforcement",
+  "news-hotspots",
+  "social-osint",
+  "manual-standby",
+  "uncategorized",
+];
+
+function sourceGroupRank(name: string) {
+  const index = SOURCE_PRIMARY_ORDER.indexOf(name);
+  return index >= 0 ? index : SOURCE_PRIMARY_ORDER.length;
 }
 
 export function SourcesPage() {
@@ -310,7 +370,9 @@ export function SourcesPage() {
 
       <div className="card-list">
         {groupView === "flat" && visibleSources.map((s) => renderSourceCard(s))}
-        {groupView === "grouped" && Object.entries(groupedTree).map(([l1, l2map]) => {
+        {groupView === "grouped" && Object.entries(groupedTree)
+          .sort(([left], [right]) => sourceGroupRank(left) - sourceGroupRank(right) || displayGroupL1(left).localeCompare(displayGroupL1(right), "zh-CN"))
+          .map(([l1, l2map]) => {
           const l1Count = Object.values(l2map).reduce((n, arr) => n + arr.length, 0);
           const l1Collapsed = collapsedGroups.has(`L1:${l1}`);
           return (
@@ -324,7 +386,9 @@ export function SourcesPage() {
                 <strong style={{ fontSize: "0.9rem" }}>{displayGroupL1(l1)}</strong>
                 <span className="text-muted small">({l1Count})</span>
               </div>
-              {!l1Collapsed && Object.entries(l2map).map(([l2, arr]) => {
+              {!l1Collapsed && Object.entries(l2map)
+                .sort(([left], [right]) => displayGroupL2(left).localeCompare(displayGroupL2(right), "zh-CN"))
+                .map(([l2, arr]) => {
                 const l2Key = `L1:${l1}|L2:${l2}`;
                 const l2Collapsed = collapsedGroups.has(l2Key);
                 return (

@@ -18,6 +18,19 @@ router = APIRouter(prefix="/api/v1", tags=["sources"])
 
 _CHANNELS_NEEDING_KEY = frozenset({"api_search", "ai_research", "json_api", "commercial"})
 _CHANNELS_NO_KEY_NEEDED = frozenset({"web_scrape", "official", "rss", "manual", "social", "deepweb"})
+_STALE_CONFIG_ERROR_MARKERS = (
+    "api key",
+    "apikey",
+    "api_key",
+    "key",
+    "缺少",
+    "未配置",
+    "暂不能启用",
+    "not set",
+    "missing",
+    "requires",
+    "required",
+)
 
 
 def _eval_configured(
@@ -36,6 +49,17 @@ def _eval_configured(
     if channel in _CHANNELS_NO_KEY_NEEDED:
         return has_address
     return bool(api_key)
+
+
+def _clear_stale_config_error(source: SourceConfig) -> bool:
+    """Clear old setup errors once the source has become usable."""
+    if not source.is_configured or not source.last_error:
+        return False
+    error_text = str(source.last_error).casefold()
+    if any(marker in error_text for marker in _STALE_CONFIG_ERROR_MARKERS):
+        source.last_error = None
+        return True
+    return False
 
 
 # ── Sources CRUD ────────────────────────────────────────────────────────
@@ -98,6 +122,8 @@ def reconcile_source_readiness(db: Session = Depends(get_db)):
         if source.is_configured != configured:
             source.is_configured = configured
             updated += 1
+        if _clear_stale_config_error(source):
+            updated += 1
     db.commit()
     return {"updated": updated, "configured": sum(1 for source in sources if source.is_configured)}
 
@@ -131,6 +157,7 @@ def update_source(source_id: str, data: SourceUpdate, db: Session = Depends(get_
             api_endpoint=src.api_endpoint,
             homepage_url=src.homepage_url,
         )
+        _clear_stale_config_error(src)
     db.commit()
     db.refresh(src)
     return src
@@ -190,6 +217,10 @@ async def validate_source(source_id: str, db: Session = Depends(get_db)):
     try:
         valid = await connector.validate()
         if valid:
+            src.is_configured = True
+            src.last_error = None
+            db.commit()
+            db.refresh(src)
             diagnostics.append("连接测试通过 ✓")
         else:
             diagnostics.append("连接测试失败：无法连接或认证失败。")

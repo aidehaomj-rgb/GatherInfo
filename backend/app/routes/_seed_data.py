@@ -125,6 +125,38 @@ def _default_topics() -> list[dict]:
                         "cbp-newsroom", "tavily-search"],
          "schedule_cron": "0 9 * * 1,4", "is_scheduled": True, "auto_report": True,
          "collect_window_days": 14},
+        {"id": "us-defense-procurement", "name": "美国军工采购与供应链",
+         "description": "监测美国国防部及下属机构的采购机会、已授合同和重要合同公告，识别军工供应商、采购产品、合同金额、履约周期及关键材料供应链线索。",
+         "is_active": True,
+         "keywords": [
+             "rare earth", "critical mineral", "permanent magnet",
+             "lithium battery", "battery cell", "defense supply chain",
+             "unmanned system", "naval component", "ship pump",
+             "aerospace material", "semiconductor", "tungsten",
+             "gallium", "germanium",
+         ],
+         "synonyms": [
+             "strategic materials", "defense industrial base",
+             "military procurement", "contract award", "solicitation",
+             "request for information", "sources sought",
+         ],
+         "categories": ["defense_procurement", "supply_chain"],
+         "focus_countries": ["US"], "focus_languages": ["en"],
+         "source_ids": [
+             "usaspending-dod-awards", "sam-dod-opportunities",
+             "dod-contract-announcements",
+         ],
+         "auto_tag_rules": [
+             {"keyword": "rare earth", "tag": "关键矿产"},
+             {"keyword": "critical mineral", "tag": "关键矿产"},
+             {"keyword": "battery", "tag": "军用电池"},
+             {"keyword": "magnet", "tag": "稀土永磁"},
+             {"keyword": "unmanned", "tag": "无人系统"},
+             {"keyword": "ship", "tag": "舰船装备"},
+         ],
+         "description_prompt": "重点提取采购机关、合同号、供应商、采购产品、合同金额、开始和结束日期、军事项目或用途。区分采购机会与已授合同，并将供应商作为后续自华进口记录反查对象。",
+         "schedule_cron": "30 7 * * *", "is_scheduled": True,
+         "auto_report": False, "collect_window_days": 365},
     ]
 
 

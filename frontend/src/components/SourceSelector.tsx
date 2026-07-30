@@ -45,7 +45,36 @@ const PRIMARY_CATEGORY_LABELS: Record<string, string> = {
   "社交媒体·微博": "社交媒体：微博",
   "社交媒体·今日头条": "社交媒体：今日头条",
   "未分类": "其他信息源",
+  "official-policy": "官方政策法规",
+  "customs-enforcement": "海关执法查发",
+  "export-control-sanctions": "出口管制与制裁",
+  "tbt-sps-regulation": "技术性贸易措施",
+  "critical-minerals-commodities": "关键矿产与大宗商品",
+  "trade-remedy-tariff": "关税税则与贸易救济",
+  "search-ai": "搜索与AI检索",
+  "commercial-data": "商业/API数据",
+  "news-enforcement": "新闻媒体-执法线索",
+  "news-hotspots": "新闻媒体-时政热点",
+  "social-osint": "社交媒体/公众号",
+  "manual-standby": "备用未配置",
+  "uncategorized": "其他未分类",
 };
+
+const PRIMARY_CATEGORY_ORDER = [
+  "official-policy",
+  "customs-enforcement",
+  "export-control-sanctions",
+  "tbt-sps-regulation",
+  "critical-minerals-commodities",
+  "trade-remedy-tariff",
+  "search-ai",
+  "commercial-data",
+  "news-enforcement",
+  "news-hotspots",
+  "social-osint",
+  "manual-standby",
+  "uncategorized",
+];
 
 const CHANNEL_LABELS: Record<string, string> = {
   ai_research: "AI 提示采集",
@@ -66,6 +95,11 @@ function primaryCategory(source: Source): string {
 
 function primaryLabel(category: string): string {
   return PRIMARY_CATEGORY_LABELS[category] || "其他信息源";
+}
+
+function primaryRank(category: string): number {
+  const index = PRIMARY_CATEGORY_ORDER.indexOf(category);
+  return index >= 0 ? index : PRIMARY_CATEGORY_ORDER.length;
 }
 
 function sourceUrl(source: Source): string {
@@ -216,7 +250,7 @@ export function SourceSelector({
         label: primaryLabel(id),
         sources: [...groupedSources].sort((left, right) => left.name.localeCompare(right.name, "zh-CN")),
       }))
-      .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+      .sort((left, right) => primaryRank(left.id) - primaryRank(right.id) || left.label.localeCompare(right.label, "zh-CN"));
   }, [search, sources]);
 
   const configuredModels = models.filter((model) => model.is_active && model.is_configured && Boolean(model.model_name));
