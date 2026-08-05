@@ -601,9 +601,9 @@ collect_topic(topic_id)
 
 ## 2026-07-27 夜间全主题采集稳定性规范
 
-1. 模型辅助采集必须限制单来源候选量（`MAX_CANDIDATES_PER_SOURCE=9`）并采用
-   `SOURCE_COLLECTION_CONCURRENCY=4` 的受控并发；每个来源整体执行超过 90 秒应记录失败并
-   继续队列，不能因慢网页永久阻塞其他主题。
+1. 模型辅助采集采用 `SOURCE_COLLECTION_CONCURRENCY=4` 的受控并发；单来源候选预算由
+   `SourceConfig.max_items_per_run` 决定并限制在 160 条以内，不再使用固定 9 条上限。每个来源
+   整体执行超过 90 秒应记录失败并继续队列，不能因慢网页永久阻塞其他主题。
 2. 已启用来源使用稳定限额：网页/社交每轮 4 条、RSS 12 条、Tavily 12 条；原始来源链接仍要
    保留，候选信息通过 LLM 审核后再入库。限额可由 `SourceUpdate.max_items_per_run`、
    `timeout_seconds` 和 `max_retries` 调整。
@@ -626,3 +626,72 @@ collect_topic(topic_id)
    或美国军工项目的批次关系必须保持 `follow_up`，未取得订单、生产批号和最终用途文件前不得写成确认结论。
 4. 导入前通过SQLite在线备份接口生成一致性快照；变更后需核对调查维度接口数量、报告全文、
    7批总量与120,934千克总重量，并执行前端生产构建。
+
+## 2026-08-04 全球多语种采集与双卷周刊规范
+
+1. 自动采集前必须经过 `collection_policy.py`。只有来源核验、robots、terms 和 LLM ingest
+   权限均允许的正式来源可进入全自动正文处理；未核验旧来源仅允许元数据/摘要模式，明确拒绝的
+   来源必须在联网前终止。来源画像可通过 `/sources/reconcile-compliance-profiles` 以不覆盖用户
+   配置的方式补齐，`/sources/collection-readiness` 用于核查就绪度。
+2. RSS、网页详情和搜索结果补全统一经过 `safe_fetch.py`：只允许公网 HTTP(S)，在 `connect_tcp`
+   时解析、核验并固定连接公网 IP，TLS SNI 保留原域名；逐跳校验重定向与对端地址，精确限制
+   MIME、响应体大小和跳转次数，禁用环境代理，禁止内网、localhost 和嵌入式凭据。
+3. Tavily 默认按 news 模式检索并保留原始来源 URL。`include_raw_content`、发布日期补全和原站
+   详情抓取必须分别显式配置；原站抓取还必须满足来源画像的 `origin_resolution_required` 约束。
+   搜索原文只可作为单条 LLM 精编输入，不得把模型生成内容当成原始证据。
+4. LLM 精编后的正式条目统一为中文，并在 `raw_metadata.intelligence_profile` 保存业务分类、
+   风险类型、原始语言、国家、商品、主体、路线、关键事实、证据摘录、涉华度、可发布度和优先级。
+   JSON schema 校验失败、日期不可核验、时间窗外或质量不足的候选不得进入正式信息库。
+5. 全局 URL/内容去重不能丢失主题归属。一个条目可通过 `item_topic_memberships` 属于多个主题；
+   周报、报告和条目查询必须同时考虑主主题与成员关系，不得复制同一证据条目。
+6. 周刊按北京时间 ISO 自然周选材，默认目标 80 条、最低发布 60 条，稳定拆成上下两卷，每卷
+   约 40 条。日期、中文精编状态、质量 ≥0.70、相关度 ≥0.70、可发布度 ≥70 和来源当前合规状态
+   是硬门槛；中文状态必须同时通过正文汉字占比校验，不能只相信 `language=zh` 标签。来源配额
+   按原始 URL 发布域名或显式 `publisher_id` 计算，不能用多个 SourceConfig 绕过；单一发布方
+   不得超过每卷 20%，每卷至少 5 个独立发布方。低于最低值时返回明确缺口，不生成空壳文档。
+7. 周刊报告类型为 `weekly_digest`，首次发布必须冻结包含上下卷完整 item IDs 的 manifest；晚到
+   候选不得隐式改写已出版卷，失败卷只能按原 manifest 重试。同一 `topic_id + period_key +
+   report_type + part_index` 只能存在一份。跨进程生成使用 `generation_owner` 与 30 分钟租约；
+   未过期任务不得被抢占，过期任务按冻结 manifest 接管。周刊逐条保留事实边界，不跨文章融合事实，支持
+   MD/HTML/DOCX/PDF，上下卷使用不同标题和文件名；周期清理不得删除周刊。
+8. 调度器每周一 06:30（Asia/Shanghai）为已启用主题生成上一完整周周刊；应用停机补跑也必须
+   以当前北京自然周周一之前的最后时刻为 reference，不能用“当前时间减一天”。`global-trade`
+   当前每天 01:00 采集、7 天窗口、周目标 80/每卷 40/最低 60，并复用
+   `ollama_cloud / glm-5.2`。当前主题绑定 87 个来源，其中 12 个通过正式全文处理策略；受管官方
+   来源目录包含 Federal Register 多条机构通道、巴西 Receita、澳大利亚 ABF、欧盟委员会、英国
+   DBT 和美国 CBP 共 10 个配置。被替代的持续失败来源只做可逆停用，不删除定义或历史数据。
+9. 2026-W31 经 Federal Register 和欧盟委员会真实回填后，19 条周内输入中选出 13 条，距离最低
+   发布还差 47 条、距 80 条目标还差 67 条；实际覆盖 6 个 SourceConfig、3 个独立发布方。W32
+   当前没有合格条目。因此功能与真实链路已验证，但不能把“稳定周产 80 条”视为已经达成；仍需
+   扩大已核验正式来源，并以连续两周真实 canary 验收。外部执行额度不足时不得绕过限制或降低门槛。
+10. 报告/采集内容在前端只能以 React 转义节点渲染，禁止 `dangerouslySetInnerHTML`；来源 API Key
+    是 write-only，任何输出 schema 必须返回 `null`。报告输出只允许 `REPORT_OUTPUT_ROOTS` 批准
+    的应用目录，读、写、下载、删除都要复用 containment 校验；HTML 链接只允许 HTTP(S)。任何
+    分析报告、翻译或历史条目重审在调用 LLM 前，都必须按来源当前策略再次核验
+    `llm_ingest_allowed`；不合规条目只能由本地规则处理或保留，不能发送给模型。JSON/通用 API
+    也必须使用 `safe_fetch.py` 的公网固定传输；HTML/JSON 跳转只接受同源目标，认证凭据绝不能
+    跨 origin 转发；Tavily 未建立原站独立许可时，
+    不得为了补日期下载搜索结果详情页。所有 `/api/v1` 写请求需要前端自定义 operator header，
+    并携带后端签发、12 小时有效的 operator session token；拒绝非白名单 Origin/cross-site 浏览器请求。
+11. 自定义来源只能通过 `/sources/{id}/compliance-review` 记录人工核验结果；请求必须包含证据 URL、
+    robots/条款结论、法律依据、审核人、说明和显式确认，并保存不含明文凭据的配置指纹。普通 CRUD、
+    配置导入、搜索类型、采集 URL、频率或配额变更都不得自我声明合规，且必须重置既有证明。来源
+    请求不得接受任意 `api_key_ref` 来读取环境变量，只可使用显式 write-only key 或代码内固定服务变量。
+    运营新建、配置导入和关键变更后的来源必须进入 `unverified` 阻断态；仅代码内置种子和历史迁移
+    可使用 `legacy_unverified` 兼容态。JSON API 只要携带 query/header/bearer 凭据，就必须在构造请求
+    和联网前确认最终配置端点为 HTTPS，连接验证接口也不得例外。
+12. 中文质量校验必须把汉字数与所有 Unicode 字母数比较；日文假名、西里尔字母、阿拉伯字母等
+    非拉丁文字不能因未进入分母而绕过“中文正文”门槛。
+13. 本阶段验证基线：`backend/.venv/bin/python -m pytest backend/tests -q` 为 439 passed；
+    `npm --prefix frontend run build` 通过。覆盖率插件当前未安装，后续启用覆盖率门禁时不得把
+    “测试全部通过”等同于“已测得覆盖率 ≥80%”。
+14. 周刊主题采集必须把北京自然周的精确 UTC 起止时间传给所有连接器；JSON API 映射服务端日期
+    参数，Tavily 生成六语种检索计划并受控并发，RSS 支持 RSS 1.0/2.0 与 Atom。没有注册连接器的
+    channel 必须在创建运行前过滤，避免用失败任务消耗采集容量。
+15. 欧盟委员会 Press Corner 通过官方 RSS 发现条目，并只在显式配置、HTTPS 同主机、固定 API
+    路径和严格文档 reference 校验后补全正文。Daily News 汇编必须拆成可独立审核的小节，每个
+    小节保留 parent URL 和稳定 section identity；其他跟踪参数继续从全局去重身份中剔除。
+16. 主题入库审核与周刊出版统一采用 70 分的海关价值、主题相关度和可发布度门槛。通用
+    `relevance_score` 保存主题相关度，`china_relevance` 独立保存在 intelligence profile，避免
+    全球高价值信息因不直接涉华而被误删。周刊 `selection_audit.source_coverage` 必须记录已配置/
+    可出版来源、本周来源与发布方、发布方缺口及去重后的国家和语言覆盖；前端不足提示应展示该信息。

@@ -1,7 +1,7 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
 import { ArrowLeft, FolderKanban, Plus, Trash2, Edit3, Scale, ShieldAlert, Cpu, Globe2, ChartNoAxesCombined, PackageSearch } from "lucide-react";
-import { fetchTopics } from "../api";
+import { fetchTopics, operatorWriteHeaders } from "../api";
 import type { Topic } from "../types";
 
 interface Category {
@@ -60,7 +60,9 @@ export function CategoriesPage() {
     if (!confirmDelete) return;
     const id = confirmDelete.id;
     try {
-      const resp = await fetch(`${BASE}/categories/${id}`, { method: "DELETE" });
+      const resp = await fetch(`${BASE}/categories/${id}`, {
+        method: "DELETE", headers: await operatorWriteHeaders(),
+      });
       if (!resp.ok) throw new Error(await resp.text());
       setCategories((p) => p.filter((c) => c.id !== id));
     } catch (e) { alert(e instanceof Error ? e.message : "删除失败"); }
@@ -187,13 +189,26 @@ export function CategoriesPage() {
           category={editing}
           onSave={async (data) => {
             const isNew = !editing;
+            const operatorHeaders = await operatorWriteHeaders();
             const resp = isNew
-              ? await fetch(`${BASE}/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
-              : await fetch(`${BASE}/categories/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+              ? await fetch(`${BASE}/categories`, { method: "POST", headers: { ...operatorHeaders, "Content-Type": "application/json" }, body: JSON.stringify(data) })
+              : await fetch(`${BASE}/categories/${editing.id}`, { method: "PUT", headers: { ...operatorHeaders, "Content-Type": "application/json" }, body: JSON.stringify(data) });
             if (!resp.ok) { alert(await resp.text()); return; }
             setShowCreate(false); setEditing(null); await load();
           }}
           onClose={() => { setShowCreate(false); setEditing(null); }}
+        />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="删除类别"
+          message={confirmDelete.message}
+          variant="danger"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          onConfirm={() => void executeDelete()}
+          onClose={() => setConfirmDelete(null)}
         />
       )}
     </div>

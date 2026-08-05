@@ -261,6 +261,30 @@ export function TagsPage() {
           onClose={() => setDetailTag(null)}
         />
       )}
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="删除标签"
+          message={`确认删除标签 "${confirmDelete.value}"？关联的条目将移除该标签。`}
+          variant="danger"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          onConfirm={() => void executeDelete()}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
+      {confirmMerge && (
+        <ConfirmDialog
+          open={true}
+          title="合并标签"
+          message={`确认将源标签合并到目标标签？合并后源标签将被删除，其关联条目转移到目标标签。`}
+          variant="default"
+          confirmLabel="合并"
+          cancelLabel="取消"
+          onConfirm={() => void executeMerge()}
+          onClose={() => setConfirmMerge(false)}
+        />
+      )}
     </div>
   );
 }

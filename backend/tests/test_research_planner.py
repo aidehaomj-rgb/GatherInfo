@@ -80,3 +80,43 @@ def test_customs_hotspot_topic_uses_stable_risk_mission_matrix(monkeypatch):
     assert any("fuel shortage" in query and "smuggling" in query for query in queries)
     assert any("fertilizer shortage" in query and "third country" in query for query in queries)
     assert any("critical minerals" in query and "transshipment" in query for query in queries)
+def test_weekly_global_topic_reserves_multilingual_search_lanes(monkeypatch):
+    monkeypatch.setattr(
+        "app.research_planner.call_llm",
+        AsyncMock(return_value={
+            "content": '{"queries":["official tariff update", "customs trade remedy news"]}',
+        }),
+    )
+    topic = _topic(
+        id="global-trade", name="全球贸易政策",
+        weekly_digest_enabled=True,
+    )
+
+    queries = asyncio.run(build_research_queries(
+        topic, "", SimpleNamespace(is_active=True, model_name="model"),
+        max_queries=12, window_days=7, today=date(2026, 8, 4),
+    ))
+
+    assert len(queries) == 8
+    assert queries[:2] == ["official tariff update", "customs trade remedy news"]
+    assert any("aduanas" in query for query in queries)
+    assert any("aduana" in query for query in queries)
+    assert any("douanes" in query for query in queries)
+    assert any("税関" in query for query in queries)
+    assert any("관세청" in query for query in queries)
+
+
+def test_exact_backfill_dates_override_rolling_window_hint(monkeypatch):
+    llm = AsyncMock(return_value={"content": '{"queries":["official customs update"]}'})
+    monkeypatch.setattr("app.research_planner.call_llm", llm)
+
+    asyncio.run(build_research_queries(
+        _topic(), "", SimpleNamespace(is_active=True, model_name="model"),
+        window_days=30, today=date(2026, 8, 4),
+        window_start_date=date(2026, 7, 27),
+        window_end_date=date(2026, 8, 2),
+    ))
+
+    prompt = llm.await_args.args[1]
+    assert "2026-07-27 through 2026-08-02" in prompt
+    assert "2026-07-05" not in prompt

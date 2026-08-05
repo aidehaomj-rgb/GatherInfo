@@ -15,9 +15,13 @@ from app.connectors.base import (
     JobStatus, SourceConfig, register_collector,
 )
 from app.connectors._helpers import detect_lang, infer_category, build_tags, result
+from app.safe_fetch import fetch_public_html, public_async_client
+from app.collection_policy import evaluate_collection_policy
 from app.web_content_extractor import extract_article_text
 
 logger = logging.getLogger(__name__)
+
+SHORT_SNIPPET_MAX_CHARS = 800
 
 
 @register_collector("api_search")
@@ -31,13 +35,11 @@ class TavilyCollector(BaseCollector):
         self.search_type = self.auth_config.get("search_type") or "tavily"
         self.api_key = (
             config.api_key
-            or os.getenv(config.api_key_ref or "")
             or os.getenv("TAVILY_API_KEY", "")
         )
         if self.search_type in ("baidu", "baidu_qianfan"):
             self.api_key = (
                 config.api_key
-                or os.getenv(config.api_key_ref or "")
                 or os.getenv("BAIDU_QIANFAN_API_KEY", "")
                 or os.getenv("BAIDU_API_KEY", "")
             )
@@ -48,7 +50,7 @@ class TavilyCollector(BaseCollector):
         if not self.api_key:
             return False
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with public_async_client(timeout=10) as client:
                 resp = await client.post(self.BASE_URL, json={
                     "api_key": self.api_key, "query": "test", "max_results": 1,
                 })
@@ -84,59 +86,61 @@ class TavilyCollector(BaseCollector):
         search_topic = self.auth_config.get("search_topic", "general")
         search_depth = self.auth_config.get("search_depth", "advanced")
         resolved_dates = 0
+        policy = evaluate_collection_policy(self.config)
+        allow_metadata_fetch = policy.content_depth == "full"
+        allow_content_hydration = (
+            allow_metadata_fetch
+            and not bool(getattr(self.config, "origin_resolution_required", True))
+        )
+        resolve_dates = (
+            self.auth_config.get("resolve_published_dates", True)
+            and allow_content_hydration
+        )
+        hydrate_results = (
+            self.auth_config.get("hydrate_search_results") is True
+            and allow_content_hydration
+        )
+        include_raw_content = (
+            self.auth_config.get("include_raw_content") is True
+            and policy.llm_ingest_allowed
+        )
+        max_date_resolutions = int(self.auth_config.get("max_date_resolutions", 40))
+        resolved_details = 0
 
-        async with httpx.AsyncClient(
+        async with public_async_client(
             timeout=self.config.timeout_seconds,
             limits=httpx.Limits(max_connections=3),
         ) as client:
-            for query in queries:
+            semaphore = asyncio.Semaphore(3)
+            responses = await asyncio.gather(*(
+                self._request_query(
+                    client, index, query, per_query,
+                    include_domains_param, include_raw_content, semaphore,
+                )
+                for index, query in enumerate(queries)
+            ))
+            for query, data, request_error in responses:
                 if len(items) >= max_items:
                     break
+                if request_error:
+                    errors.append(request_error)
+                    continue
                 try:
                     query_text, directives = _parse_search_query(query)
-                    payload = {
-                        "api_key": self.api_key,
-                        "query": query_text,
-                        "search_depth": search_depth,
-                        "max_results": per_query,
-                        "include_answer": False,
-                        "include_raw_content": include_raw_content,
-                        "topic": search_topic,
-                    }
-                    if (
-                        directives.get("country")
-                        and search_topic == "general"
-                        and self.auth_config.get("use_country_boost", False)
-                    ):
-                        payload["country"] = directives["country"]
-                    if self.window_start:
-                        payload["start_date"] = self.window_start.date().isoformat()
-                    if self.window_end:
-                        # Tavily's end_date is exclusive. Add one day while the
-                        # engine still applies the exact inclusive boundary.
-                        payload["end_date"] = (
-                            self.window_end.date() + timedelta(days=1)
-                        ).isoformat()
-                    if include_domains_param:
-                        payload["include_domains"] = include_domains_param
-                    if exclude_domains:
-                        payload["exclude_domains"] = exclude_domains
-                    resp = await client.post(self.BASE_URL, json=payload)
-                    if resp.status_code in {429, 432}:
-                        errors.append(f"Rate limited: {query_text}")
-                        logger.warning("Tavily rate limited for query: %s", query_text[:60])
-                        break
-                    resp.raise_for_status()
-                    data = resp.json()
 
-                    for r in data.get("results", []):
+                    for r in (data or {}).get("results", []):
+                        if len(items) >= max_items:
+                            break
                         title = r.get("title", "")
-                        snippet = r.get("content", "")
-                        raw_content = r.get("raw_content", "")
+                        search_snippet = str(r.get("content", "") or "")
+                        raw_content = str(r.get("raw_content", "") or "")
+                        used_raw_content = (
+                            include_raw_content and len(raw_content) > len(search_snippet)
+                        )
                         content = (
-                            raw_content
-                            if isinstance(raw_content, str) and len(raw_content.strip()) >= 120
-                            else snippet
+                            raw_content[:12_000]
+                            if used_raw_content
+                            else search_snippet
                         )
                         url = r.get("url", "")
 
@@ -159,7 +163,7 @@ class TavilyCollector(BaseCollector):
                             # explicitly labelled date first, then verify the
                             # page, and only use a bare snippet date last.
                             pub_date = _extract_date_hint(
-                                f"{title} {snippet}", labelled_only=True
+                                f"{title} {search_snippet}", labelled_only=True
                             )
                         if not pub_date and content:
                             pub_date = _extract_date_hint(
@@ -172,20 +176,53 @@ class TavilyCollector(BaseCollector):
                             pub_date = _extract_date_hint(
                                 f"{title} {content[:1800]}"
                             )
-                        if not pub_date and url and resolve_dates and resolved_dates < max_date_resolutions:
-                            page_date = await _resolve_page_date(client, url)
-                            if page_date:
-                                pub_date = page_date
-                            resolved_dates += 1
+                        page_metadata: dict = {}
+                        should_fetch_detail = (resolve_dates and not pub_date) or (
+                            hydrate_results and _is_short_snippet(content)
+                        )
+                        if (
+                            url
+                            and resolved_details < max_date_resolutions
+                            and should_fetch_detail
+                        ):
+                            page_metadata = await _resolve_page_metadata(
+                                client, url,
+                                minimum_interval_seconds=float(
+                                    getattr(self.config, "crawl_delay_seconds", 0) or 0
+                                ),
+                            )
+                            resolved_details += 1
+                        if (
+                            resolve_dates
+                            and not pub_date
+                            and page_metadata.get("published_at")
+                        ):
+                            pub_date = page_metadata["published_at"]
                         if not pub_date:
-                            pub_date = _extract_date_hint(f"{title} {snippet}")
+                            pub_date = _extract_date_hint(f"{title} {search_snippet}")
+
+                        summary = search_snippet[:500] if search_snippet else None
+                        if (
+                            hydrate_results
+                            and page_metadata
+                            and _is_short_snippet(content)
+                        ):
+                            title = _prefer_extracted_title(
+                                title, str(page_metadata.get("title") or "")
+                            )
+                            content = _prefer_more_complete_text(
+                                content, str(page_metadata.get("content") or "")
+                            )
+                            summary = _prefer_more_complete_text(
+                                summary, str(page_metadata.get("summary") or "")
+                            ) or None
 
                         items.append(FetchItem(
                             title=title,
                             content=content,
                             url=url,
                             published_at=pub_date,
-                            summary=snippet[:500] if snippet else (content[:500] if content else None),
+                            summary=summary,
                             language=detect_lang(f"{url} {content}"),
                             category=infer_category(title, content),
                             suggested_tags=build_tags(title, content),
@@ -198,13 +235,15 @@ class TavilyCollector(BaseCollector):
                                 "search_country": directives.get("country"),
                                 "source_domain": urlparse(url).netloc.casefold(),
                                 "score": r.get("score"),
+                                "content_source": (
+                                    "tavily_raw_content"
+                                    if used_raw_content
+                                    else "tavily_snippet"
+                                ),
                                 "allow_undated_results": False,
                                 "allow_unfiltered_results": True,
                             },
                         ))
-
-                    await asyncio.sleep(
-                        1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0)
 
                 except Exception as exc:
                     query_text, _ = _parse_search_query(query)
@@ -215,6 +254,49 @@ class TavilyCollector(BaseCollector):
         logger.info("Tavily: %d items, %d errors for source %s",
                      len(items), len(errors), self.config.id)
         return result(self._new_run_id(), self.config.id, items, errors)
+
+    async def _request_query(
+        self,
+        client: httpx.AsyncClient,
+        index: int,
+        query: str,
+        per_query: int,
+        include_domains: list[str] | None,
+        include_raw_content: bool,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[str, dict | None, str | None]:
+        interval = 1.0 / self.config.rate_limit_rps if self.config.rate_limit_rps else 1.0
+        if index:
+            await asyncio.sleep(index * interval)
+        payload = {
+            "api_key": self.api_key,
+            "query": query,
+            "search_depth": "advanced",
+            "max_results": per_query,
+            "include_answer": False,
+            "include_raw_content": include_raw_content,
+            "topic": self.auth_config.get("topic", "news"),
+        }
+        if self.window_start:
+            payload["start_date"] = self.window_start.date().isoformat()
+        if self.window_end:
+            payload["end_date"] = (
+                self.window_end.date() + timedelta(days=1)
+            ).isoformat()
+        if include_domains:
+            payload["include_domains"] = include_domains
+        try:
+            async with semaphore:
+                response = await client.post(self.BASE_URL, json=payload)
+            if response.status_code == 429:
+                logger.warning("Tavily rate limited for query: %s", query[:60])
+                return query, None, f"Rate limited: {query}"
+            response.raise_for_status()
+            return query, response.json(), None
+        except Exception as exc:
+            message = f"Query '{query[:40]}': {exc}"
+            logger.error("Tavily fetch error for source %s: %s", self.config.id, exc)
+            return query, None, message
 
     async def _fetch_baidu_qianfan(
         self, keywords: list[str], max_items: int = 100
@@ -239,7 +321,7 @@ class TavilyCollector(BaseCollector):
             "User-Agent": "GatherInfo/0.5 (Baidu Qianfan Search)",
         }
 
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+        async with public_async_client(timeout=self.config.timeout_seconds) as client:
             for query in queries:
                 if len(items) >= max_items:
                     break
@@ -292,12 +374,18 @@ class TavilyCollector(BaseCollector):
         return result(self._new_run_id(), self.config.id, items[:max_items], errors)
 
 
-async def _resolve_page_date(client: httpx.AsyncClient, url: str) -> str | None:
-    """Read a public source page's declared publication date without bypassing access controls."""
+async def _resolve_page_metadata(
+    client: httpx.AsyncClient, url: str, *, minimum_interval_seconds: float = 0,
+) -> dict:
+    """Read public article metadata using one ordinary GET request."""
     try:
-        response = await client.get(url, headers={"User-Agent": "GatherInfo/0.5 (date verification)"}, timeout=15)
-        response.raise_for_status()
-        parsed = extract_article_text(response.text, url)
+        response = await fetch_public_html(
+            client, url, timeout_seconds=15,
+            minimum_interval_seconds=minimum_interval_seconds,
+        )
+        if response is None:
+            return {}
+        parsed = extract_article_text(response.text, response.url)
         published = parsed.get("published_at")
         if not published:
             # Some public pages expose a human-readable Written/Updated line
@@ -308,10 +396,26 @@ async def _resolve_page_date(client: httpx.AsyncClient, url: str) -> str | None:
         if not published:
             published = _extract_url_date_hint(url)
         if not published:
-            return None
-        from datetime import datetime
-        return datetime.fromisoformat(str(published).replace("Z", "+00:00")).isoformat()
+            return {}
+        normalized_published = _normalize_published_at(published)
+        return {**parsed, "published_at": normalized_published}
     except Exception:
+        return {}
+
+
+def _is_short_snippet(content: str | None) -> bool:
+    return len((content or "").strip()) < SHORT_SNIPPET_MAX_CHARS
+
+
+def _normalize_published_at(value: object) -> str | None:
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        ).isoformat()
+    except (TypeError, ValueError):
         return None
 
 
@@ -332,7 +436,27 @@ def _extract_url_date_hint(url: str) -> str | None:
         except ValueError:
             continue
     return None
+def _prefer_more_complete_text(current: str | None, candidate: str | None) -> str:
+    current_text = current or ""
+    candidate_text = (candidate or "").strip()
+    return (
+        candidate_text
+        if len(candidate_text) > len(current_text.strip())
+        else current_text
+    )
 
+
+def _prefer_extracted_title(current: str, candidate: str) -> str:
+    """Use a longer page title only when it retains the search-result title."""
+    current_text = current
+    candidate_text = candidate.strip()
+    if not current_text.strip():
+        return candidate_text
+    if len(candidate_text) <= len(current_text.strip()):
+        return current_text
+    normalized_current = " ".join(current_text.casefold().split())
+    normalized_candidate = " ".join(candidate_text.casefold().split())
+    return candidate_text if normalized_current in normalized_candidate else current_text
 
 def _parse_search_query(query: str) -> tuple[str, dict[str, str]]:
     """Split optional research directives from the query sent to providers."""

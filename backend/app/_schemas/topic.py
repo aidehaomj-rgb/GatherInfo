@@ -1,5 +1,5 @@
 """Topic, schedule, and category schemas."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from .common import IsoDT
 
 
@@ -24,10 +24,23 @@ class TopicCreate(BaseModel):
     auto_report: bool = False
     auto_report_model_id: str | None = None
     auto_report_type: str = Field(default="analytical", pattern="^(analytical|archive)$")
+    weekly_digest_enabled: bool = False
+    weekly_digest_model_id: str | None = None
+    weekly_digest_target_items: int = Field(default=80, ge=60, le=80)
+    weekly_digest_part_size: int = Field(default=40, ge=30, le=40)
+    weekly_digest_min_items: int = Field(default=60, ge=60, le=80)
     keyword_tags: list[dict] | None = None
     description_prompt: str | None = None
     ai_research_model_id: str | None = None
     collect_window_days: int = Field(default=7, ge=0, le=365)
+
+    @model_validator(mode="after")
+    def validate_weekly_digest_contract(self):
+        if self.weekly_digest_target_items > self.weekly_digest_part_size * 2:
+            raise ValueError("weekly digest target exceeds two-volume capacity")
+        if self.weekly_digest_min_items > self.weekly_digest_target_items:
+            raise ValueError("weekly digest minimum exceeds target")
+        return self
 
 
 class TopicUpdate(BaseModel):
@@ -47,6 +60,11 @@ class TopicUpdate(BaseModel):
     auto_report: bool | None = None
     auto_report_model_id: str | None = None
     auto_report_type: str | None = Field(default=None, pattern="^(analytical|archive)$")
+    weekly_digest_enabled: bool | None = None
+    weekly_digest_model_id: str | None = None
+    weekly_digest_target_items: int | None = Field(default=None, ge=60, le=80)
+    weekly_digest_part_size: int | None = Field(default=None, ge=30, le=40)
+    weekly_digest_min_items: int | None = Field(default=None, ge=60, le=80)
     keyword_tags: list[dict] | None = None
     description_prompt: str | None = None
     ai_research_model_id: str | None = None
@@ -77,6 +95,11 @@ class TopicOut(BaseModel):
     auto_report: bool = False
     auto_report_model_id: str | None = None
     auto_report_type: str = "analytical"
+    weekly_digest_enabled: bool = False
+    weekly_digest_model_id: str | None = None
+    weekly_digest_target_items: int = 80
+    weekly_digest_part_size: int = 40
+    weekly_digest_min_items: int = 60
     ai_research_model_id: str | None = None
     last_collection_run_id: str | None = None
     source_names: list[str] = []
@@ -96,6 +119,7 @@ class ScheduleCreate(BaseModel):
     source_ids: list[str] | None = None
     topic_ids: list[str] | None = None
     cron_expression: str = Field(default="0 8 * * *", max_length=100)
+    timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=80)
     is_active: bool = True
 
 
@@ -106,6 +130,7 @@ class ScheduleOut(BaseModel):
     source_ids: list[str] | None = None
     topic_ids: list[str] | None = None
     cron_expression: str
+    timezone: str = "Asia/Shanghai"
     is_active: bool
     last_run_at: IsoDT = None
     next_run_at: IsoDT = None

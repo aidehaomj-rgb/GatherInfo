@@ -1,13 +1,18 @@
 """Sources CRUD + validation + connectors listing."""
+import hashlib
+import json
 import logging
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
-    ConnectorInfo, SourceCreate, SourceOut, SourceUpdate,
+    ConnectorInfo, SourceComplianceReview, SourceCreate, SourceOut, SourceUpdate,
 )
 from app.database import get_db
+from app.collection_policy import evaluate_collection_policy
 from app.models import SourceConfig
 
 from ._helpers import CHANNEL_DEFAULTS, _gen_id
@@ -31,6 +36,43 @@ _STALE_CONFIG_ERROR_MARKERS = (
     "requires",
     "required",
 )
+_COMPLIANCE_CRITICAL_FIELDS = frozenset({
+    "channel", "base_url", "api_endpoint", "homepage_url", "auth_config",
+    "crawl_delay_seconds", "rate_limit_rps", "max_items_per_run",
+})
+
+
+def _source_contract_digest(source: SourceConfig) -> str:
+    """Hash the approved collection contract without persisting credentials."""
+    channel = source.channel.value if hasattr(source.channel, "value") else source.channel
+    contract = {
+        "channel": str(channel or ""),
+        "base_url": source.base_url,
+        "api_endpoint": source.api_endpoint,
+        "homepage_url": source.homepage_url,
+        "auth_config_digest": hashlib.sha256(
+            json.dumps(source.auth_config or {}, sort_keys=True, default=str).encode()
+        ).hexdigest(),
+        "crawl_delay_seconds": source.crawl_delay_seconds,
+        "rate_limit_rps": source.rate_limit_rps,
+        "max_items_per_run": source.max_items_per_run,
+    }
+    serialized = json.dumps(contract, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _absolute_collection_urls(source: SourceConfig) -> tuple[str, ...]:
+    urls: list[str] = []
+    for value in (source.base_url, source.api_endpoint):
+        if not value:
+            continue
+        try:
+            parsed = urlsplit(str(value))
+        except ValueError:
+            raise HTTPException(400, "采集地址格式无效") from None
+        if parsed.scheme and parsed.hostname:
+            urls = [*urls, str(value)]
+    return tuple(urls)
 
 
 def _eval_configured(
@@ -90,6 +132,11 @@ def create_source(data: SourceCreate, db: Session = Depends(get_db)):
     elif db.query(SourceConfig).filter(SourceConfig.id == src_id).first():
         raise HTTPException(400, f"信息源 '{src_id}' 已存在")
     payload["id"] = src_id
+    # New operator-created sources fail closed until an evidence-backed review.
+    payload["verification_status"] = "unverified"
+    payload["robots_status"] = "unverified"
+    payload["terms_status"] = "unverified"
+    payload["llm_ingest_allowed"] = False
     payload["is_configured"] = _eval_configured(
         payload.get("channel", ""), payload.get("api_key"),
         base_url=payload.get("base_url"),
@@ -128,6 +175,88 @@ def reconcile_source_readiness(db: Session = Depends(get_db)):
     return {"updated": updated, "configured": sum(1 for source in sources if source.is_configured)}
 
 
+@router.get("/sources/collection-readiness")
+def collection_readiness(db: Session = Depends(get_db)):
+    """Explain which sources may fetch, hydrate, and enter LLM curation."""
+    sources = db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
+    rows = []
+    for source in sources:
+        decision = evaluate_collection_policy(source)
+        rows.append({
+            "source_id": source.id,
+            "source_name": source.name,
+            "automated_fetch_allowed": decision.automated_fetch_allowed,
+            "llm_ingest_allowed": decision.llm_ingest_allowed,
+            "content_depth": decision.content_depth,
+            "reason": decision.reason,
+        })
+    return {
+        "total_active": len(rows),
+        "ready_full": sum(row["content_depth"] == "full" for row in rows),
+        "excerpt_only": sum(row["content_depth"] == "excerpt" for row in rows),
+        "blocked": sum(not row["automated_fetch_allowed"] for row in rows),
+        "sources": rows,
+    }
+
+
+@router.post("/sources/reconcile-compliance-profiles")
+def reconcile_compliance_profiles(db: Session = Depends(get_db)):
+    from app.source_profile_registry import reconcile_verified_source_profiles
+
+    updated_ids = reconcile_verified_source_profiles(db)
+    return {"updated": len(updated_ids), "source_ids": updated_ids}
+
+
+@router.post("/sources/{source_id}/compliance-review", response_model=SourceOut)
+def record_compliance_review(
+    source_id: str,
+    data: SourceComplianceReview,
+    db: Session = Depends(get_db),
+):
+    """Record an explicit, evidence-backed operator decision for a custom source."""
+    source = db.query(SourceConfig).filter(SourceConfig.id == source_id).first()
+    if source is None:
+        raise HTTPException(404, "信息源不存在")
+    if not data.confirmed:
+        raise HTTPException(400, "必须确认已人工核对 robots、条款和采集地址")
+    if data.decision != "block" and (
+        data.robots_evidence == "blocked" or data.terms_evidence == "blocked"
+    ):
+        raise HTTPException(400, "存在阻止证据时不能批准自动采集")
+    absolute_urls = _absolute_collection_urls(source)
+    if data.decision != "block":
+        if not absolute_urls:
+            raise HTTPException(400, "批准自动采集前必须配置 HTTPS 采集地址")
+        if any(urlsplit(value).scheme.casefold() != "https" for value in absolute_urls):
+            raise HTTPException(400, "自动采集审核只批准 HTTPS 地址")
+
+    stamp = datetime.now(timezone.utc)
+    source.discovery_urls = [str(url) for url in data.discovery_urls]
+    source.legal_basis = data.legal_basis.strip()
+    source.compliance_note = data.compliance_note.strip()
+    source.verified_at = stamp
+    source.compliance_reviewed_by = data.reviewed_by.strip()
+    source.compliance_snapshot = {
+        "decision": data.decision,
+        "reviewed_at": stamp.isoformat(),
+        "contract_digest": _source_contract_digest(source),
+        "evidence_urls": [str(url) for url in data.discovery_urls],
+    }
+    if data.decision == "block":
+        source.verification_status = "blocked_manual"
+        source.robots_status = "blocked_manual_review"
+        source.terms_status = "blocked_manual_review"
+        source.llm_ingest_allowed = False
+    else:
+        source.verification_status = f"verified_manual_{stamp.date().isoformat()}"
+        source.robots_status = f"{data.robots_evidence}_manual_review"
+        source.terms_status = f"{data.terms_evidence}_manual_review"
+        source.llm_ingest_allowed = data.decision == "approve_full"
+    db.commit()
+    db.refresh(source)
+    return source
+
+
 @router.get("/sources/{source_id}", response_model=SourceOut)
 def get_source(source_id: str, db: Session = Depends(get_db)):
     src = db.query(SourceConfig).filter(SourceConfig.id == source_id).first()
@@ -142,13 +271,34 @@ def update_source(source_id: str, data: SourceUpdate, db: Session = Depends(get_
     if not src:
         raise HTTPException(404)
     update_data = data.model_dump(exclude_unset=True)
+    compliance_contract_changed = bool(
+        _COMPLIANCE_CRITICAL_FIELDS & update_data.keys()
+    )
     for k, v in update_data.items():
         # The form sends null when no advanced JSON is supplied. Preserve an
         # existing connector configuration so a routine API-key edit cannot
         # silently turn a specialised source into the default connector.
         if k == "auth_config" and v is None:
             continue
+        if k == "api_key" and not str(v or "").strip():
+            continue
         setattr(src, k, v)
+    if compliance_contract_changed:
+        prior_snapshot = (
+            src.compliance_snapshot if isinstance(src.compliance_snapshot, dict) else {}
+        )
+        src.verification_status = "unverified"
+        src.discovery_urls = None
+        src.robots_status = "unverified"
+        src.terms_status = "unverified"
+        src.llm_ingest_allowed = False
+        src.origin_resolution_required = True
+        src.verified_at = None
+        src.compliance_snapshot = {
+            **prior_snapshot,
+            "invalidated_at": datetime.now(timezone.utc).isoformat(),
+            "invalidated_reason": "collection_contract_changed",
+        }
     if {"api_key", "channel", "base_url", "api_endpoint", "homepage_url"} & update_data.keys():
         channel_val = src.channel.value if hasattr(src.channel, 'value') else src.channel
         src.is_configured = _eval_configured(
@@ -238,11 +388,48 @@ async def validate_source(source_id: str, db: Session = Depends(get_db)):
         }
         diagnostics.append(channel_hints.get(channel_str, "请配置 API Key。"))
 
+    policy = evaluate_collection_policy(src)
     return {
         "source_id": source_id,
         "valid": valid,
         "error": error_msg,
         "diagnostics": diagnostics,
+        "collection_policy": {
+            "automated_fetch_allowed": policy.automated_fetch_allowed,
+            "llm_ingest_allowed": policy.llm_ingest_allowed,
+            "content_depth": policy.content_depth,
+            "reason": policy.reason,
+        },
+    }
+
+
+@router.post("/sources/health-check")
+async def health_check_sources(
+    source_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Batch-check health of all active sources (or a single source)."""
+    from app.source_health_check import check_source_health
+
+    summary = await check_source_health(db, source_id=source_id)
+    return summary
+
+
+@router.get("/sources/health-summary")
+def health_summary(db: Session = Depends(get_db)):
+    """Return health status distribution without triggering a new check."""
+    from collections import Counter
+    from sqlalchemy import func
+
+    sources = db.query(SourceConfig).filter(SourceConfig.is_active == True).all()
+    dist = Counter(s.health_status or "unknown" for s in sources)
+    return {
+        "total": len(sources),
+        "healthy": dist.get("healthy", 0),
+        "degraded": dist.get("degraded", 0),
+        "failed": dist.get("failed", 0),
+        "unreachable": dist.get("unreachable", 0),
+        "unknown": dist.get("unknown", 0),
     }
 
 

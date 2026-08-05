@@ -43,10 +43,25 @@ class SourceConfig(Base):
 
     legal_basis = Column(Text, nullable=True)
     compliance_note = Column(Text, nullable=True)
+    verification_status = Column(String(80), default="unverified")
+    discovery_urls = Column(JSON, nullable=True)
+    robots_status = Column(String(80), default="unverified")
+    terms_status = Column(String(80), default="unverified")
+    llm_ingest_allowed = Column(Boolean, default=False)
+    origin_resolution_required = Column(Boolean, default=True)
+    crawl_delay_seconds = Column(Integer, default=8)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    compliance_reviewed_by = Column(String(200), nullable=True)
+    compliance_snapshot = Column(JSON, nullable=True)
 
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
     items_collected = Column(Integer, default=0)
+
+    # Health check status: healthy / degraded / failed / unreachable / unknown
+    health_status = Column(String(40), default="unknown")
+    health_checked_at = Column(DateTime(timezone=True), nullable=True)
+    health_detail = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_utc_now)
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)

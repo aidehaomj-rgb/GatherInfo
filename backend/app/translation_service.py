@@ -85,8 +85,16 @@ async def translate_fetch_items_to_metadata(
             metadata["translation_zh"] = _normalize_translation(row)
             metadata["original_language"] = it.language
             it.raw_metadata = metadata
+            _mark_item_language_zh(it)
             translated += 1
     return translated
+
+
+def _mark_item_language_zh(item: CollectedItem) -> None:
+    """After translation, update the item language to zh so downstream filters accept it."""
+    lang = (item.language or "").strip().lower()
+    if lang not in ZH_LANGS:
+        item.language = "zh"
 
 
 async def translate_existing_items(
@@ -149,6 +157,7 @@ async def translate_existing_items(
             metadata["translation_zh"] = _normalize_translation(row)
             metadata["original_language"] = item.language
             item.raw_metadata = metadata
+            _mark_item_language_zh(item)
             translated += 1
 
         # Preserve completed batches if a later external translation request fails.

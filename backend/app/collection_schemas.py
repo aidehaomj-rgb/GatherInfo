@@ -12,7 +12,9 @@ from app._schemas.common import (
     SystemConfigOut,
     SystemConfigUpdate,
 )
-from app._schemas.source import SourceCreate, SourceUpdate, SourceOut
+from app._schemas.source import (
+    SourceComplianceReview, SourceCreate, SourceUpdate, SourceOut,
+)
 from app._schemas.topic import (
     TopicCreate, TopicUpdate, TopicOut,
     ScheduleCreate, ScheduleOut,
@@ -36,6 +38,7 @@ from app._schemas.model import (
 from app._schemas.report import (
     ReportOut, ReportListOut,
     ReportGenerateRequest, BatchGenerateRequest, BatchGenerateResult,
+    WeeklyReportGenerateRequest, WeeklyReportGenerateResult,
 )
 from app._schemas.search import (
     SearchToolConfigCreate, SearchToolConfigUpdate, SearchToolConfigOut,
@@ -46,7 +49,7 @@ __all__ = [
     "IsoDT", "StatsOut", "TagStatsOut", "ConnectorInfo",
     "SystemConfigOut", "SystemConfigUpdate",
     # source
-    "SourceCreate", "SourceUpdate", "SourceOut",
+    "SourceComplianceReview", "SourceCreate", "SourceUpdate", "SourceOut",
     # topic
     "TopicCreate", "TopicUpdate", "TopicOut",
     "ScheduleCreate", "ScheduleOut",
@@ -66,6 +69,7 @@ __all__ = [
     # report
     "ReportOut", "ReportListOut",
     "ReportGenerateRequest", "BatchGenerateRequest", "BatchGenerateResult",
+    "WeeklyReportGenerateRequest", "WeeklyReportGenerateResult",
     # search
     "SearchToolConfigCreate", "SearchToolConfigUpdate", "SearchToolConfigOut",
 ]

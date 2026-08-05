@@ -193,6 +193,18 @@ export function SchedulesPage() {
           onClose={() => setShowCreate(false)}
         />
       )}
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="删除调度"
+          message={confirmDelete.message}
+          variant="danger"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          onConfirm={() => void executeDelete()}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }

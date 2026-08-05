@@ -4,7 +4,8 @@ APScheduler integration for periodic topic/schedule execution.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,6 +24,20 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _previous_complete_week_reference(
+    now: datetime | None = None,
+) -> datetime:
+    """Return the final instant of the previous complete Beijing natural week."""
+    beijing = ZoneInfo("Asia/Shanghai")
+    current = now.astimezone(beijing) if now else datetime.now(beijing)
+    current_monday = current.date() - timedelta(days=current.weekday())
+    return datetime.combine(
+        current_monday,
+        datetime.min.time(),
+        tzinfo=beijing,
+    ) - timedelta(microseconds=1)
+
+
 class CollectionScheduler:
     def __init__(self):
         self._scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
@@ -31,10 +46,21 @@ class CollectionScheduler:
     async def start(self):
         self._scheduler.start()
         await self._load_all()
+        # Idempotently compensate for a missed Monday run after downtime.
+        await self._publish_weekly_digests()
         self._scheduler.add_job(
             self._cleanup_reports,
             trigger=CronTrigger(hour=3, minute=0, timezone="Asia/Shanghai"),
             id="cleanup-reports",
+            replace_existing=True,
+        )
+        self._scheduler.add_job(
+            self._publish_weekly_digests,
+            trigger=CronTrigger(
+                day_of_week="mon", hour=6, minute=30,
+                timezone="Asia/Shanghai",
+            ),
+            id="publish-weekly-digests",
             replace_existing=True,
         )
         logger.info("Scheduler started (%d jobs)", len(self._job_ids))
@@ -142,5 +168,43 @@ class CollectionScheduler:
             logger.info("Cleaned up %d reports older than 7 days", deleted)
         except Exception as exc:
             logger.error("Report cleanup failed: %s", exc)
+        finally:
+            db.close()
+
+    async def _publish_weekly_digests(self):
+        """Publish the previous Beijing natural week for enabled topics."""
+        db = SessionLocal()
+        try:
+            topics = db.query(Topic).filter(
+                Topic.is_active == True,
+                Topic.weekly_digest_enabled == True,
+            ).all()
+            reference = _previous_complete_week_reference()
+            from app.weekly_report_engine import publish_weekly_digest
+
+            for topic in topics:
+                try:
+                    result = await publish_weekly_digest(
+                        db,
+                        topic.id,
+                        reference=reference,
+                        model_id=topic.weekly_digest_model_id,
+                    )
+                    if result.reports:
+                        logger.info(
+                            "Weekly digest %s published %d documents",
+                            result.plan.series_id,
+                            len(result.reports),
+                        )
+                    else:
+                        logger.warning(
+                            "Weekly digest %s not published: %s",
+                            result.plan.series_id,
+                            "；".join(result.warnings),
+                        )
+                except Exception as exc:
+                    logger.error(
+                        "Weekly digest for topic %s failed: %s", topic.id, exc,
+                    )
         finally:
             db.close()

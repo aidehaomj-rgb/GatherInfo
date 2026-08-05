@@ -261,6 +261,25 @@ def _failure_guidance(errors: list[str], recurring_failures: int) -> tuple[str, 
     return "network_or_provider", False, "请重新验证该信息源；若连续失败且没有替代入口，建议停用或删除。", "disable_candidate"
 
 
+@router.post("/runs/clear")
+def clear_history(db: Session = Depends(get_db)):
+    """Clear all collection history: delete collected items and collection runs.
+
+    Topics, sources, tags, reports and schedules are preserved.
+    """
+    try:
+        # Delete items first (they reference runs via run_id)
+        db.query(CollectedItem).delete(synchronize_session=False)
+        # Then delete all runs
+        db.query(CollectionRun).delete(synchronize_session=False)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("clear_history failed: %s", exc)
+        raise HTTPException(500, f"清空采集历史失败: {exc}")
+    return {"ok": True, "message": "采集历史已清空"}
+
+
 @router.post("/runs/{run_id}/stop")
 def stop_run(run_id: str, db: Session = Depends(get_db)):
     run = db.query(CollectionRun).filter(CollectionRun.id == run_id).first()

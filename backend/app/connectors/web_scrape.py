@@ -5,9 +5,8 @@ import logging
 import re
 import asyncio
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
-import httpx
 from bs4 import BeautifulSoup
 
 from app.connectors.base import (
@@ -16,6 +15,7 @@ from app.connectors.base import (
 )
 from app.connectors._helpers import detect_lang, infer_category, build_tags
 from app.web_content_extractor import extract_article_text
+from app.safe_fetch import fetch_public_html, public_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,18 +37,20 @@ class WebScrapeCollector(BaseCollector):
         errors: list[str] = []
         seen: set[str] = set()
 
-        async with httpx.AsyncClient(
+        async with public_async_client(
             timeout=cfg.timeout_seconds,
             headers=_scrape_headers(),
-            follow_redirects=True,
-            verify=ac.get("verify_ssl", True),
         ) as client:
             for url in urls:
                 if len(items) >= max_items:
                     break
                 try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
+                    resp = await fetch_public_html(
+                        client, url, timeout_seconds=cfg.timeout_seconds,
+                        minimum_interval_seconds=_minimum_request_interval(cfg),
+                    )
+                    if resp is None:
+                        raise ValueError("URL 非公网 HTML、重定向不安全或响应过大")
                     soup = BeautifulSoup(resp.text, "lxml")
 
                     item_sel = ac.get("item_selector", "article, .news-item, .list-item, li, tr")
@@ -99,10 +101,21 @@ class WebScrapeCollector(BaseCollector):
 
                         content = ""
                         summary = ""
-                        if href and ac.get("fetch_detail", True):
+                        if (
+                            href
+                            and ac.get("fetch_detail", True)
+                            and _same_origin(cfg.base_url, href)
+                        ):
                             try:
-                                detail_resp = await client.get(href)
-                                extracted = extract_article_text(detail_resp.text, href)
+                                detail_resp = await fetch_public_html(
+                                    client, href, timeout_seconds=cfg.timeout_seconds,
+                                    minimum_interval_seconds=_minimum_request_interval(cfg),
+                                )
+                                if detail_resp is None:
+                                    raise ValueError("详情页未通过公网 HTML 安全校验")
+                                extracted = extract_article_text(
+                                    detail_resp.text, detail_resp.url,
+                                )
                                 content = extracted.get("content", "")
                                 summary = extracted.get("summary", "")
                                 if not published and extracted.get("published_at"):
@@ -163,6 +176,26 @@ def _scrape_headers() -> dict:
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
+
+
+def _minimum_request_interval(config: SourceConfig) -> float:
+    rate_interval = 1.0 / config.rate_limit_rps if config.rate_limit_rps else 1.0
+    return max(float(getattr(config, "crawl_delay_seconds", 0) or 0), rate_interval)
+
+
+def _same_origin(left: str, right: str) -> bool:
+    try:
+        first = urlsplit(left)
+        second = urlsplit(right)
+        first_port = first.port or (443 if first.scheme.casefold() == "https" else 80)
+        second_port = second.port or (443 if second.scheme.casefold() == "https" else 80)
+    except ValueError:
+        return False
+    return (
+        first.scheme.casefold(), (first.hostname or "").casefold(), first_port,
+    ) == (
+        second.scheme.casefold(), (second.hostname or "").casefold(), second_port,
+    )
 
 
 def _build_urls(base: str, max_pages: int) -> list[str]:

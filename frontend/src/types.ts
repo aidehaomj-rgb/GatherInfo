@@ -10,15 +10,31 @@ export interface Source {
   api_endpoint: string | null;
   homepage_url: string | null;
   api_key: string | null;
+  has_api_key?: boolean;
   auth_config?: Record<string, unknown> | null;
   default_keywords: string[] | null;
   default_categories: string[] | null;
   languages: string[] | null;
   country_focus: string[] | null;
+  legal_basis?: string | null;
+  compliance_note?: string | null;
   rate_limit_rps?: number;
   last_sync_at: string | null;
   last_error: string | null;
+  verification_status?: string;
+  discovery_urls?: string[] | null;
+  robots_status?: string;
+  terms_status?: string;
+  llm_ingest_allowed?: boolean;
+  origin_resolution_required?: boolean;
+  crawl_delay_seconds?: number;
+  verified_at?: string | null;
+  compliance_reviewed_by?: string | null;
+  compliance_snapshot?: Record<string, unknown> | null;
   items_collected: number;
+  health_status?: string;
+  health_checked_at?: string | null;
+  health_detail?: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -49,6 +65,11 @@ export interface Topic {
   auto_report: boolean;
   auto_report_model_id: string | null;
   auto_report_type: "analytical" | "archive";
+  weekly_digest_enabled: boolean;
+  weekly_digest_model_id: string | null;
+  weekly_digest_target_items: number;
+  weekly_digest_part_size: number;
+  weekly_digest_min_items: number;
   last_collection_run_id: string | null;
   source_names: string[];
   total_items_collected: number;
@@ -285,7 +306,7 @@ export interface Report {
   topic_id: string;
   topic_name?: string;
   title: string;
-  report_type: "analytical" | "archive";
+  report_type: "analytical" | "archive" | "weekly_digest";
   content: string | null;
   summary: string | null;
   status: string;           // pending | generating | completed | failed
@@ -294,6 +315,12 @@ export interface Report {
   item_count: number;
   item_ids: string[] | null;
   error_log: string | null;
+  series_id: string | null;
+  period_key: string | null;
+  part_index: number | null;
+  part_total: number | null;
+  selection_policy: Record<string, unknown> | null;
+  selection_audit: Record<string, unknown> | null;
   collection_run_id: string | null;
   date_range_start: string | null;
   date_range_end: string | null;
@@ -318,6 +345,20 @@ export interface SystemConfig {
 export interface BatchGenerateResult {
   results: Report[];
   failed: number;
+}
+
+export interface WeeklyReportGenerateResult {
+  series_id: string;
+  period_key: string;
+  date_from: string;
+  date_to: string;
+  candidate_count: number;
+  selected_count: number;
+  target_count: number;
+  documents: Report[];
+  selection_audit: Record<string, unknown>;
+  warnings: string[];
+  reused: boolean;
 }
 
 export interface TagMergeResult {

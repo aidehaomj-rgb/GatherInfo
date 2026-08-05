@@ -9,6 +9,8 @@ import sys
 import time
 from pathlib import Path
 
+from project_env import load_backend_env
+
 
 ROOT = Path(__file__).resolve().parent
 LOG_DIR = ROOT / "logs"
@@ -53,6 +55,7 @@ def start_process(name: str, args: list[str], log_file: Path) -> subprocess.Pope
 
 
 def main() -> int:
+    load_backend_env(ROOT)
     LOG_DIR.mkdir(exist_ok=True)
 
     backend = start_process(

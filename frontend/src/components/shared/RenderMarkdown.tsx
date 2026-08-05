@@ -4,6 +4,20 @@ interface Props {
   content: string;
 }
 
+function renderInlineText(line: string, keyPrefix: string): ReactNode[] {
+  const tokens = line.split(/(\*\*.+?\*\*|\[参见条目\d+\])/g).filter(Boolean);
+  return tokens.map((token, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (token.startsWith("**") && token.endsWith("**")) {
+      return <strong key={key}>{token.slice(2, -2)}</strong>;
+    }
+    if (/^\[参见条目\d+\]$/.test(token)) {
+      return <span key={key} style={{ color: "var(--accent)", fontSize: "0.8em" }}>{token}</span>;
+    }
+    return token;
+  });
+}
+
 /**
  * Simple Markdown renderer for report content.
  * Supports: ##/### headers, **bold**, numbered lists, bullet points, code blocks.
@@ -46,10 +60,7 @@ export function RenderMarkdown({ content }: Props): ReactNode {
     } else if (line.trim() === "") {
       elements.push(<div key={i} style={{ height: 4 }} />);
     } else {
-      const rendered = line
-        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-        .replace(/\[参见条目(\d+)\]/g, '<span style="color:var(--accent);font-size:0.8em">[参见条目$1]</span>');
-      elements.push(<p key={i} style={{ margin: "4px 0" }} dangerouslySetInnerHTML={{ __html: rendered }} />);
+      elements.push(<p key={i} style={{ margin: "4px 0" }}>{renderInlineText(line, `line-${i}`)}</p>);
     }
   }
 

@@ -44,6 +44,11 @@ class Topic(Base):
     auto_report = Column(Boolean, default=False)
     auto_report_model_id = Column(String(80), nullable=True)
     auto_report_type = Column(String(20), default="analytical")
+    weekly_digest_enabled = Column(Boolean, default=False)
+    weekly_digest_model_id = Column(String(80), nullable=True)
+    weekly_digest_target_items = Column(Integer, default=80)
+    weekly_digest_part_size = Column(Integer, default=40)
+    weekly_digest_min_items = Column(Integer, default=60)
     description_prompt = Column(Text, nullable=True)
     ai_research_model_id = Column(String(80), nullable=True)
 
@@ -69,6 +74,7 @@ class ScheduleConfig(Base):
     id = Column(String(80), primary_key=True)
     name = Column(String(200), nullable=False)
     cron_expression = Column(String(100), nullable=False)
+    timezone = Column(String(80), nullable=False, default="Asia/Shanghai")
     is_active = Column(Boolean, default=True)
 
     topic_ids = Column(JSON, nullable=True)
@@ -123,6 +129,16 @@ class Report(Base):
     item_count = Column(Integer, default=0)
     item_ids = Column(JSON, nullable=True)
     error_log = Column(Text, nullable=True)
+    series_id = Column(String(120), nullable=True, index=True)
+    period_key = Column(String(40), nullable=True, index=True)
+    part_index = Column(Integer, nullable=True)
+    part_total = Column(Integer, nullable=True)
+    selection_policy = Column(JSON, nullable=True)
+    selection_audit = Column(JSON, nullable=True)
+    retry_count = Column(Integer, default=0)
+    last_error_at = Column(DateTime(timezone=True), nullable=True)
+    generation_owner = Column(String(80), nullable=True)
+    generation_lease_until = Column(DateTime(timezone=True), nullable=True)
 
     collection_run_id = Column(String(80), nullable=True)
     date_range_start = Column(DateTime(timezone=True), nullable=True)
@@ -161,7 +177,7 @@ class SystemConfig(Base):
     __tablename__ = "system_config"
 
     id = Column(String(20), primary_key=True, default="global")
-    report_title_format = Column(String(300), default="{topic}_情报报告_{date}")
+    report_title_format = Column(String(300), default="{title}_{date}")
     report_output_dir = Column(String(800), nullable=True)
     report_dir_pattern = Column(String(100), default="%Y-%m-%d")
     report_formats = Column(JSON, default=lambda: ["docx", "pdf"])

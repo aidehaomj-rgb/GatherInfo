@@ -7,7 +7,11 @@ import os
 import sys
 import pytest
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, AsyncMock
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 # Ensure the backend package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,9 +19,25 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.engine import (
     CollectionEngine, MAX_CANDIDATES_PER_SOURCE,
     SOURCE_EXECUTION_TIMEOUT_SECONDS, utc_now, _hash,
+    _dedupe_fingerprint,
+    _sync_run_result_metrics,
+    _planning_window_dates, _planning_window_days, _topic_collection_window,
 )
 from app.connectors.base import FetchItem, CollectResult
-from app.models import CollectedItem, CollectionRun, ItemStatus, JobStatus
+from app.database import Base
+from app.models import (
+    CollectedItem, CollectionRun, ItemStatus, JobStatus, SourceChannel,
+    SourceConfig, Topic,
+)
+
+
+def _allow_full_collection(source):
+    source.is_configured = True
+    source.verification_status = "verified"
+    source.robots_status = "allowed"
+    source.terms_status = "public_domain"
+    source.llm_ingest_allowed = True
+    return source
 
 
 def test_hash_deterministic():
@@ -25,6 +45,36 @@ def test_hash_deterministic():
     assert _hash("hello") == _hash("hello")
     assert _hash("hello") != _hash("world")
     assert len(_hash("test")) == 64  # SHA-256 hex
+
+
+def test_dedupe_fingerprint_preserves_curated_roundup_section_identity():
+    first = _dedupe_fingerprint(
+        "https://example.test/daily?traderadar_section=abc123&utm_source=x",
+        "First section", "content",
+    )
+    second = _dedupe_fingerprint(
+        "https://example.test/daily?traderadar_section=def456",
+        "Second section", "content",
+    )
+
+    assert first == "url:https://example.test/daily?traderadar_section=abc123"
+    assert second == "url:https://example.test/daily?traderadar_section=def456"
+    assert first != second
+
+
+def test_final_run_metrics_include_window_and_quality_rejections():
+    run = SimpleNamespace(items_new=0, items_failed=0, error_log=None)
+    result = CollectResult(
+        run_id="run-1", source_id="source-1", status=JobStatus.COMPLETED,
+        items=[], items_new=2, items_failed=7,
+        error_log=["采集窗口过滤 3 条", "质量审核拒绝 4 条"],
+    )
+
+    _sync_run_result_metrics(run, result, persisted_count=2)
+
+    assert run.items_new == 2
+    assert run.items_failed == 7
+    assert run.error_log == ["采集窗口过滤 3 条", "质量审核拒绝 4 条"]
 
 
 def test_hash_empty_string():
@@ -58,6 +108,64 @@ def test_record_progress_appends_an_immutable_timestamped_event():
     mock_db.commit.assert_called_once()
 
 
+def test_weekly_topic_collection_uses_current_beijing_week_window() -> None:
+    now = datetime(2026, 8, 4, 4, 30, tzinfo=timezone.utc)
+    topic = SimpleNamespace(weekly_digest_enabled=True, collect_window_days=30)
+
+    start, end = _topic_collection_window(topic, now=now)
+
+    assert start == datetime(2026, 8, 2, 16, tzinfo=timezone.utc)
+    assert end == now
+
+
+def test_query_planner_uses_resolved_week_span_instead_of_topic_30_days() -> None:
+    start = datetime(2026, 8, 2, 16, tzinfo=timezone.utc)
+    current = datetime(2026, 8, 4, 0, 15, tzinfo=timezone.utc)
+    complete_week_end = datetime(2026, 8, 9, 16, tzinfo=timezone.utc)
+
+    assert _planning_window_days(start, current, fallback_days=30) == 2
+    assert _planning_window_days(start, complete_week_end, fallback_days=30) == 7
+    assert _planning_window_dates(start, complete_week_end) == (
+        datetime(2026, 8, 3).date(), datetime(2026, 8, 9).date(),
+    )
+
+
+def test_resolve_sources_skips_channels_without_registered_connector() -> None:
+    sql_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(sql_engine)
+    db = sessionmaker(bind=sql_engine)()
+    try:
+        db.add_all([
+            Topic(
+                id="topic-connectors", name="连接器核验",
+                source_ids=["supported-web", "unsupported-social"],
+            ),
+            SourceConfig(
+                id="supported-web", name="网页源",
+                channel=SourceChannel.WEB_SCRAPE, base_url="https://cbp.gov/newsroom",
+                is_active=True, is_configured=True, verification_status="verified",
+                robots_status="allowed", terms_status="public_domain",
+                llm_ingest_allowed=True,
+            ),
+            SourceConfig(
+                id="unsupported-social", name="社交源",
+                channel=SourceChannel.SOCIAL, base_url="https://example.com/social",
+                is_active=True, is_configured=True, verification_status="verified",
+                robots_status="allowed", terms_status="public_domain",
+                llm_ingest_allowed=True,
+            ),
+        ])
+        db.commit()
+        topic = db.query(Topic).filter(Topic.id == "topic-connectors").one()
+
+        resolved = CollectionEngine(db)._resolve_sources(topic)
+
+        assert [source.id for source in resolved] == ["supported-web"]
+    finally:
+        db.close()
+        sql_engine.dispose()
+
+
 class TestFetchItemId:
     """FetchItem.item_id generates unique IDs."""
     
@@ -86,6 +194,7 @@ def test_collection_fails_source_when_connector_exceeds_timeout(monkeypatch):
     source.name = "Slow source"
     source.is_active = True
     source.max_items_per_run = 1
+    _allow_full_collection(source)
     mock_db.query.return_value.filter.return_value.first.return_value = source
     connector = MagicMock()
 
@@ -194,7 +303,10 @@ class TestPersistItems:
 
         engine._persist_items(items, "src-1", "run-1", topic_id="t1")
 
-        added = mock_db.add.call_args.args[0]
+        added = next(
+            call.args[0] for call in mock_db.add.call_args_list
+            if isinstance(call.args[0], CollectedItem)
+        )
         assert added.content == items[0].content
         assert added.summary
         assert added.raw_metadata["engine"] == "test"
@@ -238,6 +350,74 @@ class TestPersistItems:
 
         mock_db.add.assert_not_called()
 
+    def test_existing_item_receives_newer_curated_profile_fields(self):
+        """A better LLM curation pass must refresh searchable editorial fields."""
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        existing = MagicMock(spec=CollectedItem)
+        existing.title = "Original title"
+        existing.content = "old body"
+        existing.summary = "old summary"
+        existing.language = "en"
+        existing.category = "general"
+        existing.quality_score = 0.4
+        existing.relevance_score = 0.5
+        existing.published_at = None
+        existing.topic_id = "t1"
+        existing.entities = {"countries": ["US"]}
+        existing.raw_metadata = {}
+        mock_db.query.return_value.filter.return_value.first.return_value = existing
+        item = FetchItem(
+            title="美国更新关键矿产出口管制",
+            content="中" * 240,
+            summary="新的中文摘要",
+            url="https://example.com/control",
+            language="zh",
+            category="出口管制",
+            quality_score=0.92,
+            relevance_score=0.88,
+            entities={"products": ["关键矿产"]},
+            raw_metadata={"intelligence_profile": {"priority": "high"}},
+        )
+
+        engine._persist_items([item], "source-1", "run-1", topic_id="t1")
+
+        assert existing.title == item.title
+        assert existing.language == "zh"
+        assert existing.category == "出口管制"
+        assert existing.quality_score == 0.92
+        assert existing.relevance_score == 0.88
+
+
+def test_topic_source_resolution_uses_only_formal_llm_approved_sources():
+    db = MagicMock()
+    approved = _allow_full_collection(MagicMock())
+    approved.id = "approved"
+    approved.channel = SourceChannel.WEB_SCRAPE
+    legacy = MagicMock()
+    legacy.id = "legacy"
+    legacy.channel = SourceChannel.WEB_SCRAPE
+    legacy.is_active = True
+    legacy.is_configured = True
+    legacy.verification_status = "legacy_unverified"
+    legacy.robots_status = "unverified"
+    legacy.terms_status = "unverified"
+    legacy.llm_ingest_allowed = False
+    blocked = _allow_full_collection(MagicMock())
+    blocked.id = "blocked"
+    blocked.channel = SourceChannel.WEB_SCRAPE
+    blocked.robots_status = "denied_all"
+    db.query.return_value.filter.return_value.all.return_value = [
+        approved, legacy, blocked,
+    ]
+    topic = MagicMock(spec=Topic)
+    topic.source_ids = ["approved", "legacy", "blocked"]
+    topic.collection_model_ids = None
+
+    sources = CollectionEngine(db)._resolve_sources(topic)
+
+    assert [source.id for source in sources] == ["approved"]
+
 
 class TestWindowFiltering:
     """Window-based filtering of items by publication date."""
@@ -278,20 +458,21 @@ class TestWindowFiltering:
 
     @patch("app.content_quality.curate_article_candidates", new_callable=AsyncMock)
     @patch("app.connectors.base.ConnectorRegistry.create")
-    def test_collection_caps_candidates_before_model_review(self, mock_create, mock_curate):
-        """A large source response must not create an unbounded LLM review queue."""
+    def test_collection_uses_source_candidate_budget_before_model_review(self, mock_create, mock_curate):
+        """The configured source budget should replace the legacy nine-item cap."""
         mock_db = MagicMock()
         source = MagicMock()
         source.id = "source-1"
         source.name = "Source"
         source.is_active = True
-        source.max_items_per_run = 100
+        source.max_items_per_run = 12
+        _allow_full_collection(source)
         mock_db.query.return_value.filter.return_value.first.return_value = source
         mock_db.query.return_value.filter.return_value.all.return_value = []
         connector = MagicMock()
         connector.execute = AsyncMock(return_value=CollectResult(
             run_id="connector-run", source_id="source-1", status=JobStatus.COMPLETED,
-            items=[FetchItem(title=f"Article {index}", content="x" * 250, url=f"https://example.com/{index}", published_at=utc_now()) for index in range(MAX_CANDIDATES_PER_SOURCE + 4)],
+            items=[FetchItem(title=f"Article {index}", content="x" * 250, url=f"https://example.com/{index}", published_at=utc_now()) for index in range(source.max_items_per_run + 4)],
         ))
         mock_create.return_value = connector
         mock_curate.return_value = ([], [])
@@ -301,7 +482,65 @@ class TestWindowFiltering:
         asyncio.run(engine.collect_from_source("source-1", ["Article"], "topic-1"))
 
         reviewed = mock_curate.call_args.args[0]
-        assert len(reviewed) == MAX_CANDIDATES_PER_SOURCE
+        assert len(reviewed) == source.max_items_per_run
+
+    @patch("app.engine.ConnectorRegistry.create")
+    def test_collection_policy_blocks_denied_source_before_network(self, mock_create):
+        mock_db = MagicMock()
+        source = MagicMock()
+        source.id = "blocked-source"
+        source.name = "Blocked"
+        source.is_active = True
+        source.is_configured = True
+        source.verification_status = "verified"
+        source.robots_status = "denied_all"
+        source.terms_status = "allowed"
+        source.llm_ingest_allowed = True
+        mock_db.query.return_value.filter.return_value.first.return_value = source
+
+        import asyncio
+        result = asyncio.run(CollectionEngine(mock_db).collect_from_source(
+            source.id, ["trade"], "topic-1",
+        ))
+
+        assert result.status == JobStatus.FAILED
+        assert "robots" in result.error_log[0]
+        mock_create.assert_not_called()
+
+    @patch("app.content_quality.curate_article_candidates", new_callable=AsyncMock)
+    @patch("app.engine.ConnectorRegistry.create")
+    def test_unverified_source_never_sends_excerpt_to_llm(self, mock_create, mock_curate):
+        mock_db = MagicMock()
+        source = MagicMock()
+        source.id = "legacy-source"
+        source.name = "Legacy"
+        source.is_active = True
+        source.is_configured = True
+        source.verification_status = "legacy_unverified"
+        source.robots_status = "unverified"
+        source.terms_status = "unverified"
+        source.llm_ingest_allowed = True
+        source.max_items_per_run = 10
+        mock_db.query.return_value.filter.return_value.first.return_value = source
+        connector = MagicMock()
+        connector.execute = AsyncMock(return_value=CollectResult(
+            run_id="connector-run", source_id=source.id, status=JobStatus.COMPLETED,
+            items=[FetchItem(
+                title="Trade policy", content="x" * 250,
+                url="https://example.com/policy", published_at=utc_now(),
+            )],
+        ))
+        mock_create.return_value = connector
+
+        import asyncio
+        result = asyncio.run(CollectionEngine(mock_db).collect_from_source(
+            source.id, ["trade"], "topic-1",
+        ))
+
+        assert result.status == JobStatus.FAILED
+        assert "LLM" in result.error_log[-1]
+        mock_create.assert_not_called()
+        mock_curate.assert_not_called()
 
     def test_undated_search_result_is_rejected_even_when_source_requests_bypass(self):
         """A topic window is a hard boundary and cannot be bypassed by a connector."""

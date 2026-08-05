@@ -22,6 +22,7 @@ from app._models_items import (
     item_tags,
     CollectionRun,
     CollectedItem,
+    ItemTopicMembership,
 )
 from app._models_config import (
     Topic,
@@ -52,6 +53,7 @@ __all__ = [
     "item_tags",
     "CollectionRun",
     "CollectedItem",
+    "ItemTopicMembership",
     "Topic",
     "ScheduleConfig",
     "ModelConfig",

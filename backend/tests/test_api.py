@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import create_app  # noqa: E402
+from app.main import (  # noqa: E402
+    _issue_operator_token, _operator_write_rejection, _rate_limit_client_ip,
+)
 from app.database import SessionLocal, init_db  # noqa: E402
 from app.models import CollectionRun, JobStatus  # noqa: E402
 
@@ -30,6 +33,58 @@ def test_health() -> None:
     assert resp.json()["status"] == "ok"
 
 
+def test_rate_limit_ignores_untrusted_forwarded_for(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.delenv("TRUSTED_PROXY_IPS", raising=False)
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={"X-Forwarded-For": "203.0.113.9"},
+    )
+
+    assert _rate_limit_client_ip(request) == "127.0.0.1"
+
+
+def test_operator_write_guard_rejects_browser_request_without_header() -> None:
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/runs/clear"),
+        headers={
+            "Origin": "https://attacker.example",
+            "Sec-Fetch-Site": "cross-site",
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    rejection = _operator_write_rejection(
+        request, frozenset({"http://127.0.0.1:5178"}),
+    )
+
+    assert rejection is not None
+
+
+def test_operator_write_guard_accepts_valid_signed_same_origin_session() -> None:
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/topics"),
+        headers={
+            "Origin": "http://127.0.0.1:5178",
+            "Sec-Fetch-Site": "same-origin",
+            "X-Operator-Request": "RiskInfoRader",
+            "X-Operator-Token": _issue_operator_token(),
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    assert _operator_write_rejection(
+        request, frozenset({"http://127.0.0.1:5178"}),
+    ) is None
+
+
 # ── Sources ─────────────────────────────────────────────────────────
 
 def test_list_sources() -> None:
@@ -41,16 +96,160 @@ def test_list_sources() -> None:
 def test_create_and_delete_source() -> None:
     resp = client.post("/api/v1/sources", json={
         "id": "test-source", "name": "Test Source", "channel": "api_search",
+        "api_key": "source-secret-must-not-leak",
+        "verification_status": "verified_by_attacker",
+        "robots_status": "allowed_by_attacker",
+        "terms_status": "allowed_by_attacker",
+        "llm_ingest_allowed": True,
     })
     assert resp.status_code in (200, 201)
     data = resp.json()
     assert data["id"] == "test-source"
     assert data["channel"] == "api_search"
+    assert data["api_key"] is None
+    assert data["verification_status"] == "unverified"
+    assert data["llm_ingest_allowed"] is False
+
+    listed = client.get("/api/v1/sources").json()
+    listed_source = next(source for source in listed if source["id"] == "test-source")
+    assert listed_source["api_key"] is None
+    assert listed_source["has_api_key"] is True
+
+    client.put("/api/v1/sources/test-source", json={
+        "name": "Test Source Renamed", "api_key": "",
+    })
+    db = SessionLocal()
+    try:
+        from app.models import SourceConfig
+        assert db.get(SourceConfig, "test-source").api_key == "source-secret-must-not-leak"
+    finally:
+        db.close()
 
     # Delete
     resp2 = client.delete("/api/v1/sources/test-source")
     assert resp2.status_code == 200
     assert resp2.json()["ok"] is True
+
+
+def test_config_import_cannot_assert_source_compliance() -> None:
+    source_id = "import-attestation-test"
+    response = client.post("/api/v1/config/import", json={
+        "mode": "overwrite",
+        "sources": [{
+            "id": source_id, "name": "Imported untrusted source",
+            "channel": "web_scrape", "base_url": "https://example.com/news",
+            "is_active": True, "is_configured": True,
+            "verification_status": "verified_by_import",
+            "robots_status": "allowed_by_import",
+            "terms_status": "allowed_by_import",
+            "llm_ingest_allowed": True,
+        }],
+    })
+
+    assert response.status_code == 200
+    source = client.get(f"/api/v1/sources/{source_id}").json()
+    assert source["verification_status"] == "unverified"
+    assert source["llm_ingest_allowed"] is False
+    client.delete(f"/api/v1/sources/{source_id}")
+
+
+def test_collection_url_change_resets_verified_attestation() -> None:
+    source_id = "cbp-attestation-reset-test"
+    created = client.post("/api/v1/sources", json={
+        "id": source_id, "name": "CBP reset test", "channel": "web_scrape",
+        "base_url": "https://www.cbp.gov/newsroom/media-releases/all",
+    })
+    assert created.status_code == 201
+    client.post(f"/api/v1/sources/{source_id}/compliance-review", json={
+        "decision": "approve_full", "robots_evidence": "allowed",
+        "terms_evidence": "us_government",
+        "discovery_urls": ["https://www.cbp.gov/robots.txt"],
+        "legal_basis": "美国政府公开信息允许依照适用条件自动处理。",
+        "compliance_note": "测试运营员已核对采集地址与网站使用条件并批准全文处理。",
+        "reviewed_by": "测试运营员", "confirmed": True,
+    })
+    verified = client.get(f"/api/v1/sources/{source_id}").json()
+    assert verified["llm_ingest_allowed"] is True
+
+    updated = client.put(f"/api/v1/sources/{source_id}", json={
+        "base_url": "https://www.cbp.gov/user/login",
+    })
+    assert updated.status_code == 200
+    assert updated.json()["verification_status"] == "unverified"
+    assert updated.json()["llm_ingest_allowed"] is False
+    client.delete(f"/api/v1/sources/{source_id}")
+
+
+def test_search_dispatch_change_resets_verified_attestation() -> None:
+    source_id = "tavily-dispatch-reset-test"
+    created = client.post("/api/v1/sources", json={
+        "id": source_id, "name": "Tavily dispatch reset", "channel": "api_search",
+        "api_key": "configured", "api_endpoint": "https://api.tavily.com/search",
+        "auth_config": {"search_type": "tavily"},
+    })
+    assert created.status_code == 201
+    client.post(f"/api/v1/sources/{source_id}/compliance-review", json={
+        "decision": "approve_full", "robots_evidence": "api_required",
+        "terms_evidence": "allowed",
+        "discovery_urls": ["https://docs.tavily.com/documentation/api-reference/introduction"],
+        "legal_basis": "已订阅的 API 服务允许按服务条款自动调用。",
+        "compliance_note": "测试运营员已核对 API 端点、认证方式与服务使用条件。",
+        "reviewed_by": "测试运营员", "confirmed": True,
+    })
+    assert client.get(f"/api/v1/sources/{source_id}").json()["llm_ingest_allowed"] is True
+
+    updated = client.put(f"/api/v1/sources/{source_id}", json={
+        "auth_config": {"search_type": "baidu_qianfan"},
+    })
+
+    assert updated.status_code == 200
+    assert updated.json()["verification_status"] == "unverified"
+    assert updated.json()["llm_ingest_allowed"] is False
+    client.delete(f"/api/v1/sources/{source_id}")
+
+
+def test_operator_can_record_evidence_based_compliance_review() -> None:
+    source_id = "manual-compliance-review-test"
+    created = client.post("/api/v1/sources", json={
+        "id": source_id,
+        "name": "Manual compliance review",
+        "channel": "web_scrape",
+        "base_url": "https://example.org/public-trade-news",
+    })
+    assert created.status_code == 201
+
+    reviewed = client.post(f"/api/v1/sources/{source_id}/compliance-review", json={
+        "decision": "approve_full",
+        "robots_evidence": "allowed",
+        "terms_evidence": "open_government",
+        "discovery_urls": [
+            "https://example.org/robots.txt",
+            "https://example.org/terms",
+        ],
+        "legal_basis": "公开政府许可允许自动处理并保留来源署名。",
+        "compliance_note": "运营人员已核对 robots 与使用条款，批准低频采集和 LLM 中文精编。",
+        "reviewed_by": "测试运营员",
+        "confirmed": True,
+    })
+
+    assert reviewed.status_code == 200
+    payload = reviewed.json()
+    assert payload["verification_status"].startswith("verified_manual_")
+    assert payload["llm_ingest_allowed"] is True
+    assert payload["verified_at"] is not None
+    assert payload["compliance_reviewed_by"] == "测试运营员"
+    assert len(payload["compliance_snapshot"]["contract_digest"]) == 64
+
+    changed = client.put(f"/api/v1/sources/{source_id}", json={
+        "crawl_delay_seconds": 0,
+    })
+    assert changed.status_code == 200
+    assert changed.json()["verification_status"] == "unverified"
+    assert changed.json()["llm_ingest_allowed"] is False
+    assert changed.json()["compliance_snapshot"]["invalidated_reason"] == (
+        "collection_contract_changed"
+    )
+    client.delete(f"/api/v1/sources/{source_id}")
 
 
 # ── Topics ──────────────────────────────────────────────────────────
@@ -563,8 +762,9 @@ def test_settings_update() -> None:
 
 # ── Report export file generation ───────────────────────────────────
 
-def test_report_export_generates_files(tmp_path) -> None:
+def test_report_export_generates_files(tmp_path, monkeypatch) -> None:
     """export_report should render the configured formats to disk."""
+    monkeypatch.setenv("REPORT_OUTPUT_ROOTS", str(tmp_path))
     from types import SimpleNamespace
     from app.report_export import export_report
 

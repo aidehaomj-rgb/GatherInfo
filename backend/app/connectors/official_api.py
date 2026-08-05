@@ -14,6 +14,7 @@ from app.connectors.base import (
     JobStatus, SourceConfig, register_collector,
 )
 from app.connectors._helpers import result
+from app.safe_fetch import fetch_public_json, public_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -478,19 +479,28 @@ class OfficialAPICollector(BaseCollector):
         errors: list[str] = []
 
         headers = {"Accept": "application/json"}
-        api_key = os.getenv(self.config.api_key_ref or "", "")
+        # Generic user-configured endpoints may only use the write-only key
+        # stored on this source. Arbitrary environment-variable references are
+        # intentionally not resolved here.
+        api_key = self.config.api_key or ""
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+        async with public_async_client(timeout=self.config.timeout_seconds) as client:
             try:
-                resp = await client.get(
+                response = await fetch_public_json(
+                    client,
                     self.config.api_endpoint,
                     params={"q": " ".join(keywords)} if keywords else {},
                     headers=headers,
+                    timeout_seconds=self.config.timeout_seconds,
+                    minimum_interval_seconds=float(
+                        getattr(self.config, "crawl_delay_seconds", 0) or 0
+                    ),
                 )
-                resp.raise_for_status()
-                data = resp.json()
+                if response is None:
+                    raise ValueError("Unsafe, redirected, oversized, or non-JSON API response")
+                data = response.data
                 results = data if isinstance(data, list) else data.get(
                     "results", data.get("data", []))
                 for r in results[:max_items]:

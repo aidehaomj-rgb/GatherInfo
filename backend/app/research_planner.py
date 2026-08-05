@@ -75,15 +75,20 @@ async def build_research_queries(
     max_queries: int = 12,
     window_days: int = 7,
     today: date | None = None,
+    window_start_date: date | None = None,
+    window_end_date: date | None = None,
 ) -> list[str]:
     """Turn an analyst prompt into search inputs, keeping evidence on the web."""
     current_date = today or datetime.now(timezone.utc).date()
     safe_window_days = max(1, int(window_days or 7))
-    window_start = current_date - timedelta(days=safe_window_days)
+    target_start = window_start_date or (
+        current_date - timedelta(days=safe_window_days)
+    )
+    target_end = window_end_date or current_date
     request = _collection_instruction(topic, user_prompt)
     time_constraint = (
         f"Today is {current_date.isoformat()}. The target publication window is "
-        f"{window_start.isoformat()} through {current_date.isoformat()}. "
+        f"{target_start.isoformat()} through {target_end.isoformat()}. "
         "Search for recent or latest publications in this window. Do not use "
         "an obsolete year or month. Do not make an exact quoted date a required match."
     )
@@ -102,6 +107,13 @@ async def build_research_queries(
         # runs comparable across periods.
         return _fallback_queries(
             topic, current_date, safe_window_days, max_queries,
+        )
+    if bool(getattr(topic, "weekly_digest_enabled", False)):
+        request += (
+            "\n\nWeekly global-coverage constraints: cover at least English, Spanish, "
+            "Portuguese, French, Japanese and Korean source languages across the query set. "
+            "Use one language per query and vary customs, tariff, trade-remedy, sanctions, "
+            "export-control, import-rule and supply-chain authorities across regions."
         )
 
     keywords = topic.keywords if isinstance(topic.keywords, list) else []
@@ -137,7 +149,10 @@ Analyst request: {request}
         content = str(result.get("content") or "")
     except Exception as exc:
         logger.warning("AI research query planning failed: %s", exc)
-        return _fallback_queries(topic, current_date, safe_window_days, max_queries)
+        fallback = _fallback_queries(
+            topic, current_date, safe_window_days, max_queries,
+        )
+        return _with_weekly_global_lanes(topic, fallback, max_queries)
 
     queries = _parse_query_json(content)
     cleaned: list[str] = []
@@ -163,7 +178,30 @@ Analyst request: {request}
         cleaned.append(value[:240])
         if len(cleaned) >= max_queries:
             break
-    return cleaned or _fallback_queries(topic, current_date, safe_window_days, max_queries)
+    queries = cleaned or _fallback_queries(
+        topic, current_date, safe_window_days, max_queries,
+    )
+    return _with_weekly_global_lanes(topic, queries, max_queries)
+
+
+def _with_weekly_global_lanes(
+    topic: Topic,
+    queries: list[str],
+    max_queries: int,
+) -> list[str]:
+    if not bool(getattr(topic, "weekly_digest_enabled", False)):
+        return list(queries)[:max_queries]
+    lanes = [
+        "official customs tariff trade remedy export control latest",
+        "aduanas arancel antidumping control de exportaciones comunicado oficial",
+        "aduana tarifa antidumping controle de exportação notícia oficial",
+        "douanes tarif antidumping contrôle des exportations communiqué officiel",
+        "税関 関税 アンチダンピング 輸出管理 最新 発表",
+        "관세청 관세 반덤핑 수출통제 최신 발표",
+    ][:max_queries]
+    prefix_budget = max(0, max_queries - len(lanes))
+    combined = [*queries[:prefix_budget], *lanes]
+    return list(dict.fromkeys(combined))[:max_queries]
 
 
 def _collection_instruction(topic: Topic, user_prompt: str) -> str:

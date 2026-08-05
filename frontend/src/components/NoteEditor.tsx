@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { PenLine, Eye, Save, Trash2 } from "lucide-react";
 import { formatBeijingDateTime } from "../utils/date";
+import { RenderMarkdown } from "./shared/RenderMarkdown";
 
 interface NoteEditorProps {
   itemId: string;
@@ -26,27 +27,6 @@ function readNotes(): Record<string, NoteRecord> {
 
 function writeNotes(notes: Record<string, NoteRecord>): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-}
-
-function simpleMarkdownToHtml(md: string): string {
-  let html = md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/^###### (.*$)/gim, "<h6>$1</h6>")
-    .replace(/^##### (.*$)/gim, "<h5>$1</h5>")
-    .replace(/^#### (.*$)/gim, "<h4>$1</h4>")
-    .replace(/^### (.*$)/gim, "<h3>$1</h3>")
-    .replace(/^## (.*$)/gim, "<h2>$1</h2>")
-    .replace(/^# (.*$)/gim, "<h1>$1</h1>")
-    .replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>")
-    .replace(/\*(.*?)\*/gim, "<em>$1</em>")
-    .replace(/`(.*?)`/gim, "<code>$1</code>")
-    .replace(/^\> (.*$)/gim, "<blockquote>$1</blockquote>")
-    .replace(/^- (.*$)/gim, "<li>$1</li>")
-    .replace(/^\d+\. (.*$)/gim, "<li>$1</li>")
-    .replace(/\n/gim, "<br>");
-  return html;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({ itemId, className = "" }) => {
@@ -133,10 +113,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ itemId, className = "" }
       </div>
 
       {preview ? (
-        <div
-          className="note-preview"
-          dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(content || "*暂无内容*") }}
-        />
+        <div className="note-preview">
+          <RenderMarkdown content={content || "*暂无内容*"} />
+        </div>
       ) : (
         <textarea
           ref={textareaRef}

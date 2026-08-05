@@ -87,6 +87,21 @@ export function TopicForm({
   const [autoReportType, setAutoReportType] = useState<"analytical" | "archive">(
     topic?.auto_report_type ?? "analytical",
   );
+  const [weeklyDigestEnabled, setWeeklyDigestEnabled] = useState(
+    topic?.weekly_digest_enabled ?? false,
+  );
+  const [weeklyDigestModelId, setWeeklyDigestModelId] = useState(
+    topic?.weekly_digest_model_id ?? models.find((m) => m.is_default)?.id ?? "",
+  );
+  const [weeklyDigestTargetItems, setWeeklyDigestTargetItems] = useState(
+    topic?.weekly_digest_target_items ?? 80,
+  );
+  const [weeklyDigestPartSize, setWeeklyDigestPartSize] = useState(
+    topic?.weekly_digest_part_size ?? 40,
+  );
+  const [weeklyDigestMinItems, setWeeklyDigestMinItems] = useState(
+    topic?.weekly_digest_min_items ?? 60,
+  );
   const [autoTags, setAutoTags] = useState(
     (topic?.auto_tag_rules ?? [])
       .map((r) => `${r.keyword}:${r.tag}`)
@@ -131,6 +146,11 @@ export function TopicForm({
         auto_report: autoReport,
         auto_report_model_id: autoReport ? autoReportModelId || null : null,
         auto_report_type: autoReportType,
+        weekly_digest_enabled: weeklyDigestEnabled,
+        weekly_digest_model_id: weeklyDigestEnabled ? weeklyDigestModelId || null : null,
+        weekly_digest_target_items: weeklyDigestTargetItems,
+        weekly_digest_part_size: weeklyDigestPartSize,
+        weekly_digest_min_items: weeklyDigestMinItems,
         auto_tag_rules: autoTags
           ? autoTags
               .split(/[,，]/)
@@ -320,6 +340,73 @@ export function TopicForm({
                   </option>
                 ))}
               </select>
+            </label>
+          )}
+          <label>
+            每周双卷情报合集
+            <select
+              value={weeklyDigestEnabled ? "1" : "0"}
+              onChange={(event) => setWeeklyDigestEnabled(event.target.value === "1")}
+            >
+              <option value="0">关闭</option>
+              <option value="1">每周一 06:30 自动编排上周合集</option>
+            </select>
+          </label>
+          {weeklyDigestEnabled && (
+            <label>
+              周刊处理模型
+              <select
+                value={weeklyDigestModelId}
+                onChange={(event) => setWeeklyDigestModelId(event.target.value)}
+              >
+                <option value="">使用默认模型</option>
+                {models.filter((model) => model.is_active).map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {weeklyDigestEnabled && (
+            <label>
+              每周目标条数
+              <input
+                type="number"
+                min={60}
+                max={80}
+                value={weeklyDigestTargetItems}
+                onChange={(event) => setWeeklyDigestTargetItems(
+                  Math.max(60, Math.min(80, Number(event.target.value) || 80)),
+                )}
+              />
+            </label>
+          )}
+          {weeklyDigestEnabled && (
+            <label>
+              每卷最多条数
+              <input
+                type="number"
+                min={30}
+                max={40}
+                value={weeklyDigestPartSize}
+                onChange={(event) => setWeeklyDigestPartSize(
+                  Math.max(30, Math.min(40, Number(event.target.value) || 40)),
+                )}
+              />
+            </label>
+          )}
+          {weeklyDigestEnabled && (
+            <label>
+              自动发布最低条数
+              <input
+                type="number"
+                min={60}
+                max={weeklyDigestTargetItems}
+                value={weeklyDigestMinItems}
+                onChange={(event) => setWeeklyDigestMinItems(
+                  Math.max(60, Math.min(weeklyDigestTargetItems, Number(event.target.value) || 60)),
+                )}
+              />
+              <span className="text-muted small">不足 60 条不自动发布，避免低质量凑数。</span>
             </label>
           )}
           {autoReport && (

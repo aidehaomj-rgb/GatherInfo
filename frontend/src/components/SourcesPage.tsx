@@ -1,8 +1,9 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List, Wrench } from "lucide-react";
-import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors, reconcileSourceReadiness } from "../api";
+import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List, Wrench, ShieldCheck, HeartPulse, Activity } from "lucide-react";
+import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors, reconcileSourceReadiness, healthCheckSources, fetchHealthSummary } from "../api";
 import type { Source, ConnectorInfo } from "../types";
+import { SourceComplianceReviewDialog } from "./SourceComplianceReviewDialog";
 
 const GROUP_LABEL_L1: Record<string, string> = {
   defense_procurement: "政府与军方采购",
@@ -145,6 +146,10 @@ export function SourcesPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [reconciling, setReconciling] = useState(false);
   const [readinessMessage, setReadinessMessage] = useState<string | null>(null);
+  const [reviewingSource, setReviewingSource] = useState<Source | null>(null);
+  const [healthChecking, setHealthChecking] = useState(false);
+  const [healthSummary, setHealthSummary] = useState<{ healthy: number; degraded: number; failed: number; unreachable: number; unknown?: number } | null>(null);
+  const [healthFilter, setHealthFilter] = useState<string | null>(null);
 
  const load = useCallback(async () => {
     try {
@@ -152,6 +157,10 @@ export function SourcesPage() {
       setSources(srcs);
       setConnectors(cs);
       setError(null);
+      try {
+        const hs = await fetchHealthSummary();
+        setHealthSummary(hs);
+      } catch { /* health summary is optional */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -197,9 +206,24 @@ export function SourcesPage() {
     }
   };
 
+  const handleHealthCheck = async () => {
+    setHealthChecking(true);
+    try {
+      const result = await healthCheckSources();
+      setHealthSummary(result);
+      setReadinessMessage(`健康检查完成：${result.healthy} 健康 / ${result.degraded} 降级 / ${result.failed} 失败 / ${result.unreachable} 不可达`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "健康检查失败");
+    } finally {
+      setHealthChecking(false);
+    }
+  };
+
   const visibleSources = sources
     .filter((s) => sourceTab === "configured" ? s.is_configured : !s.is_configured)
-    .filter((s) => matchesSourceSearch(s, sourceSearch));
+    .filter((s) => matchesSourceSearch(s, sourceSearch))
+    .filter((s) => !healthFilter || (s.health_status ?? "unknown") === healthFilter);
 
   const renderSourceCard = (s: Source) => (
     <article key={s.id} className="card-item card-item--compact">
@@ -219,6 +243,8 @@ export function SourcesPage() {
           <span className={`badge ${s.is_configured ? (s.is_active ? "badge--green" : "badge--gray") : "badge--yellow"}`}>
             {s.is_configured ? (s.is_active ? "可采集" : "已配置停用") : "待补充配置"}
           </span>
+          <HealthBadge status={s.health_status} />
+          <ComplianceBadge source={s} />
           {!s.is_configured && s.api_key && <span className="badge badge--blue" style={{ marginLeft: 4 }}>已填Key</span>}
         </div>
       </div>
@@ -241,6 +267,9 @@ export function SourcesPage() {
         )}
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(s)}>
           <Edit3 size={12} /> 编辑
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setReviewingSource(s)}>
+          <ShieldCheck size={12} /> 合规审核
         </button>
         <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDelete(s.id)}>
           <Trash2 size={12} /> 删除
@@ -298,10 +327,62 @@ export function SourcesPage() {
           <h2>信息源管理</h2>
           <p className="text-muted">管理采集渠道：搜索API、网页抓取、RSS、官方API、通用JSON API等</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={14} /> 新建信息源
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn btn-secondary" onClick={() => void handleHealthCheck()} disabled={healthChecking}>
+            <HeartPulse size={14} /> {healthChecking ? "检查中..." : "健康检查"}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={14} /> 新建信息源
+          </button>
+        </div>
       </div>
+
+      {healthSummary && (
+        <div className="health-summary-bar" style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={`chip ${healthFilter === null ? "chip--blue" : "chip--gray"}`}
+            onClick={() => setHealthFilter(null)}
+          >
+            全部 {healthSummary.healthy + healthSummary.degraded + healthSummary.failed + healthSummary.unreachable + (healthSummary.unknown ?? 0)}
+          </button>
+          <button
+            type="button"
+            className={`chip ${healthFilter === "healthy" ? "chip--green" : "chip--gray"}`}
+            onClick={() => setHealthFilter(healthFilter === "healthy" ? null : "healthy")}
+          >
+            <Activity size={12} /> 健康 {healthSummary.healthy}
+          </button>
+          <button
+            type="button"
+            className={`chip ${healthFilter === "degraded" ? "chip--yellow" : "chip--gray"}`}
+            onClick={() => setHealthFilter(healthFilter === "degraded" ? null : "degraded")}
+          >
+            降级 {healthSummary.degraded}
+          </button>
+          <button
+            type="button"
+            className={`chip ${healthFilter === "failed" ? "chip--red" : "chip--gray"}`}
+            onClick={() => setHealthFilter(healthFilter === "failed" ? null : "failed")}
+          >
+            失败 {healthSummary.failed}
+          </button>
+          <button
+            type="button"
+            className={`chip ${healthFilter === "unreachable" ? "chip--red" : "chip--gray"}`}
+            onClick={() => setHealthFilter(healthFilter === "unreachable" ? null : "unreachable")}
+          >
+            不可达 {healthSummary.unreachable}
+          </button>
+          <button
+            type="button"
+            className={`chip ${healthFilter === "unknown" ? "chip--gray" : "chip--gray"}`}
+            onClick={() => setHealthFilter(healthFilter === "unknown" ? null : "unknown")}
+          >
+            未检查 {healthSummary.unknown}
+          </button>
+        </div>
+      )}
 
       <div className="connector-list">
         <h4>可用连接器</h4>
@@ -437,8 +518,57 @@ export function SourcesPage() {
           onClose={() => { setShowCreate(false); setEditing(null); }}
         />
       )}
+      {reviewingSource && (
+        <SourceComplianceReviewDialog
+          source={reviewingSource}
+          onClose={() => setReviewingSource(null)}
+          onReviewed={async () => {
+            setReviewingSource(null);
+            await load();
+          }}
+        />
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          open={true}
+          title="删除信息源"
+          message={confirmDelete.message}
+          variant="danger"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          onConfirm={() => void executeDelete()}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
+}
+
+function ComplianceBadge({ source }: { source: Source }) {
+  if (source.verification_status?.startsWith("blocked")) {
+    return <span className="badge badge--red">已阻止</span>;
+  }
+  if (source.llm_ingest_allowed) {
+    return <span className="badge badge--green">全文与 LLM 已批准</span>;
+  }
+  if (source.verification_status?.startsWith("verified")) {
+    return <span className="badge badge--blue">仅摘要已核验</span>;
+  }
+  return <span className="badge badge--yellow">待合规审核</span>;
+}
+
+const HEALTH_BADGE_MAP: Record<string, { label: string; cls: string }> = {
+  healthy: { label: "健康", cls: "badge--green" },
+  degraded: { label: "降级", cls: "badge--yellow" },
+  failed: { label: "失败", cls: "badge--red" },
+  unreachable: { label: "不可达", cls: "badge--red" },
+  unknown: { label: "未检查", cls: "badge--gray" },
+};
+
+function HealthBadge({ status }: { status?: string }) {
+  const s = status ?? "unknown";
+  const info = HEALTH_BADGE_MAP[s] ?? HEALTH_BADGE_MAP.unknown;
+  return <span className={`badge ${info.cls}`} title={s}>{info.label}</span>;
 }
 
 function matchesSourceSearch(source: Source, query: string) {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2, FileText, Square } from "lucide-react";
-import { fetchActiveRuns, fetchBatches, fetchReports, stopRun } from "../api";
+import { fetchActiveRuns, fetchBatches, fetchReports, operatorWriteHeaders, stopRun } from "../api";
 import type { ActiveRunOut, BatchOut, Report } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
@@ -97,12 +97,17 @@ export function HistoryPage() {
   const handleClearHistory = async () => {
     setClearing(true);
     try {
-      const resp = await fetch("/api/v1/runs/clear", { method: "POST" });
+      const resp = await fetch("/api/v1/runs/clear", {
+        method: "POST",
+        headers: await operatorWriteHeaders(),
+      });
       const data = await resp.json();
       if (data.ok) {
         setActiveRuns([]);
         setBatches([]);
         await load();
+      } else {
+        alert(data.message || data.detail || "清空失败");
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : "清空失败");

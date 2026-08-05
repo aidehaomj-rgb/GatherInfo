@@ -70,7 +70,11 @@ class TestCollectResult:
 
 class TestConnectorRegistry:
     def setup_method(self):
-        ConnectorRegistry._collectors.clear()
+        self._original_collectors = {**ConnectorRegistry._collectors}
+        ConnectorRegistry._collectors = {}
+
+    def teardown_method(self):
+        ConnectorRegistry._collectors = {**self._original_collectors}
 
     def test_register_and_get(self):
         @register_collector("test_channel")
@@ -143,7 +147,11 @@ class TestBaseCollectorExecute:
     """Test the execute() lifecycle using asyncio.run()."""
 
     def setup_method(self):
-        ConnectorRegistry._collectors.clear()
+        self._original_collectors = {**ConnectorRegistry._collectors}
+        ConnectorRegistry._collectors = {}
+
+    def teardown_method(self):
+        ConnectorRegistry._collectors = {**self._original_collectors}
 
     def test_execute_happy_path(self):
         @register_collector("happy")

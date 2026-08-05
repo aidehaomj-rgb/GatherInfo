@@ -185,6 +185,8 @@ def init_db():
     try:
         if reconcile_default_model(db):
             db.commit()
+        from app.source_profile_registry import reconcile_verified_source_profiles
+        reconcile_verified_source_profiles(db)
     finally:
         db.close()
     logger.info("Database ready at %s", _db_file_path() or DATABASE_URL)

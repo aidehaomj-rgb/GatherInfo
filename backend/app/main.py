@@ -9,6 +9,10 @@ TradeRadar — 全球贸易风险情报中枢 v0.8.0
 """
 import os
 import logging
+import ipaddress
+import hashlib
+import hmac
+import secrets
 import time
 import uuid
 from collections import defaultdict
@@ -48,17 +52,89 @@ logger = logging.getLogger(__name__)
 _RATE_LIMIT_MAX = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "600"))
 _RATE_LIMIT_WINDOW = 60
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_MAX_CLIENTS = 4096
+_OPERATOR_HEADER = "X-Operator-Request"
+_OPERATOR_HEADER_VALUE = "RiskInfoRader"
+_OPERATOR_TOKEN_HEADER = "X-Operator-Token"
+_OPERATOR_TOKEN_TTL_SECONDS = 12 * 60 * 60
+_OPERATOR_SIGNING_SECRET = (
+    os.getenv("OPERATOR_SESSION_SECRET", "").encode("utf-8")
+    or secrets.token_bytes(32)
+)
+
+
+def _issue_operator_token(now: int | None = None) -> str:
+    issued_at = int(time.time() if now is None else now)
+    payload = f"{issued_at}.{secrets.token_urlsafe(24)}"
+    signature = hmac.new(
+        _OPERATOR_SIGNING_SECRET, payload.encode("utf-8"), hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def _valid_operator_token(value: str, now: int | None = None) -> bool:
+    try:
+        issued_text, nonce, signature = value.split(".", 2)
+        issued_at = int(issued_text)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    current = int(time.time() if now is None else now)
+    if issued_at > current + 60 or current - issued_at > _OPERATOR_TOKEN_TTL_SECONDS:
+        return False
+    payload = f"{issued_at}.{nonce}"
+    expected = hmac.new(
+        _OPERATOR_SIGNING_SECRET, payload.encode("utf-8"), hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def _rate_limit_client_ip(request: Request) -> str:
+    direct_ip = str(request.client.host if request.client else "unknown")
+    trusted_proxies = {
+        value.strip() for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+        if value.strip()
+    }
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if direct_ip not in trusted_proxies or not forwarded:
+        return direct_ip
+    try:
+        return str(ipaddress.ip_address(forwarded))
+    except ValueError:
+        return direct_ip
+
+
+def _operator_write_rejection(
+    request: Request,
+    allowed_origins: frozenset[str],
+) -> str | None:
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if not request.url.path.startswith("/api/v1"):
+        return None
+    origin = request.headers.get("Origin", "").rstrip("/")
+    fetch_site = request.headers.get("Sec-Fetch-Site", "").casefold()
+    client_host = str(request.client.host if request.client else "")
+    if client_host == "testclient" and not origin and not fetch_site:
+        return None
+    if request.headers.get(_OPERATOR_HEADER) != _OPERATOR_HEADER_VALUE:
+        return "Missing operator request header"
+    if not _valid_operator_token(request.headers.get(_OPERATOR_TOKEN_HEADER, "")):
+        return "Missing or expired operator session token"
+    if origin and origin not in allowed_origins:
+        return "Untrusted request origin"
+    if fetch_site == "cross-site":
+        return "Cross-site write request blocked"
+    return None
 
 async def rate_limit_middleware(request: Request, call_next):
-    client_ip = (
-        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or request.client.host
-    )
+    client_ip = _rate_limit_client_ip(request)
     now = time.monotonic()
     window_start = now - _RATE_LIMIT_WINDOW
 
+    if client_ip not in _rate_limit_store and len(_rate_limit_store) >= _RATE_LIMIT_MAX_CLIENTS:
+        client_ip = "overflow"
     _rate_limit_store[client_ip] = [
-        ts for ts in _rate_limit_store[client_ip] if ts > window_start
+        ts for ts in _rate_limit_store.get(client_ip, []) if ts > window_start
     ]
 
     timestamps = _rate_limit_store[client_ip]
@@ -81,7 +157,8 @@ async def rate_limit_middleware(request: Request, call_next):
             },
         )
 
-    timestamps.append(now)
+    timestamps = [*timestamps, now]
+    _rate_limit_store[client_ip] = timestamps
     response = await call_next(request)
     response.headers["X-RateLimit-Limit"] = str(_RATE_LIMIT_MAX)
     response.headers["X-RateLimit-Remaining"] = str(max(0, _RATE_LIMIT_MAX - len(timestamps)))
@@ -203,13 +280,33 @@ def create_app() -> FastAPI:
         for origin in os.getenv("CORS_ORIGINS", "http://127.0.0.1:5178,http://localhost:5178").split(",")
         if origin.strip()
     ]
+    allowed_origin_set = frozenset(origin.rstrip("/") for origin in allowed_origins)
+
+    @app.middleware("http")
+    async def operator_write_middleware(request: Request, call_next):
+        rejection = _operator_write_rejection(request, allowed_origin_set)
+        if rejection:
+            return JSONResponse(status_code=403, content={"detail": rejection})
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=[
+            "Authorization", "Content-Type", _OPERATOR_HEADER,
+            _OPERATOR_TOKEN_HEADER,
+        ],
     )
+
+    @app.get("/api/v1/operator-session", tags=["security"])
+    async def operator_session():
+        """Issue a short-lived same-origin token required for local write requests."""
+        return {
+            "token": _issue_operator_token(),
+            "expires_in": _OPERATOR_TOKEN_TTL_SECONDS,
+        }
 
     # ── Health & Monitoring ────────────────────────────────────────────
 

@@ -7,6 +7,26 @@ import type {
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+let operatorTokenPromise: Promise<string> | null = null;
+
+async function fetchOperatorToken(): Promise<string> {
+  const response = await fetch(`${BASE}/operator-session`);
+  if (!response.ok) throw new Error("无法建立本机操作会话");
+  const payload = await response.json() as { token?: string };
+  if (!payload.token) throw new Error("本机操作会话无效");
+  return payload.token;
+}
+
+export async function operatorWriteHeaders(): Promise<Record<string, string>> {
+  operatorTokenPromise ??= fetchOperatorToken().catch((error) => {
+    operatorTokenPromise = null;
+    throw error;
+  });
+  return {
+    "X-Operator-Request": "RiskInfoRader",
+    "X-Operator-Token": await operatorTokenPromise,
+  };
+}
 
 async function get<T>(
   path: string,
@@ -27,9 +47,12 @@ async function get<T>(
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
+  const operatorHeaders = await operatorWriteHeaders();
   const resp = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: body
+      ? { ...operatorHeaders, "Content-Type": "application/json" }
+      : operatorHeaders,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok) {
@@ -40,9 +63,10 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
+  const operatorHeaders = await operatorWriteHeaders();
   const resp = await fetch(`${BASE}${path}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...operatorHeaders, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
@@ -53,7 +77,10 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function del(path: string): Promise<void> {
-  const resp = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  const operatorHeaders = await operatorWriteHeaders();
+  const resp = await fetch(`${BASE}${path}`, {
+    method: "DELETE", headers: operatorHeaders,
+  });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
     throw new Error((err as { detail?: string }).detail ?? resp.statusText);
@@ -85,6 +112,28 @@ export const validateSource = (id: string) =>
   post<{ source_id: string; valid: boolean; error: string | null }>(`/sources/${id}/validate`);
 export const reconcileSourceReadiness = () =>
   post<{ updated: number; configured: number }>("/sources/reconcile-readiness");
+export const healthCheckSources = (sourceId?: string) =>
+  post<{ total: number; healthy: number; degraded: number; failed: number; unreachable: number; unknown?: number }>(
+    `/sources/health-check${sourceId ? `?source_id=${sourceId}` : ""}`,
+  );
+export const fetchHealthSummary = () =>
+  get<{ total: number; healthy: number; degraded: number; failed: number; unreachable: number; unknown: number }>(
+    "/sources/health-summary",
+  );
+export const reviewSourceCompliance = (
+  id: string,
+  data: {
+    decision: "approve_full" | "approve_excerpt" | "block";
+    robots_evidence: "allowed" | "api_required" | "blocked";
+    terms_evidence: "allowed" | "public_domain" | "government_conditions" |
+      "open_government" | "us_government" | "blocked";
+    discovery_urls: string[];
+    legal_basis: string;
+    compliance_note: string;
+    reviewed_by: string;
+    confirmed: boolean;
+  },
+) => post<Source>(`/sources/${id}/compliance-review`, data);
 
 // ── Topics ──────────────────────────────────────────────────────────────
 
@@ -307,6 +356,15 @@ export const batchGenerateReports = (
     ...(collectionRunIds ? { collection_run_ids: collectionRunIds } : {}),
     ...(collectionRunIdsList ? { collection_run_ids_list: collectionRunIdsList } : {}),
   });
+export const generateWeeklyReports = (
+  topicId: string,
+  opts: { modelId?: string; weekStart?: string; allowPartial?: boolean } = {},
+) => post<import("./types").WeeklyReportGenerateResult>("/reports/weekly-generate", {
+  topic_id: topicId,
+  allow_partial: opts.allowPartial ?? false,
+  ...(opts.modelId ? { model_id: opts.modelId } : {}),
+  ...(opts.weekStart ? { week_start: opts.weekStart } : {}),
+});
 export const batchDeleteItems = (itemIds: string[]) =>
   post<{deleted: number; total: number}>("/items/batch-delete", { item_ids: itemIds });
 

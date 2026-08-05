@@ -7,12 +7,13 @@ import os
 import sys
 import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.scheduler import CollectionScheduler, _now
+from app.scheduler import CollectionScheduler, _now, _previous_complete_week_reference
 from apscheduler.triggers.cron import CronTrigger
 
 
@@ -28,6 +29,14 @@ def test_now_is_recent():
     result = _now()
     delta = datetime.now(timezone.utc) - result
     assert abs(delta.total_seconds()) < 5
+
+
+def test_missed_weekly_run_targets_previous_complete_beijing_week():
+    now = datetime(2026, 8, 4, 12, tzinfo=timezone(timedelta(hours=8)))
+
+    reference = _previous_complete_week_reference(now)
+
+    assert reference.isoformat() == "2026-08-02T23:59:59.999999+08:00"
 
 
 # ── CronTrigger validation ──────────────────────────────────────────────────
@@ -74,6 +83,43 @@ class TestSchedulerInit:
         sched = CollectionScheduler()
         with pytest.raises(Exception):
             asyncio.run(sched.shutdown())
+
+    def test_start_registers_cleanup_and_weekly_publication_jobs(self):
+        sched = CollectionScheduler()
+        sched._scheduler.start = MagicMock()
+        sched._scheduler.add_job = MagicMock()
+        sched._load_all = AsyncMock()
+        sched._publish_weekly_digests = AsyncMock()
+
+        asyncio.run(sched.start())
+
+        job_ids = [call.kwargs["id"] for call in sched._scheduler.add_job.call_args_list]
+        assert job_ids == ["cleanup-reports", "publish-weekly-digests"]
+        sched._publish_weekly_digests.assert_awaited_once()
+
+
+def test_weekly_job_publishes_each_enabled_topic(monkeypatch):
+    sched = CollectionScheduler()
+    topic = SimpleNamespace(id="topic-weekly", weekly_digest_model_id="model-1")
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = [topic]
+    publication = SimpleNamespace(
+        reports=[SimpleNamespace(id="report-1"), SimpleNamespace(id="report-2")],
+        plan=SimpleNamespace(series_id="topic-weekly-weekly-2026-W31"),
+        warnings=(),
+    )
+    publish = AsyncMock(return_value=publication)
+    monkeypatch.setattr("app.scheduler.SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        "app.weekly_report_engine.publish_weekly_digest", publish,
+    )
+
+    asyncio.run(sched._publish_weekly_digests())
+
+    publish.assert_awaited_once()
+    assert publish.await_args.args[:2] == (db, "topic-weekly")
+    assert publish.await_args.kwargs["model_id"] == "model-1"
+    db.close.assert_called_once()
 
 
 # ── Job ID management ───────────────────────────────────────────────────────

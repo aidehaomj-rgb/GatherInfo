@@ -62,15 +62,19 @@ def get_report(db: Session, report_id: str) -> Report:
 
 
 def cleanup_old_reports(db: Session, days: int = 7) -> int:
-    """Delete reports older than the given number of days and their exported files."""
+    """Delete transient reports while retaining published weekly editions."""
     from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    stale = db.query(Report).filter(Report.created_at < cutoff).all()
+    stale = db.query(Report).filter(
+        Report.created_at < cutoff,
+        Report.report_type != "weekly_digest",
+    ).all()
     deleted = 0
     for r in stale:
         try:
+            from app.report_export import is_approved_report_path
             for path in (r.output_files or {}).values():
-                if path and os.path.isfile(path):
+                if is_approved_report_path(path, require_file=True):
                     os.remove(path)
         except OSError:
             pass
@@ -87,9 +91,10 @@ def delete_report(db: Session, report_id: str) -> None:
         raise HTTPException(404, f"Report not found: {report_id}")
     # Clean up exported files
     output_files = r.output_files or {}
+    from app.report_export import is_approved_report_path
     for path in output_files.values():
         try:
-            if path and os.path.isfile(path):
+            if is_approved_report_path(path, require_file=True):
                 os.remove(path)
         except OSError:
             pass
@@ -114,7 +119,8 @@ def export_report_files(db: Session, report_id: str) -> Report:
         db.refresh(r)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(500, f"导出失败: {exc}")
+        logger.exception("Report export failed for %s", report_id)
+        raise HTTPException(500, "报告导出失败，请检查服务器输出目录与导出依赖")
     return r
 
 
@@ -141,8 +147,9 @@ def download_report_file(report_id: str, format: str, db: Session) -> tuple[str,
         except Exception as exc:
             db.rollback()
             logger.exception("Failed to restore report %s format %s", report_id, format)
-            raise HTTPException(500, f"无法重新生成 {format.upper()} 文件: {exc}")
-    if not path or not os.path.isfile(path):
+            raise HTTPException(500, f"无法重新生成 {format.upper()} 文件")
+    from app.report_export import is_approved_report_path
+    if not is_approved_report_path(path, require_file=True):
         raise HTTPException(409, f"未能生成 {format.upper()} 文件，请检查导出设置后重试")
 
     media = {

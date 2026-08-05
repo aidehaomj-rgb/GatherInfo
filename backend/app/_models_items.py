@@ -26,6 +26,25 @@ item_tags = Table(
 )
 
 
+class ItemTopicMembership(Base):
+    """Auditable many-to-many topic membership for globally deduplicated items."""
+    __tablename__ = "item_topic_memberships"
+
+    item_id = Column(
+        String(120), ForeignKey("collected_items.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    topic_id = Column(
+        String(80), ForeignKey("topics.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    first_run_id = Column(String(80), nullable=True)
+    last_run_id = Column(String(80), nullable=True)
+    relevance_score = Column(Float, nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), default=_utc_now)
+    last_seen_at = Column(DateTime(timezone=True), default=_utc_now)
+
+
 class Tag(Base):
     """Structured dimension tag with namespace:value pattern."""
     __tablename__ = "tags"

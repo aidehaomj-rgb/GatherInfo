@@ -67,8 +67,17 @@ async def update_topic(topic_id: str, data: TopicUpdate, db: Session = Depends(g
     t = db.query(Topic).filter(Topic.id == topic_id).first()
     if not t:
         raise HTTPException(404)
+    payload = _normalize_topic_payload(data.model_dump(exclude_unset=True))
+    target = int(payload.get("weekly_digest_target_items", t.weekly_digest_target_items or 80))
+    part_size = int(payload.get("weekly_digest_part_size", t.weekly_digest_part_size or 40))
+    minimum = int(payload.get("weekly_digest_min_items", t.weekly_digest_min_items or 60))
+    if target > part_size * 2 or minimum > target:
+        raise HTTPException(
+            400,
+            "周刊配置必须满足：两卷容量覆盖目标条数，且发布下限不超过目标条数",
+        )
     try:
-        for k, v in _normalize_topic_payload(data.model_dump(exclude_unset=True)).items():
+        for k, v in payload.items():
             setattr(t, k, v)
         db.commit()
         db.refresh(t)

@@ -16,13 +16,17 @@ import html as _html
 import logging
 import os
 import re
+import tempfile
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.database import DATA_DIR
 from app.models import Report, SystemConfig, Topic
 
 SUPPORTED_FORMATS = ("md", "html", "docx", "pdf")
 logger = logging.getLogger(__name__)
+DEFAULT_REPORT_ROOT = os.path.realpath(os.path.join(DATA_DIR, "reports"))
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -41,13 +45,12 @@ def export_report(
     title = _resolve_title(report, system, topic)
     safe_title = _safe_filename(title)
 
-    root = normalize_report_output_dir(
+    root = resolve_report_output_dir(
         system.report_output_dir if system and system.report_output_dir else None,
-    ) \
-        or os.path.join(DATA_DIR, "reports")
+    )
     pattern = (system.report_dir_pattern if system and system.report_dir_pattern else "%Y-%m-%d")
-    subdir = datetime.now().strftime(pattern)
-    out_dir = os.path.join(root, subdir)
+    subdir = _safe_report_subdir(pattern)
+    out_dir = os.path.join(os.path.abspath(root), subdir)
     os.makedirs(out_dir, exist_ok=True)
 
     body = report.content or ""
@@ -55,17 +58,20 @@ def export_report(
 
     for fmt in target_formats:
         path = os.path.join(out_dir, f"{safe_title}.{fmt}")
+        fd, temporary_path = tempfile.mkstemp(prefix=".report-", suffix=".tmp", dir=out_dir)
+        os.close(fd)
         try:
             if fmt == "md":
-                _write_md(path, title, body)
+                _write_md(temporary_path, title, body)
             elif fmt == "html":
-                _write_html(path, title, body)
+                _write_html(temporary_path, title, body)
             elif fmt == "docx":
-                _write_docx(path, title, body)
+                _write_docx(temporary_path, title, body)
             elif fmt == "pdf":
-                _write_pdf(path, title, body)
+                _write_pdf(temporary_path, title, body)
             else:
                 continue
+            os.replace(temporary_path, path)
             out_files[fmt] = path
         except ImportError:
             logger.warning("Report %s export skipped for %s: optional dependency unavailable", report.id, fmt)
@@ -73,6 +79,9 @@ def export_report(
         except Exception as exc:
             logger.exception("Report %s export failed for %s: %s", report.id, fmt, exc)
             continue
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
 
     report.output_files = out_files
     report.output_dir = out_dir
@@ -100,6 +109,35 @@ def normalize_report_output_dir(value: str | None) -> str | None:
     return os.path.abspath(os.path.expanduser(normalized)) if normalized else None
 
 
+def approved_report_roots() -> tuple[str, ...]:
+    configured = tuple(
+        os.path.realpath(os.path.abspath(os.path.expanduser(value.strip())))
+        for value in os.getenv("REPORT_OUTPUT_ROOTS", "").split(os.pathsep)
+        if value.strip()
+    )
+    return tuple(dict.fromkeys((DEFAULT_REPORT_ROOT, *configured)))
+
+
+def is_approved_report_path(path: str | None, *, require_file: bool = False) -> bool:
+    if not path or not os.path.isabs(path) or os.path.islink(path):
+        return False
+    resolved = Path(os.path.realpath(path))
+    allowed = any(
+        resolved == Path(root) or resolved.is_relative_to(Path(root))
+        for root in approved_report_roots()
+    )
+    return allowed and (not require_file or resolved.is_file())
+
+
+def resolve_report_output_dir(value: str | None) -> str:
+    candidate = normalize_report_output_dir(value) or DEFAULT_REPORT_ROOT
+    if not is_approved_report_path(candidate):
+        raise ValueError(
+            "报告输出目录不在服务器批准范围；请通过 REPORT_OUTPUT_ROOTS 显式批准。"
+        )
+    return candidate
+
+
 def valid_output_files(files: dict | None) -> dict[str, str]:
     """Keep only download-ready absolute paths from persisted export metadata."""
     if not isinstance(files, dict):
@@ -107,13 +145,13 @@ def valid_output_files(files: dict | None) -> dict[str, str]:
     return {
         fmt: path for fmt, path in files.items()
         if fmt in SUPPORTED_FORMATS and isinstance(path, str)
-        and os.path.isabs(path) and os.path.isfile(path)
+        and is_approved_report_path(path, require_file=True)
     }
 
 
 def _resolve_title(report: Report, system: SystemConfig | None, topic: Topic | None) -> str:
     fmt = (system.report_title_format if system and system.report_title_format else None) \
-        or "{topic}_情报报告_{date}"
+        or "{title}_{date}"
     topic_name = (topic.name if topic else None) or report.topic_id or "报告"
     date_str = datetime.now().strftime("%Y-%m-%d")
     try:
@@ -131,6 +169,17 @@ def _safe_filename(name: str) -> str:
     return cleaned or "report"
 
 
+def _safe_report_subdir(pattern: str) -> str:
+    """Preserve date nesting while preventing traversal outside the report root."""
+    rendered = datetime.now().strftime(pattern or "%Y-%m-%d")
+    parts = [
+        _safe_filename(part)
+        for part in re.split(r"[\\/]+", rendered)
+        if part.strip() not in {"", ".", ".."}
+    ]
+    return os.path.join(*parts) if parts else datetime.now().strftime("%Y-%m-%d")
+
+
 def _write_md(path: str, title: str, body: str) -> None:
     text = body if body.lstrip().startswith("#") else f"# {title}\n\n{body}"
     with open(path, "w", encoding="utf-8") as fh:
@@ -141,6 +190,7 @@ def _write_html(path: str, title: str, body: str) -> None:
     content_html = _markdown_to_html(body)
     doc = (
         "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n"
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:;\">\n"
         f"<title>{_html.escape(title)}</title>\n"
         "<style>\n"
         "body{font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;"
@@ -274,5 +324,16 @@ def _inline_html(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
     text = re.sub(r"`(.+?)`", r"<code>\1</code>", text)
-    text = re.sub(r"\[(.+?)\]\((.+?)\)", r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\[(.+?)\]\((.+?)\)", _safe_html_link, text)
     return text
+
+
+def _safe_html_link(match: re.Match[str]) -> str:
+    label, escaped_url = match.group(1), match.group(2)
+    scheme = urlsplit(_html.unescape(escaped_url)).scheme.casefold()
+    if scheme not in {"http", "https"}:
+        return label
+    return (
+        f'<a href="{escaped_url}" rel="noopener noreferrer" '
+        f'target="_blank">{label}</a>'
+    )

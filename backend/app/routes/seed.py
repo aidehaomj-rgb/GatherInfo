@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Category, ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
+from app.verified_source_catalog import install_verified_global_sources
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,12 @@ def seed_defaults(db: Session = Depends(get_db)):
     updated_sources = 0
     for cfg in _default_sources():
         existing = db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first()
-        if not existing:
-            db.add(SourceConfig(**cfg))
+        if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
+            # Bundled definitions are the only fresh rows allowed to enter the
+            # legacy compatibility lane; operator-created/imported rows fail closed.
+            db.add(SourceConfig(**{
+                **cfg, "verification_status": "legacy_unverified",
+            }))
             created_sources += 1
         elif cfg["id"] in _DEFENSE_PROCUREMENT_SOURCE_IDS:
             for field in _PUBLIC_METADATA_FIELDS:
@@ -68,6 +73,9 @@ def seed_defaults(db: Session = Depends(get_db)):
             t.description_prompt = _default_description_prompt(cfg["id"])
             db.add(t)
             created_topics += 1
+
+    catalog_result = install_verified_global_sources(db)
+    created_sources += len(catalog_result["created"])
 
     # Model configurations are private user settings. Seeding content must not
     # silently add, replace, or select an AI model.

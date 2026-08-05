@@ -6,6 +6,12 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 cd "$PROJECT_DIR"
 
+if [[ -f "$PROJECT_DIR/backend/.env" ]]; then
+  set -a
+  source "$PROJECT_DIR/backend/.env"
+  set +a
+fi
+
 # ── Pre-flight checks ────────────────────────────────────────────────────────
 if [[ ! -x backend/.venv/bin/python ]]; then
   echo "ERROR: backend/.venv is missing."

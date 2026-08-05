@@ -174,8 +174,45 @@ class TestReportService:
         finally:
             db.close()
 
+    def test_cleanup_preserves_weekly_publications(self, tmp_path):
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.database import Base
+        from app.services.report_service import cleanup_old_reports
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'cleanup.db'}")
+        Base.metadata.create_all(engine)
+        local_session = sessionmaker(bind=engine)
+        db = local_session()
+        try:
+            topic = Topic(id="cleanup-topic", name="Cleanup Topic", keywords=[])
+            db.add(topic)
+            db.commit()
+            old_at = datetime.now(timezone.utc) - timedelta(days=30)
+            normal = Report(
+                id="normal-old", topic_id=topic.id, title="旧临时报告",
+                report_type="analytical", created_at=old_at,
+            )
+            weekly = Report(
+                id="weekly-old", topic_id=topic.id, title="历史周刊",
+                report_type="weekly_digest", created_at=old_at,
+            )
+            db.add_all([normal, weekly])
+            db.commit()
+
+            deleted = cleanup_old_reports(db, days=7)
+
+            assert deleted == 1
+            assert db.get(Report, "normal-old") is None
+            assert db.get(Report, "weekly-old") is not None
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_download_rebuilds_missing_export_file(self, tmp_path, monkeypatch):
         import app.services.report_service as report_service
+        monkeypatch.setenv("REPORT_OUTPUT_ROOTS", str(tmp_path))
 
         db = SessionLocal()
         try:

@@ -7,20 +7,23 @@ Flow:
 """
 import asyncio
 import logging
+import math
 import re
 from collections import Counter
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
+from app.collection_policy import evaluate_collection_policy
 from app.content_parser import parse_fetch_item
 from app.model_defaults import get_default_model
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
-    JobStatus, ModelConfig, SourceConfig, Tag, Topic,
+    ItemTopicMembership, JobStatus, ModelConfig, SourceConfig, Tag, Topic,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,8 @@ MAX_ITEM_PROGRESS_EVENTS = 40
 MAX_CANDIDATES_PER_SOURCE = 9
 MAX_ENFORCEMENT_CANDIDATES_PER_SOURCE = 45
 MAX_ENFORCEMENT_SEARCH_RESULTS_PER_SOURCE = 120
+DEFAULT_CANDIDATES_PER_SOURCE = 9
+MAX_CANDIDATES_PER_SOURCE = 160
 SOURCE_COLLECTION_CONCURRENCY = 4
 SOURCE_EXECUTION_TIMEOUT_SECONDS = 90
 SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS = 300
@@ -159,6 +164,44 @@ class CollectionEngine:
             detail={"source_id": source.id, "source_name": source.name},
         )
 
+        policy = evaluate_collection_policy(source)
+        self._record_progress(
+            run,
+            "compliance_review",
+            policy.reason,
+            status="completed" if policy.automated_fetch_allowed else "failed",
+            detail={
+                "automated_fetch_allowed": policy.automated_fetch_allowed,
+                "llm_ingest_allowed": policy.llm_ingest_allowed,
+                "content_depth": policy.content_depth,
+            },
+        )
+        if not policy.automated_fetch_allowed:
+            run.status = JobStatus.FAILED
+            run.completed_at = utc_now()
+            run.error_log = [policy.reason]
+            self.db.commit()
+            return CollectResult(
+                run_id=run.id, source_id=source.id, status=JobStatus.FAILED,
+                items=[], error_log=[policy.reason],
+            )
+        if not policy.llm_ingest_allowed:
+            message = (
+                f"{policy.reason} 当前正式采集连接器可能读取正文，因此在联网前阻止；"
+                "该来源不得进入 LLM 或正式情报库。"
+            )
+            run.status = JobStatus.FAILED
+            run.completed_at = utc_now()
+            run.error_log = [message]
+            self._record_progress(
+                run, "compliance_blocked", message, status="failed",
+                detail={"content_depth": policy.content_depth},
+            )
+            return CollectResult(
+                run_id=run.id, source_id=source.id, status=JobStatus.FAILED,
+                items=[], error_log=[message],
+            )
+
         try:
             self._record_progress(
                 run, "connecting", f"正在连接信息源“{source.name}”",
@@ -258,6 +301,8 @@ class CollectionEngine:
         else:
             candidate_limit = MAX_CANDIDATES_PER_SOURCE
             retained_items = window_items[:candidate_limit]
+        candidate_limit = _candidate_review_limit(source)
+        retained_items = window_items[:candidate_limit]
         candidate_limited = max(0, len(window_items) - len(retained_items))
         result.items = retained_items
         result.items_failed += window_rejected + candidate_limited
@@ -283,6 +328,23 @@ class CollectionEngine:
                 f"正在并发读取 {len(result.items)} 个候选原网页，补充执法事实和来源证据",
             )
             result.items = await _hydrate_enforcement_candidates(result.items)
+        if result.items and not policy.llm_ingest_allowed:
+            message = (
+                f"{policy.reason} 候选仅作为线索返回，未发送至 LLM，"
+                "也未进入正式情报库。"
+            )
+            result.items_failed += len(result.items)
+            result.items = []
+            result.status = JobStatus.FAILED
+            result.error_log = [*(result.error_log or []), message]
+            run.status = JobStatus.FAILED
+            run.completed_at = utc_now()
+            run.error_log = [*(run.error_log or []), message]
+            self._record_progress(
+                run, "compliance_blocked", message, status="failed",
+                detail={"content_depth": policy.content_depth},
+            )
+            return result
         if model is None:
             model = get_default_model(self.db)
 
@@ -308,6 +370,13 @@ class CollectionEngine:
                 model,
                 _topic_review_context(topic, semantic_prompt) if topic else None,
             )
+        approved_items, rejected_items = await curate_article_candidates(
+            result.items,
+            model,
+            _topic_review_context(
+                topic, semantic_prompt, window_start, window_end,
+            ) if topic else None,
+        )
         result.items = approved_items
         result.items_failed += len(rejected_items)
         if rejected_items:
@@ -371,7 +440,7 @@ class CollectionEngine:
             result.items, source.id, run.id, topic_id, window_start, window_end, keywords
         )
         result.items_new = persisted_count
-        run.items_new = persisted_count
+        _sync_run_result_metrics(run, result, persisted_count)
         duplicate_count = max(0, len(result.items) - persisted_count)
         self._record_progress(
             run, "persisted",
@@ -497,6 +566,8 @@ class CollectionEngine:
         research_prompt: str | None = None,
         research_model_id: str | None = None,
         only_source_ids: list[str] | None = None,
+        collection_window_start: datetime | None = None,
+        collection_window_end: datetime | None = None,
     ) -> list[CollectResult]:
         """Collect from all sources relevant to a topic."""
         topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
@@ -509,22 +580,20 @@ class CollectionEngine:
         if only_source_ids:
             allowed = set(only_source_ids)
             sources = [source for source in sources if source.id in allowed]
+        if not sources:
+            raise ValueError(
+                "该主题没有通过来源核验、robots/条款与 LLM 使用许可的正式信息源；"
+                "请先查看 /sources/collection-readiness。"
+            )
         source_ids = [s.id for s in sources]
         keywords = _topic_collection_keywords(topic)
 
-        # Compute the publication time window from the topic configuration.
-        # window_days <= 0 disables filtering (collect everything).
         window_days = getattr(topic, "collect_window_days", None) or 0
-        window_end = utc_now()
-        if window_days > 0:
-            # Weekly reports are date-based. Start at UTC midnight for the
-            # boundary date so a valid article published early that day is not
-            # lost merely because the job ran later in the day.
-            window_start = (window_end - timedelta(days=window_days)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-        else:
-            window_start = None
+        window_start, window_end = _topic_collection_window(
+            topic,
+            requested_start=collection_window_start,
+            requested_end=collection_window_end,
+        )
 
         # Generate a shared batch_id for all runs in this topic collection
         from uuid import uuid4
@@ -549,6 +618,12 @@ class CollectionEngine:
 
         semantic_queries: list[str] = []
         effective_research_prompt = research_prompt or topic.description_prompt
+        planning_window_days = _planning_window_days(
+            window_start, window_end, fallback_days=window_days or 7,
+        )
+        planning_start_date, planning_end_date = _planning_window_dates(
+            window_start, window_end,
+        )
         if any(_channel_value(source) in SEMANTIC_SEARCH_CHANNELS for source in sources):
             try:
                 from app.research_planner import build_research_queries
@@ -557,7 +632,9 @@ class CollectionEngine:
                     effective_research_prompt or "",
                     research_model,
                     max_queries=40 if topic.id == "weekly-enforcement-intelligence" else 12,
-                    window_days=window_days or 7,
+                    window_days=planning_window_days,
+                    window_start_date=planning_start_date,
+                    window_end_date=planning_end_date,
                 )
                 if semantic_queries:
                     logger.info(
@@ -760,6 +837,11 @@ class CollectionEngine:
                 SourceConfig.is_active == True,
                 SourceConfig.is_configured == True,
             ).all()
+        selected = [
+            source for source in selected
+            if evaluate_collection_policy(source).content_depth == "full"
+            and ConnectorRegistry.get(_channel_value(source)) is not None
+        ]
         if not topic.collection_model_ids or not topic.source_ids:
             return selected
 
@@ -774,6 +856,11 @@ class CollectionEngine:
         ]
         additions = ai_research_sources or [
             source for source in broad_sources if _channel_value(source) == "api_search"
+        ]
+        additions = [
+            source for source in additions
+            if evaluate_collection_policy(source).content_depth == "full"
+            and ConnectorRegistry.get(_channel_value(source)) is not None
         ]
         return [
             *selected,
@@ -791,6 +878,15 @@ class CollectionEngine:
                        window_end: "datetime | None" = None,
                        keywords: list[str] | None = None):
         persisted_count = 0
+        self._source_cache = getattr(self, "_source_cache", {})
+        _source_obj = self._source_cache.get(source_id)
+        if _source_obj is None:
+            _source_obj = self.db.query(SourceConfig).filter(
+                SourceConfig.id == source_id
+            ).first()
+            self._source_cache[source_id] = _source_obj
+        _source_channel = getattr(_source_obj, "channel", None) if _source_obj else None
+        _curated_channel = _source_channel in ("rss", "official", "json_api")
         for fi in items:
             parsed = parse_fetch_item(fi)
             if not parsed.is_meaningful:
@@ -803,13 +899,21 @@ class CollectionEngine:
             if window_start is not None:
                 if pub is None:
                     pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
-                if pub is None or (
+                # For RSS/official sources, allow undated items (the publisher
+                # curates content topically; missing dates shouldn't discard
+                # valid trade news) and extend the window to 30 days so weekly
+                # collection captures items published slightly before the
+                # configured window.
+                if pub is None and _curated_channel:
+                    pass  # keep undated items from curated feeds
+                elif pub is None or (
                     pub is not None and _is_out_of_range(pub, window_start, window_end)
                 ):
                     continue
 
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
+            required_matches = 1 if _curated_channel else None
             allow_unfiltered = bool(
                 isinstance(fi.raw_metadata, dict)
                 and fi.raw_metadata.get("allow_unfiltered_results")
@@ -833,7 +937,8 @@ class CollectionEngine:
                 text = f"{fi.title} {fi.content or ''} {fi.summary or ''} {metadata_text}"
                 matched_kws = [kw for kw in keywords if kw and kw.lower() in text.lower()]
                 total_kw = len([kw for kw in keywords if kw])
-                required_matches = 2 if total_kw >= 3 else 1
+                if required_matches is None:
+                    required_matches = 2 if total_kw >= 3 else 1
                 if len(matched_kws) < required_matches:
                     continue
             item_id = fi.item_id(source_id)
@@ -845,19 +950,39 @@ class CollectionEngine:
                         CollectedItem.content_hash == content_hash,
                     ).first()
                 if existing:
+                    if fi.title.strip() and fi.title.strip() != existing.title:
+                        existing.title = fi.title.strip()
                     if parsed.content and parsed.content != existing.content:
                         existing.content = parsed.content
                     if parsed.summary and parsed.summary != existing.summary:
                         existing.summary = parsed.summary
+                    if fi.language and fi.language != existing.language:
+                        existing.language = fi.language
+                    if fi.category and fi.category != existing.category:
+                        existing.category = fi.category
+                    existing.quality_score = max(
+                        float(existing.quality_score or 0),
+                        float(fi.quality_score or 0),
+                    )
+                    existing.relevance_score = max(
+                        float(existing.relevance_score or 0),
+                        float(fi.relevance_score or 0),
+                    )
                     if pub and not existing.published_at:
                         existing.published_at = pub
+                    elif not existing.published_at and fi.url:
+                        _url_date = _extract_date_from_text(fi.url)
+                        if _url_date:
+                            existing.published_at = _url_date
                     if topic_id and not existing.topic_id:
                         existing.topic_id = topic_id
                     existing.entities = _merge_json(existing.entities, parsed.entities)
                     existing.raw_metadata = _merge_json(existing.raw_metadata, parsed.metadata)
                     existing.updated_at = utc_now()
                 else:
-                    self.db.add(CollectedItem(
+                    if pub is None and fi.url:
+                        pub = _extract_date_from_text(fi.url)
+                    existing = CollectedItem(
                         id=item_id, source_id=source_id, run_id=run_id,
                         topic_id=topic_id,
                         title=fi.title.strip(), content=parsed.content,
@@ -871,9 +996,14 @@ class CollectionEngine:
                         collected_at=utc_now(),
                         raw_metadata=parsed.metadata,
                         status=ItemStatus.RAW,
-                    ))
+                    )
+                    self.db.add(existing)
                     persisted_count += 1
                 self.db.flush()
+                if topic_id:
+                    self._ensure_topic_membership(
+                        existing.id, topic_id, run_id, fi.relevance_score,
+                    )
             except Exception:
                 self.db.rollback()
         self.db.commit()
@@ -970,6 +1100,34 @@ class CollectionEngine:
         source.last_sync_at = utc_now()
         source.items_collected += items_found
 
+    def _ensure_topic_membership(
+        self,
+        item_id: str,
+        topic_id: str,
+        run_id: str | None,
+        relevance_score: float | None,
+    ) -> None:
+        bounded_relevance = _bounded_relevance(relevance_score)
+        membership = self.db.query(ItemTopicMembership).filter(
+            ItemTopicMembership.item_id == item_id,
+            ItemTopicMembership.topic_id == topic_id,
+        ).first()
+        if membership:
+            membership.last_run_id = run_id or membership.last_run_id
+            if bounded_relevance is not None:
+                membership.relevance_score = bounded_relevance
+            membership.last_seen_at = utc_now()
+            return
+        self.db.add(ItemTopicMembership(
+            item_id=item_id,
+            topic_id=topic_id,
+            first_run_id=run_id,
+            last_run_id=run_id,
+            relevance_score=bounded_relevance,
+            first_seen_at=utc_now(),
+            last_seen_at=utc_now(),
+        ))
+
 
 async def _hydrate_enforcement_candidates(
     items: list[FetchItem],
@@ -1027,13 +1185,49 @@ def _hash(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
+def _bounded_relevance(value: float | None) -> float | None:
+    try:
+        return max(0.0, min(1.0, float(value))) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _sync_run_result_metrics(
+    run: CollectionRun,
+    result: CollectResult,
+    persisted_count: int,
+) -> None:
+    """Persist the final funnel counters after window and LLM review."""
+    run.items_new = persisted_count
+    run.items_failed = int(result.items_failed or 0)
+    run.error_log = list(result.error_log) if result.error_log else None
+
+
+def _candidate_review_limit(source: SourceConfig) -> int:
+    """Honor per-source budgets while keeping one bad config bounded."""
+    try:
+        configured = int(source.max_items_per_run or DEFAULT_CANDIDATES_PER_SOURCE)
+    except (TypeError, ValueError):
+        configured = DEFAULT_CANDIDATES_PER_SOURCE
+    return max(1, min(configured, MAX_CANDIDATES_PER_SOURCE))
+
+
 def _dedupe_fingerprint(url: str | None, title: str, content: str | None) -> str:
     """Return a stable cross-source identity without retaining tracking parameters."""
     if url:
-        from urllib.parse import urlsplit, urlunsplit
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
         parsed = urlsplit(url.strip())
-        normalized_url = urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", ""))
+        section_query = urlencode([
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key == "traderadar_section"
+            and re.fullmatch(r"[0-9a-f]{6,64}", value.casefold())
+        ])
+        normalized_url = urlunsplit((
+            parsed.scheme.lower(), parsed.netloc.lower(),
+            parsed.path.rstrip("/"), section_query, "",
+        ))
         if normalized_url:
             return f"url:{normalized_url}"
     normalized_text = re.sub(r"\s+", " ", f"{title} {content or ''}").strip().lower()
@@ -1164,14 +1358,86 @@ def _filter_items_by_window(
     return accepted, rejected
 
 
-def _topic_review_context(topic: Topic, semantic_prompt: str | None) -> dict:
+def _topic_collection_window(
+    topic: Topic,
+    *,
+    now: datetime | None = None,
+    requested_start: datetime | None = None,
+    requested_end: datetime | None = None,
+) -> tuple[datetime | None, datetime]:
+    """Resolve the exact ingest window, aligning weekly topics to Beijing weeks."""
+    current = _as_aware_utc(now or utc_now()) or utc_now()
+    end = _as_aware_utc(requested_end) or current
+    if requested_start is not None:
+        start = _as_aware_utc(requested_start)
+    elif bool(getattr(topic, "weekly_digest_enabled", False)):
+        beijing = ZoneInfo("Asia/Shanghai")
+        local_end = end.astimezone(beijing)
+        monday = local_end.date() - timedelta(days=local_end.weekday())
+        start = datetime.combine(
+            monday, datetime.min.time(), tzinfo=beijing,
+        ).astimezone(timezone.utc)
+    else:
+        window_days = int(getattr(topic, "collect_window_days", None) or 0)
+        start = (
+            (end - timedelta(days=window_days)).replace(
+                hour=0, minute=0, second=0, microsecond=0,
+            )
+            if window_days > 0 else None
+        )
+    if start is not None and start > end:
+        raise ValueError("collection window start must not be after end")
+    return start, end
+
+
+def _planning_window_days(
+    window_start: datetime | None,
+    window_end: datetime | None,
+    *,
+    fallback_days: int,
+) -> int:
+    start = _as_aware_utc(window_start)
+    end = _as_aware_utc(window_end)
+    if start is None or end is None or end <= start:
+        return max(1, int(fallback_days or 7))
+    return max(1, math.ceil((end - start).total_seconds() / 86_400))
+
+
+def _planning_window_dates(
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> tuple[date | None, date | None]:
+    start = _as_aware_utc(window_start)
+    end = _as_aware_utc(window_end)
+    if start is None or end is None or end <= start:
+        return None, None
+    beijing = ZoneInfo("Asia/Shanghai")
+    local_start = start.astimezone(beijing)
+    local_end = end.astimezone(beijing)
+    end_date = local_end.date()
+    if local_end.time() == datetime.min.time():
+        end_date -= timedelta(days=1)
+    return local_start.date(), end_date
+
+
+def _topic_review_context(
+    topic: Topic,
+    semantic_prompt: str | None,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+) -> dict:
     keywords = topic.keywords if isinstance(topic.keywords, list) else []
-    return {
+    context = {
         "topic_id": topic.id,
         "name": topic.name,
         "description": topic.description or "",
         "semantic_instruction": semantic_prompt or topic.description_prompt or "",
         "keywords": [str(value) for value in keywords if value],
+    }
+    return {
+        **context,
+        **({"collection_window_start": window_start.isoformat()} if window_start else {}),
+        **({"collection_window_end": window_end.isoformat()} if window_end else {}),
     }
 
 

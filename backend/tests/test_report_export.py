@@ -24,6 +24,8 @@ from app.report_export import (
     _write_html,
     _write_docx,
     _write_pdf,
+    _safe_report_subdir,
+    is_approved_report_path,
     normalize_report_output_dir,
     SUPPORTED_FORMATS,
 )
@@ -114,6 +116,16 @@ class TestOutputDirectory:
         path = normalize_report_output_dir("'/tmp/report output'")
         assert path == "/tmp/report output"
 
+    def test_report_subdir_preserves_date_nesting_without_traversal(self):
+        subdir = _safe_report_subdir("../../outside/%Y/%m")
+
+        assert ".." not in subdir
+        assert not os.path.isabs(subdir)
+        assert subdir.startswith("outside")
+
+    def test_unapproved_absolute_path_is_rejected(self):
+        assert is_approved_report_path("/tmp/outside-report.md") is False
+
 
 # ── _resolve_title ──────────────────────────────────────────────────────────
 
@@ -126,9 +138,23 @@ class TestResolveTitle:
         report.title = "Custom Title"
 
         result = _resolve_title(report, None, topic)
-        assert "关税监控" in result
-        assert "情报报告" in result
+        assert "Custom Title" in result
         assert datetime.now().strftime("%Y-%m-%d") in result
+
+    def test_default_format_keeps_weekly_parts_distinct(self):
+        topic = MagicMock(spec=Topic)
+        topic.name = "全球海关风险"
+        first = MagicMock(spec=Report)
+        first.topic_id = "t1"
+        first.title = "全球海关风险 2026-W31（上卷）"
+        second = MagicMock(spec=Report)
+        second.topic_id = "t1"
+        second.title = "全球海关风险 2026-W31（下卷）"
+
+        first_title = _resolve_title(first, None, topic)
+        second_title = _resolve_title(second, None, topic)
+
+        assert first_title != second_title
 
     def test_custom_format(self):
         system = MagicMock(spec=SystemConfig)
@@ -149,7 +175,7 @@ class TestResolveTitle:
         report.title = "Report Title"
 
         result = _resolve_title(report, None, None)
-        assert report.topic_id in result or "报告" in result
+        assert report.title in result
 
     def test_invalid_format_string_falls_back(self):
         system = MagicMock(spec=SystemConfig)
@@ -234,7 +260,14 @@ class TestInlineHtml:
 
     def test_link(self):
         result = _inline_html("[label](http://x.com)")
-        assert '<a href="http://x.com">label</a>' in result
+        assert 'href="http://x.com"' in result
+        assert 'rel="noopener noreferrer"' in result
+
+    def test_link_rejects_active_content_protocols(self):
+        result = _inline_html("[bad](javascript:alert(1)) [data](data:text/html,x)")
+        assert "javascript:" not in result
+        assert "data:text/html" not in result
+        assert "<a " not in result
 
     def test_escapes_html(self):
         result = _inline_html("<script>alert(1)</script>")

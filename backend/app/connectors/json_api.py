@@ -8,15 +8,14 @@ only configures things in ONE place (this project), per source.
 All behaviour is driven by SourceConfig fields.
 """
 import logging
-import asyncio
-from urllib.parse import urljoin
-
-import httpx
+from datetime import timezone
+from urllib.parse import urljoin, urlsplit
 
 from app.connectors.base import (
     BaseCollector, CollectResult, FetchItem,
     JobStatus, SourceConfig, register_collector,
 )
+from app.safe_fetch import fetch_public_json, public_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +31,15 @@ class JsonApiCollector(BaseCollector):
         url = self._request_url()
         if not url:
             return False
+        if self._credential_transport_error(url):
+            return False
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            async with public_async_client(timeout=10) as client:
                 params, headers, _ = self._build_request(["test"])
-                resp = await client.get(url, params=params, headers=headers)
-                return resp.status_code < 500
+                response = await fetch_public_json(
+                    client, url, params=params, headers=headers, timeout_seconds=10,
+                )
+                return bool(response and response.status_code < 500)
         except Exception:
             return False
 
@@ -49,27 +52,37 @@ class JsonApiCollector(BaseCollector):
         if ac.get("auth", "none") != "none" and not self.config.api_key:
             logger.warning("api_key not configured for JSON API source %s", self.config.id)
             return self._error("api_key not configured for this source")
+        transport_error = self._credential_transport_error(url)
+        if transport_error:
+            return self._error(transport_error)
 
         method = (ac.get("method") or "GET").upper()
-        queries = keywords or self.config.default_keywords or [""]
+        queries = self._query_terms(keywords)
         params, headers, body = self._build_request(queries)
 
         items: list[FetchItem] = []
         errors: list[str] = []
         try:
-            async with httpx.AsyncClient(
-                timeout=self.config.timeout_seconds,
-                follow_redirects=True,
-            ) as client:
-                if method == "POST":
-                    resp = await client.post(url, params=params, headers=headers, json=body)
-                else:
-                    resp = await client.get(url, params=params, headers=headers)
-                if resp.status_code == 429:
+            async with public_async_client(timeout=self.config.timeout_seconds) as client:
+                response = await fetch_public_json(
+                    client,
+                    url,
+                    method=method,
+                    params=params,
+                    headers=headers,
+                    json_body=body if method == "POST" else None,
+                    timeout_seconds=self.config.timeout_seconds,
+                    minimum_interval_seconds=max(
+                        float(getattr(self.config, "crawl_delay_seconds", 0) or 0),
+                        1.0 / float(self.config.rate_limit_rps or 1),
+                    ),
+                )
+                if response and response.status_code == 429:
                     logger.warning("JSON API rate limited for source %s", self.config.id)
                     return self._error("Rate limited (HTTP 429)")
-                resp.raise_for_status()
-                data = resp.json()
+                if response is None:
+                    return self._error("Unsafe, redirected, oversized, or non-JSON API response")
+                data = response.data
         except Exception as exc:
             logger.error("JSON API HTTP error for source %s: %s", self.config.id, exc)
             return self._error(f"HTTP/JSON error: {exc}")
@@ -143,6 +156,18 @@ class JsonApiCollector(BaseCollector):
                 else:
                     params[kp] = joined
 
+        window_format = str(ac.get("window_date_format") or "%Y-%m-%d")
+        window_start_param = ac.get("window_start_param")
+        window_end_param = ac.get("window_end_param")
+        if window_start_param and self.window_start:
+            params[str(window_start_param)] = self.window_start.astimezone(
+                timezone.utc
+            ).strftime(window_format)
+        if window_end_param and self.window_end:
+            params[str(window_end_param)] = self.window_end.astimezone(
+                timezone.utc
+            ).strftime(window_format)
+
         auth = ac.get("auth", "none")
         key = self.config.api_key or ""
         if auth == "query" and key:
@@ -153,6 +178,24 @@ class JsonApiCollector(BaseCollector):
             headers["Authorization"] = f"Bearer {key}"
 
         return params, headers, body
+
+    def _query_terms(self, topic_keywords: list[str]) -> list[str]:
+        defaults = self.config.default_keywords or []
+        if (self.config.auth_config or {}).get("prefer_default_keywords") and defaults:
+            return list(defaults)
+        return list(topic_keywords or defaults or [""])
+
+    def _credential_transport_error(self, url: str) -> str | None:
+        auth = str((self.config.auth_config or {}).get("auth", "none"))
+        if auth == "none" or not self.config.api_key:
+            return None
+        try:
+            scheme = urlsplit(url).scheme.casefold()
+        except ValueError:
+            return "API credential target URL is invalid"
+        if scheme != "https":
+            return "API credentials require an HTTPS endpoint"
+        return None
 
     def _error(self, msg: str) -> CollectResult:
         return CollectResult(

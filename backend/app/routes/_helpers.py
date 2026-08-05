@@ -4,10 +4,12 @@ import unicodedata
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.models import Category, CollectedItem, SourceConfig, Topic
+from app.models import (
+    Category, CollectedItem, ItemTopicMembership, SourceConfig, Topic,
+)
 
 
 def _now() -> datetime:
@@ -118,9 +120,19 @@ def _topic_out(db: Session, t: Topic) -> "TopicOut":
     out = TopicOut.model_validate(t)
     out.source_names = _source_names(db, t.source_ids)
     out.category_name = _category_name(db, t.category_id)
-    out.current_item_count = db.query(func.count(CollectedItem.id)).filter(
-        CollectedItem.topic_id == t.id,
-    ).scalar() or 0
+    out.current_item_count = (
+        db.query(func.count(func.distinct(CollectedItem.id)))
+        .outerjoin(
+            ItemTopicMembership,
+            ItemTopicMembership.item_id == CollectedItem.id,
+        )
+        .filter(or_(
+            CollectedItem.topic_id == t.id,
+            ItemTopicMembership.topic_id == t.id,
+        ))
+        .scalar()
+        or 0
+    )
     return out
 
 

@@ -1,18 +1,36 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { FileText, Trash2, Eye, Download, BrainCircuit, Send } from "lucide-react";
-import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, deleteReport, fetchBatches, exportReport, downloadReportFile, listAvailableModels, pushReportToHaiSee } from "../api";
+import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, generateWeeklyReports, deleteReport, fetchBatches, exportReport, downloadReportFile, listAvailableModels, pushReportToHaiSee } from "../api";
 import type { Report, Topic, ModelConfig } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
 import { YmgDeepPanel } from "./YmgDeepPanel";
 import { formatBeijingDateTime } from "../utils/date";
 
-type GenMode = "single" | "multi";
+type GenMode = "single" | "multi" | "weekly";
 type SingleSubMode = "merged" | "perBatch";
 type ReportType = "analytical" | "archive";
 
 interface BatchOption { batch_id: string; label: string; run_id: string; }
+
+function weeklySourceCoverageSummary(audit: Record<string, unknown>): string {
+  const value = audit.source_coverage;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const coverage = value as Record<string, unknown>;
+  const configured = Number(coverage.configured_source_count || 0);
+  const ready = Number(coverage.publication_ready_source_count || 0);
+  const publishers = Number(coverage.in_period_publisher_count || 0);
+  const publisherShortfall = Number(coverage.publisher_shortfall || 0);
+  const countries = Array.isArray(coverage.countries) ? coverage.countries.map(String) : [];
+  const languages = Array.isArray(coverage.languages) ? coverage.languages.map(String) : [];
+  return [
+    `正式可出版来源 ${ready}/${configured} 个`,
+    `本周独立发布方 ${publishers} 个${publisherShortfall ? `（还缺 ${publisherShortfall} 个）` : ""}`,
+    countries.length ? `国家/地区 ${countries.join("、")}` : "",
+    languages.length ? `语言 ${languages.join("、")}` : "",
+  ].filter(Boolean).join("；");
+}
 
 export function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
@@ -38,6 +56,11 @@ export function ReportsPage() {
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
   const [singleSubMode, setSingleSubMode] = useState<SingleSubMode>("merged");
+  const [weeklyDate, setWeeklyDate] = useState(() => {
+    const value = new Date();
+    value.setDate(value.getDate() - 7);
+    return value.toISOString().slice(0, 10);
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -137,6 +160,27 @@ export function ReportsPage() {
     setGenerating(false);
   };
 
+  const handleWeeklyGenerate = async () => {
+    if (!selectedTopic) { setGenMsg("请先选择一个主题"); return; }
+    setGenerating(true);
+    setGenMsg(null);
+    try {
+      const { modelId } = parseModel(selectedModel);
+      const result = await generateWeeklyReports(selectedTopic, {
+        modelId,
+        weekStart: weeklyDate,
+      });
+      const sourceCoverage = weeklySourceCoverageSummary(result.selection_audit);
+      setGenMsg(result.documents.length > 0
+        ? `${result.period_key} 双卷周刊已生成：${result.documents.map((doc) => `${doc.part_index ?? "?"}/${doc.part_total ?? 2}卷 ${doc.item_count}条`).join("，")}${result.reused ? "（已复用现有文档）" : ""}`
+        : `${result.period_key} 暂未发布：${result.warnings.join("；")}${sourceCoverage ? `；${sourceCoverage}` : ""}`);
+      await load();
+    } catch (e) {
+      setGenMsg(`周刊生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    }
+    setGenerating(false);
+  };
+
   const handleDelete = (id: string) => setDeleteTarget({ id, message: "删除此报告？" });
 
   const executeDelete = async () => {
@@ -212,10 +256,13 @@ export function ReportsPage() {
         <button type="button" className={`seg-btn${genMode === "multi" ? " seg-btn--active" : ""}`} onClick={() => setGenMode("multi")}>
           多主题批量
         </button>
+        <button type="button" className={`seg-btn${genMode === "weekly" ? " seg-btn--active" : ""}`} onClick={() => setGenMode("weekly")}>
+          每周双卷合集
+        </button>
       </div>
 
       <div className="gen-controls" style={{ background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 20, marginBottom: 16 }}>
-        <div style={{ marginBottom: 16 }}>
+        {genMode !== "weekly" && <div style={{ marginBottom: 16 }}>
           <span className="gen-label">报告类型</span>
           <div className="segmented-control" style={{ marginTop: 6 }}>
             <button type="button" className={`seg-btn${reportType === "analytical" ? " seg-btn--active" : ""}`} onClick={() => setReportType("analytical")}>
@@ -230,7 +277,7 @@ export function ReportsPage() {
               ? "综合多条证据形成关键发现、趋势研判与行动建议。"
               : "按类别保留每条信息的独立标题、完整正文和原文链接，可批量送至 HaiSee。"}
           </p>
-        </div>
+        </div>}
         {genMode === "single" ? (
           <SingleTopicPanel
             topics={topics}
@@ -251,7 +298,7 @@ export function ReportsPage() {
             onGenerate={handleSingleGenerate}
             reportType={reportType}
           />
-        ) : (
+        ) : genMode === "multi" ? (
           <ReportBatchPanel
             topics={topics}
             models={models}
@@ -263,6 +310,36 @@ export function ReportsPage() {
             onGenMsg={setGenMsg}
             reportType={reportType}
           />
+        ) : (
+          <div>
+            <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 }}>按北京时间自然周编排</h3>
+            <div className="gen-controls-row">
+              <div className="gen-field">
+                <label className="gen-label" htmlFor="weekly-topic">选择主题</label>
+                <select id="weekly-topic" value={selectedTopic} onChange={(event) => setSelectedTopic(event.target.value)}>
+                  <option value="">-- 请选择 --</option>
+                  {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+                </select>
+              </div>
+              <div className="gen-field">
+                <label className="gen-label" htmlFor="weekly-date">所属周任意日期</label>
+                <input id="weekly-date" type="date" value={weeklyDate} onChange={(event) => setWeeklyDate(event.target.value)} />
+              </div>
+              <div className="gen-field">
+                <label className="gen-label" htmlFor="weekly-model">中文整理模型</label>
+                <select id="weekly-model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+                  <option value="">{defaultModel?.name ? `默认: ${defaultModel.name}` : "-- 默认模型 --"}</option>
+                  {activeModels.map((model) => <option key={model.id} value={model.id}>{model.name} · {model.model_name}</option>)}
+                </select>
+              </div>
+            </div>
+            <p className="text-muted small" style={{ marginTop: 8 }}>
+              系统按质量、相关性、时效、来源、国家与分类多样性选择最多 80 条，稳定拆成两卷；不足 60 条时只报告缺口，不会凑数发布。
+            </p>
+            <button type="button" className="btn btn-primary" onClick={() => void handleWeeklyGenerate()} disabled={generating || !selectedTopic} style={{ marginTop: 12 }}>
+              <FileText size={14} /> {generating ? "编排中…" : "生成两卷周刊"}
+            </button>
+          </div>
         )}
 
         {models.length === 0 && (
@@ -294,7 +371,7 @@ export function ReportsPage() {
                   {r.model_id && ` · 模型: ${models.find((m) => m.id === r.model_id)?.name || r.model_id}`}
                 </span>
                 <span className="badge badge--gray" style={{ marginLeft: 8 }}>
-                  {r.report_type === "archive" ? "逐条归档" : "总结研判"}
+                  {r.report_type === "weekly_digest" ? `周刊 ${r.part_index ?? "?"}/${r.part_total ?? 2}` : r.report_type === "archive" ? "逐条归档" : "总结研判"}
                 </span>
               </div>
               <div className="card-item-actions">
@@ -328,7 +405,7 @@ export function ReportsPage() {
               <button type="button" className="btn btn-sm btn-primary" onClick={() => setViewing(r)} disabled={r.status !== "completed"}>
                 <Eye size={12} /> 查看报告
               </button>
-              {r.status === "completed" && r.report_type === "archive" && (
+              {r.status === "completed" && (r.report_type === "archive" || r.report_type === "weekly_digest") && (
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => handleSendReport(r)} disabled={sendingReportId === r.id}>
                   <Send size={12} /> {sendingReportId === r.id ? "发送中…" : "批量送至 HaiSee"}
                 </button>

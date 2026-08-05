@@ -25,6 +25,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_import_datetime(value):
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def _get_system_config(db: Session) -> SystemConfig:
     cfg = db.query(SystemConfig).filter(SystemConfig.id == "global").first()
     if not cfg:
@@ -104,7 +114,17 @@ def export_config(db: Session = Depends(get_db)):
     sources = [
         {"id": s.id, "name": s.name, "channel": s.channel, "is_active": s.is_active,
          "base_url": s.base_url, "api_endpoint": s.api_endpoint,
-         "default_keywords": s.default_keywords, "languages": s.languages}
+         "default_keywords": s.default_keywords, "languages": s.languages,
+         "country_focus": s.country_focus,
+         "verification_status": s.verification_status,
+         "discovery_urls": s.discovery_urls,
+         "robots_status": s.robots_status,
+         "terms_status": s.terms_status,
+         "llm_ingest_allowed": s.llm_ingest_allowed,
+         "origin_resolution_required": s.origin_resolution_required,
+         "crawl_delay_seconds": s.crawl_delay_seconds,
+         "verified_at": s.verified_at.isoformat() if s.verified_at else None,
+         "compliance_note": s.compliance_note}
         for s in db.query(SourceConfig).all()
     ]
     topics_data = []
@@ -116,7 +136,13 @@ def export_config(db: Session = Depends(get_db)):
               "ai_research_model_id": t.ai_research_model_id,
               "target_urls": t.target_urls, "auto_tag_rules": t.auto_tag_rules,
               "schedule_cron": t.schedule_cron, "is_scheduled": t.is_scheduled,
-              "is_active": t.is_active}
+              "is_active": t.is_active,
+              "collect_window_days": t.collect_window_days,
+              "weekly_digest_enabled": t.weekly_digest_enabled,
+              "weekly_digest_model_id": t.weekly_digest_model_id,
+              "weekly_digest_target_items": t.weekly_digest_target_items,
+              "weekly_digest_part_size": t.weekly_digest_part_size,
+              "weekly_digest_min_items": t.weekly_digest_min_items}
         topics_data.append(td)
     models_data = [
         {"id": m.id, "name": m.name, "provider": m.provider, "base_url": m.base_url,
@@ -132,6 +158,7 @@ def export_config(db: Session = Depends(get_db)):
     ]
     schedules_data = [
         {"id": s.id, "name": s.name, "cron_expression": s.cron_expression,
+         "timezone": s.timezone,
          "source_ids": s.source_ids, "topic_ids": s.topic_ids, "is_active": s.is_active}
         for s in db.query(ScheduleConfig).all()
     ]
@@ -157,6 +184,17 @@ def import_config(data: dict, db: Session = Depends(get_db)):
     mode = data.get("mode", "skip")
 
     for item in data.get("sources", []):
+        item = {
+            **item,
+            "api_key_ref": None,
+            "verification_status": "unverified",
+            "discovery_urls": None,
+            "robots_status": "unverified",
+            "terms_status": "unverified",
+            "llm_ingest_allowed": False,
+            "origin_resolution_required": True,
+            "verified_at": None,
+        }
         existing = db.query(SourceConfig).filter(SourceConfig.id == item["id"]).first()
         if existing:
             if mode == "skip":
