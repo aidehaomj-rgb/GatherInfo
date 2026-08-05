@@ -39,6 +39,7 @@ export interface Topic {
   focus_languages: string[] | null;
   source_ids: string[] | null;
   collection_model_ids: string[] | null;
+  prompt_template_ids: string[] | null;
   target_urls: string[] | null;
   auto_tag_rules: AutoTagRule[] | null;
   collect_window_days: number;
@@ -336,6 +337,17 @@ export interface DiscoveredProvider {
 
 export interface AutoDiscoverResult {
   providers: DiscoveredProvider[];
+}
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  is_active: boolean;
+  topic_count: number;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface SupplyChainDashboard {

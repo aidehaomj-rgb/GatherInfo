@@ -60,6 +60,25 @@ def _topic_collection_keywords(topic: Topic) -> list[str]:
     return keywords
 
 
+def _topic_collection_prompt(db: Session, topic: Topic, override: str | None = None) -> str:
+    """Combine the run override, topic instruction, and enabled reusable prompts."""
+    from app.models import PromptTemplate
+
+    sections = [value.strip() for value in [override, topic.description_prompt] if value and value.strip()]
+    prompt_ids = topic.prompt_template_ids if isinstance(topic.prompt_template_ids, list) else []
+    if prompt_ids:
+        templates = db.query(PromptTemplate).filter(
+            PromptTemplate.id.in_(prompt_ids), PromptTemplate.is_active == True,
+        ).all()
+        by_id = {template.id: template for template in templates}
+        sections.extend(
+            f"【挂载提示词：{by_id[prompt_id].name}】\n{by_id[prompt_id].content.strip()}"
+            for prompt_id in prompt_ids
+            if prompt_id in by_id and by_id[prompt_id].content.strip()
+        )
+    return "\n\n".join(dict.fromkeys(sections))
+
+
 async def _translate_persisted_items(item_ids: list[str], model_id: str | None) -> dict:
     """Translate persisted items before collection results are exposed to the UI."""
     from app.database import SessionLocal
@@ -548,7 +567,7 @@ class CollectionEngine:
             ).first() or research_model
 
         semantic_queries: list[str] = []
-        effective_research_prompt = research_prompt or topic.description_prompt
+        effective_research_prompt = _topic_collection_prompt(self.db, topic, research_prompt)
         if any(_channel_value(source) in SEMANTIC_SEARCH_CHANNELS for source in sources):
             try:
                 from app.research_planner import build_research_queries

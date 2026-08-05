@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Topic, ModelConfig, Source } from "../types";
+import type { Topic, ModelConfig, Source, PromptTemplate } from "../types";
 import {
   DESCRIPTION_PROMPT_TEMPLATES,
   KEYWORD_WEIGHT_TEMPLATES,
@@ -39,6 +39,7 @@ type TopicFormProps = {
   sources: Source[];
   models: ModelConfig[];
   categories: { id: string; name: string }[];
+  promptTemplates: PromptTemplate[];
   onSave: (data: Partial<Topic>) => Promise<void>;
   onClose: () => void;
 };
@@ -48,6 +49,7 @@ export function TopicForm({
   sources,
   models,
   categories,
+  promptTemplates,
   onSave,
   onClose,
 }: TopicFormProps) {
@@ -75,6 +77,9 @@ export function TopicForm({
   );
   const [selectedCollectionModelIds, setSelectedCollectionModelIds] = useState<string[]>(
     topic?.collection_model_ids ?? [],
+  );
+  const [selectedPromptTemplateIds, setSelectedPromptTemplateIds] = useState<string[]>(
+    topic?.prompt_template_ids ?? [],
   );
   const [targetUrls, setTargetUrls] = useState(
     (topic?.target_urls ?? []).join("\n"),
@@ -117,6 +122,7 @@ export function TopicForm({
         ai_research_model_id: aiResearchModelId || null,
         source_ids: selectedSourceIds.length ? selectedSourceIds : null,
         collection_model_ids: selectedCollectionModelIds.length ? selectedCollectionModelIds : null,
+        prompt_template_ids: selectedPromptTemplateIds.length ? selectedPromptTemplateIds : [],
         collect_window_days: Number.isFinite(collectWindowDays)
           ? collectWindowDays
           : 7,
@@ -363,6 +369,25 @@ export function TopicForm({
               主题关联“AI 提示采集”信息源时，手动与定时采集都会使用这份提示词生成检索式。
             </span>
           </label>
+          <fieldset className="span-2 prompt-template-picker">
+            <legend>挂载提示词</legend>
+            <span className="text-muted small">采集时会与本主题的 AI 采集提示词合并使用。</span>
+            <div className="prompt-template-picker__list">
+              {promptTemplates.filter((prompt) => prompt.is_active || selectedPromptTemplateIds.includes(prompt.id)).map((prompt) => (
+                <label key={prompt.id} className="prompt-template-picker__item">
+                  <input
+                    type="checkbox"
+                    checked={selectedPromptTemplateIds.includes(prompt.id)}
+                    onChange={(event) => setSelectedPromptTemplateIds((current) => event.target.checked
+                      ? [...current, prompt.id]
+                      : current.filter((id) => id !== prompt.id))}
+                  />
+                  <span><strong>{prompt.name}</strong>{prompt.description && <small>{prompt.description}</small>}</span>
+                </label>
+              ))}
+              {promptTemplates.length === 0 && <span className="text-muted small">暂无提示词，请先到“提示词库”创建。</span>}
+            </div>
+          </fieldset>
           <label>
             AI 采集模型
             <select value={aiResearchModelId} onChange={(event) => setAiResearchModelId(event.target.value)}>

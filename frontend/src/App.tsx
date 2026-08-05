@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard, Network,
+  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard, Network, FileCode2,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -27,6 +27,7 @@ const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m =
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 const SupplyChainPage = lazy(() => import("./components/SupplyChainPage").then(m => ({ default: m.SupplyChainPage })));
+const PromptTemplatesPage = lazy(() => import("./components/PromptTemplatesPage").then(m => ({ default: m.PromptTemplatesPage })));
 
 function PageLoader() {
   return (
@@ -39,7 +40,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "home" | "dashboard" | "categories" | "topics" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -52,6 +53,7 @@ const views: ViewDef[] = [
   { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
   { id: "categories", label: "采集类别", icon: FolderTree },
   { id: "topics", label: "主题管理", icon: BarChart3 },
+  { id: "prompts", label: "提示词库", icon: FileCode2 },
   { id: "sources", label: "信息源", icon: Globe },
   { id: "items", label: "采集条目", icon: Database },
   { id: "tags", label: "标签系统", icon: Tags },
@@ -246,6 +248,7 @@ function AppInner() {
               {view === "dashboard" && <DashboardPage />}
               {view === "categories" && <CategoriesPage />}
               {view === "topics" && <TopicsPage />}
+              {view === "prompts" && <PromptTemplatesPage />}
               {view === "sources" && <SourcesPage />}
               {view === "items" && <ItemsPage />}
               {view === "tags" && <TagsPage />}

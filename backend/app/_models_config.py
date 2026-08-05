@@ -36,6 +36,7 @@ class Topic(Base):
     auto_tag_rules = Column(JSON, nullable=True)
     source_ids = Column(JSON, nullable=True)
     collection_model_ids = Column(JSON, nullable=True)
+    prompt_template_ids = Column(JSON, nullable=True)
 
     schedule_cron = Column(String(100), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
@@ -60,6 +61,22 @@ class Topic(Base):
 
     def __repr__(self):
         return f"<Topic id={self.id} name={self.name}>"
+
+
+class PromptTemplate(Base):
+    """Reusable collection instruction that can be attached to topics."""
+    __tablename__ = "prompt_templates"
+
+    id = Column(String(80), primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    content = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    def __repr__(self):
+        return f"<PromptTemplate id={self.id} name={self.name}>"
 
 
 class ScheduleConfig(Base):

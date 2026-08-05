@@ -62,6 +62,8 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE topics ADD COLUMN next_run_at TIMESTAMP"))
             if "collection_model_ids" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN collection_model_ids JSON"))
+            if "prompt_template_ids" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN prompt_template_ids JSON"))
             conn.commit()
 
     # Add window columns to `collection_runs` table if it exists

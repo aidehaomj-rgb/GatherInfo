@@ -39,6 +39,7 @@ from app.routes.ymg_deep import router as ymg_router
 from app.routes.haisee import router as haisee_router
 from app.routes.material_sets import router as material_sets_router
 from app.routes.supply_chain import router as supply_chain_router
+from app.routes.prompt_templates import router as prompt_templates_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,10 @@ async def lifespan(app: FastAPI):
     global scheduler_instance
 
     init_db()
+    from app.database import SessionLocal
+    from app.prompt_seed import ensure_builtin_prompt_templates
+    with SessionLocal() as seed_db:
+        ensure_builtin_prompt_templates(seed_db)
     
     try:
         from app.scheduler import CollectionScheduler
@@ -284,6 +289,7 @@ def create_app() -> FastAPI:
     app.include_router(haisee_router)
     app.include_router(material_sets_router)
     app.include_router(supply_chain_router)
+    app.include_router(prompt_templates_router)
 
     return app
 

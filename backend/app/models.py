@@ -25,6 +25,7 @@ from app._models_items import (
 )
 from app._models_config import (
     Topic,
+    PromptTemplate,
     ScheduleConfig,
     ModelConfig,
     Report,
@@ -53,6 +54,7 @@ __all__ = [
     "CollectionRun",
     "CollectedItem",
     "Topic",
+    "PromptTemplate",
     "ScheduleConfig",
     "ModelConfig",
     "Report",
