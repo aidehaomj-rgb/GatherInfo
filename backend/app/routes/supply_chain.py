@@ -183,13 +183,182 @@ def _attach(db: Session, investigation_id: str | None, field: str, value: str) -
         row.updated_at = _now()
 
 
+def _dump_investigation(row: SupplyChainInvestigation, db: Session) -> dict:
+    data = _dump(row, INVESTIGATION_FIELDS)
+    entities = (
+        db.query(SupplyChainEntity)
+        .filter(SupplyChainEntity.id.in_(row.entity_ids or []))
+        .all()
+        if row.entity_ids else []
+    )
+    cases = (
+        db.query(SupplyChainCase)
+        .filter(SupplyChainCase.id.in_(row.case_ids or []))
+        .all()
+        if row.case_ids else []
+    )
+    shipments = (
+        db.query(SupplyChainShipment)
+        .filter(SupplyChainShipment.id.in_(row.shipment_ids or []))
+        .all()
+        if row.shipment_ids else []
+    )
+    linked_evidence = (
+        db.query(SupplyChainEvidence)
+        .filter(SupplyChainEvidence.id.in_(row.evidence_ids or []))
+        .all()
+        if row.evidence_ids else []
+    )
+    open_evidence = (
+        db.query(SupplyChainOpenSourceEvidence)
+        .filter(SupplyChainOpenSourceEvidence.id.in_(row.open_source_evidence_ids or []))
+        .all()
+        if row.open_source_evidence_ids else []
+    )
+    reports = (
+        db.query(SupplyChainReport)
+        .filter(SupplyChainReport.id.in_(row.report_ids or []))
+        .all()
+        if row.report_ids else []
+    )
+
+    gaps: list[str] = []
+    anonymous_markers = ("undisclosed", "anonymous", "unknown", "待识别", "未披露", "匿名", "候选")
+    unresolved_entities = [
+        item for item in entities
+        if any(marker in f"{item.name} {item.name_zh or ''} {item.entity_type}".casefold()
+               for marker in anonymous_markers)
+    ]
+    entity_score = (14 if unresolved_entities else 15) if entities else 0
+    if not entities:
+        gaps.append("尚未识别供应链主体")
+    elif unresolved_entities:
+        gaps.append(f"仍有{len(unresolved_entities)}个匿名、待识别或候选主体")
+
+    generic_refs = {"", "公开源供应链调查", "待补充", "公告编号待补充"}
+    specific_cases = [
+        item for item in cases
+        if (item.procurement_reference or "").strip() not in generic_refs
+        and item.procurement_date and item.source_url
+    ]
+    case_score = (15 if len(specific_cases) == len(cases) else 14) if cases else 0
+    if not cases:
+        gaps.append("尚未录入军方采购或合作项目")
+    elif len(specific_cases) < len(cases):
+        gaps.append(f"有{len(cases) - len(specific_cases)}个项目缺少具体合同编号、日期或原始公告")
+
+    def shipment_quality(item: SupplyChainShipment) -> float:
+        checks = [
+            item.shipment_date, item.exporter_name, item.importer_name, item.product,
+            item.source_url, item.bill_no or item.raw_record,
+        ]
+        return sum(bool(value) for value in checks) / len(checks)
+
+    shipment_ratio = (
+        sum(shipment_quality(item) for item in shipments) / len(shipments)
+        if shipments else 0
+    )
+    shipment_score = (25 if shipment_ratio == 1 else 24) if shipments else 0
+    if not shipments:
+        gaps.append("尚无可核验的批次级跨境贸易记录")
+    elif shipment_score < 25:
+        gaps.append("部分贸易记录缺少日期、提单号或原始数据链接")
+
+    grade_weights = {"A": 1.0, "B": 0.72, "C": 0.42, "D": 0.2}
+    evidence_values: list[float] = []
+    limited_count = 0
+    for item in open_evidence:
+        value = grade_weights.get((item.evidence_grade or "").upper(), 0.2)
+        if item.status != "verified":
+            value *= 0.65
+        if item.limitations:
+            value *= 0.82
+            limited_count += 1
+        evidence_values.append(value)
+    for item in linked_evidence:
+        value = min(max((item.score or 0) / 100, 0), 1)
+        if not item.is_reportable:
+            value *= 0.65
+        if item.status not in {"verified", "completed"}:
+            value *= 0.75
+        evidence_values.append(value)
+    weak_count = sum(
+        1 for item in open_evidence
+        if (item.evidence_grade or "").upper() not in {"A"} or item.status != "verified"
+    )
+    all_evidence_strong = bool(evidence_values) and not limited_count and not weak_count and all(
+        item.is_reportable and item.status in {"verified", "completed"}
+        for item in linked_evidence
+    )
+    evidence_score = (30 if all_evidence_strong else 28) if evidence_values else 0
+    if not evidence_values:
+        gaps.append("尚未形成可核验的证据材料")
+    if limited_count:
+        gaps.append(f"有{limited_count}项证据明确标注适用边界或待核实事项")
+    if weak_count:
+        gaps.append(f"有{weak_count}项公开源证据未达到A级已核验标准")
+
+    end_use_entities = {
+        "military_end_user", "government_end_user", "government_agency"
+    }
+    has_end_user = any(item.entity_type in end_use_entities for item in entities)
+    has_target_program = any(
+        item.target_program and "待" not in item.target_program for item in cases
+    )
+    end_use_score = 10 if has_end_user and has_target_program else 8 if has_target_program else 0
+    if not has_end_user:
+        gaps.append("最终用户尚未作为独立主体核实")
+    if not has_target_program:
+        gaps.append("最终装备或应用项目尚未核实")
+
+    completed_reports = [
+        item for item in reports
+        if item.status == "completed" and item.content and item.summary
+    ]
+    report_score = 5 if completed_reports else 0
+    if not completed_reports:
+        gaps.append("尚无基于现有证据完成的分析报告")
+
+    components = {
+        "主体实名": entity_score,
+        "采购合同": case_score,
+        "贸易记录": shipment_score,
+        "证据质量": evidence_score,
+        "最终用途": end_use_score,
+        "分析报告": report_score,
+    }
+    maximums = {
+        "主体实名": 15,
+        "采购合同": 15,
+        "贸易记录": 25,
+        "证据质量": 30,
+        "最终用途": 10,
+        "分析报告": 5,
+    }
+    score = sum(components.values())
+    if not shipments:
+        score = min(score, 70)
+    data["completeness_score"] = score
+    data["completeness_level"] = (
+        "证据闭合" if score >= 99 and not gaps
+        else "较高可信" if score >= 95
+        else "部分核实" if score >= 90
+        else "初步核实" if score >= 70
+        else "初步成链" if score >= 40 else "线索阶段"
+    )
+    data["completeness_details"] = components
+    data["completeness_maximums"] = maximums
+    data["verification_gaps"] = gaps
+    return data
+
+
 @router.get("/investigations")
 def list_investigations(country: str = "United States", db: Session = Depends(get_db)):
     _ensure_default_investigation(db)
     rows = db.query(SupplyChainInvestigation).filter(
         SupplyChainInvestigation.country == country
     ).order_by(SupplyChainInvestigation.created_at.asc()).all()
-    return [_dump(row, INVESTIGATION_FIELDS) for row in rows]
+    return [_dump_investigation(row, db) for row in rows]
 
 
 @router.post("/investigations")
@@ -205,7 +374,7 @@ def create_investigation(data: InvestigationInput, db: Session = Depends(get_db)
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _dump(row, INVESTIGATION_FIELDS)
+    return _dump_investigation(row, db)
 
 
 class EntityInput(BaseModel):

@@ -3660,28 +3660,138 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 700;
   white-space: nowrap;
 }
-.supply-chain-projects {
-  gap: 7px;
+.supply-chain-project-selector {
+  position: relative;
+  min-width: 0;
+  max-width: 720px;
 }
-.supply-chain-projects button {
-  min-height: 34px;
-  border: 1px solid transparent;
+.supply-chain-project-trigger {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #304158;
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: #182437;
+  color: #e6edf6;
+  text-align: left;
+}
+.supply-chain-project-trigger:hover {
+  border-color: #3b8f80;
+  background: #1b2a3e;
+}
+.supply-chain-project-trigger > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.supply-chain-project-trigger strong {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.supply-chain-project-trigger small,
+.supply-chain-project-picker header small {
+  color: #8291a5;
+}
+.supply-chain-project-picker {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(760px, calc(100vw - 330px));
+  border: 1px solid #33465e;
+  border-radius: 8px;
+  padding: 14px;
+  background: #111b2a;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .45);
+}
+.supply-chain-project-picker header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.supply-chain-project-picker header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.supply-chain-project-picker header button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: 5px;
-  padding: 6px 12px;
-  background: #1a2637;
-  color: #8fa0b5;
-  font-size: .78rem;
-  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  color: #91a0b4;
 }
-.supply-chain-projects button:hover {
-  border-color: #40526a;
-  color: #e2e8f0;
+.supply-chain-project-search {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #2f4056;
+  border-radius: 6px;
+  padding: 0 11px;
+  background: #0e1724;
+  color: #788a9f;
 }
-.supply-chain-projects button.active {
-  border-color: #258f7d;
-  background: #18352f;
-  color: #8df0df;
+.supply-chain-project-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e6edf6;
+}
+.supply-chain-project-grid {
+  max-height: min(54vh, 520px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+.supply-chain-project-grid button {
+  min-width: 0;
+  min-height: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border: 1px solid #28394f;
+  border-radius: 6px;
+  padding: 11px 12px;
+  background: #172235;
+  color: #dce5ef;
+  text-align: left;
+  white-space: normal;
+}
+.supply-chain-project-grid button strong {
+  width: 100%;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.supply-chain-project-grid button:hover {
+  border-color: #3b665f;
+  background: #1a2a3d;
+}
+.supply-chain-project-grid button.active {
+  border-color: #2b9d89;
+  background: #17342f;
   box-shadow: inset 3px 0 0 #2dd4bf;
+}
+.supply-chain-project-grid > p {
+  grid-column: 1 / -1;
+  margin: 20px 0;
+  color: #8291a5;
+  text-align: center;
 }
 .supply-chain-project-bar > .btn {
   min-height: 34px;
@@ -3820,6 +3930,88 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .supply-chain-finding-lead strong {
   color: #5eead4;
+}
+.supply-chain-completeness {
+  padding: 14px 19px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fbfa;
+}
+.supply-chain-completeness > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 9px;
+  font-size: .82rem;
+}
+.supply-chain-completeness > div:first-child span { color: #176b5b; font-weight: 700; }
+.supply-chain-completeness-track {
+  height: 7px;
+  overflow: hidden;
+  background: #dfe9e6;
+}
+.supply-chain-completeness-track span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #2a8c78, #56b69d);
+  transition: width .45s ease;
+}
+.supply-chain-completeness-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.supply-chain-completeness-parts span {
+  padding: 3px 7px;
+  border: 1px solid #d9e2df;
+  color: #89948f;
+  font-size: .68rem;
+}
+.supply-chain-completeness-parts span.complete {
+  border-color: #9dcec1;
+  background: #eaf6f2;
+  color: #176b5b;
+}
+.supply-chain-completeness-parts span.partial {
+  border-color: #d8bd82;
+  background: #fff8e8;
+  color: #8a641a;
+}
+.supply-chain-verification-gaps {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid #d9e2df;
+}
+.supply-chain-verification-gaps strong {
+  color: #8a641a;
+  font-size: .72rem;
+}
+.supply-chain-verification-gaps ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.supply-chain-verification-gaps li {
+  position: relative;
+  padding-left: 10px;
+  color: #687772;
+  font-size: .68rem;
+}
+.supply-chain-verification-gaps li::before {
+  position: absolute;
+  top: .48em;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #d09a32;
+  content: "";
 }
 .supply-chain-finding-grid {
   gap: 1px;
@@ -4035,6 +4227,9 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
   .supply-chain-project-label {
     grid-column: 1 / -1;
   }
+  .supply-chain-project-picker {
+    width: min(680px, calc(100vw - 32px));
+  }
   .supply-chain-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4045,6 +4240,12 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
   }
   .supply-chain-project-bar {
     grid-template-columns: 1fr;
+  }
+  .supply-chain-project-grid {
+    grid-template-columns: 1fr;
+  }
+  .supply-chain-project-picker {
+    width: calc(100vw - 32px);
   }
 }
 
@@ -4351,10 +4552,521 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
   top: 40%;
   left: 38%;
   width: 25%;
+  min-height: 164px;
   transform: translateY(-50%);
 }
 .chain-network-node--center:hover {
   transform: translateY(calc(-50% - 4px)) scale(1.015);
+}
+
+/* Linear chain for the Sulzer India -> CSBC -> CPC petrochemical project. */
+.dynamic-chain-map {
+  min-height: 520px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 38px 18px;
+  background-color: #0b1320;
+  background-image: linear-gradient(rgba(67, 91, 123, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 91, 123, .08) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.dynamic-chain-stage {
+  min-width: 188px;
+  flex: 1 1 220px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px;
+}
+.dynamic-chain-stage > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0 4px 9px;
+  border-bottom: 1px solid rgba(92, 113, 141, .28);
+  color: #8ea0b5;
+}
+.dynamic-chain-stage > header div,
+.dynamic-chain-stage > header strong,
+.dynamic-chain-stage > header small {
+  display: block;
+}
+.dynamic-chain-stage > header small {
+  margin-top: 2px;
+  color: #73849a;
+  font-size: .65rem;
+}
+.dynamic-chain-stage--upstream > header {
+  color: #fb7185;
+}
+.dynamic-chain-stage--integrator > header {
+  color: #2dd4bf;
+}
+.dynamic-chain-stage--downstream > header {
+  color: #f59e0b;
+}
+.dynamic-chain-stage--application > header {
+  color: #4ade80;
+}
+.dynamic-chain-stage-list {
+  display: grid;
+  gap: 9px;
+}
+.dynamic-chain-node {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #344860;
+  border-left: 3px solid currentColor;
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(23, 35, 55, .94);
+  color: inherit;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .18);
+  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.dynamic-chain-node:hover {
+  transform: translateY(-3px);
+  border-color: currentColor;
+  background: #1a2a3f;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, .3);
+}
+.dynamic-chain-node > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.dynamic-chain-node > div {
+  min-width: 0;
+}
+.dynamic-chain-node span,
+.dynamic-chain-node strong,
+.dynamic-chain-node small {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.dynamic-chain-node span {
+  margin-bottom: 4px;
+  color: currentColor;
+  font-size: .6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.dynamic-chain-node strong {
+  color: #edf4fc;
+  font-size: .75rem;
+  line-height: 1.4;
+}
+.dynamic-chain-node small {
+  margin-top: 5px;
+  color: #8293a8;
+  font-size: .63rem;
+  line-height: 1.45;
+}
+.dynamic-chain-placeholder {
+  border: 1px dashed #35465d;
+  border-radius: 6px;
+  padding: 18px 12px;
+  color: #76889e;
+  font-size: .7rem;
+  text-align: center;
+}
+.dynamic-chain-bridge {
+  min-width: 56px;
+  flex: 0 0 56px;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #8293a8;
+  font-size: .56rem;
+  font-weight: 700;
+  text-align: center;
+}
+.dynamic-chain-bridge-lines {
+  display: grid;
+  gap: 9px;
+}
+.dynamic-chain-bridge-lines i {
+  --bridge-color: #fb7185;
+  position: relative;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--bridge-color) 0 8px, transparent 8px 14px);
+  opacity: .72;
+}
+.dynamic-chain-bridge-lines i::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bridge-color);
+  box-shadow: 0 0 10px var(--bridge-color);
+  animation: dynamic-chain-particle 2.2s linear infinite;
+  animation-delay: var(--lane-delay);
+}
+.dynamic-chain-bridge-lines i::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--bridge-color);
+}
+.dynamic-chain-bridge--contract .dynamic-chain-bridge-lines i {
+  --bridge-color: #f59e0b;
+}
+.dynamic-chain-bridge--application .dynamic-chain-bridge-lines i {
+  --bridge-color: #4ade80;
+}
+@keyframes dynamic-chain-particle {
+  from { left: 0; }
+  to { left: calc(100% - 8px); }
+}
+
+.dynamic-network-map {
+  overflow-x: auto;
+  background: #0b1320;
+}
+.dynamic-network-canvas {
+  position: relative;
+  width: 100%;
+  min-width: 920px;
+  overflow: hidden;
+  background-color: #0b1320;
+  background-image:
+    linear-gradient(rgba(67, 91, 123, .09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(67, 91, 123, .09) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.dynamic-network-canvas::before,
+.dynamic-network-canvas::after {
+  position: absolute;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  border-color: #33506b;
+  content: "";
+  pointer-events: none;
+}
+.dynamic-network-canvas::before {
+  top: 18px;
+  left: 18px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.dynamic-network-canvas::after {
+  right: 18px;
+  bottom: 18px;
+  border-right: 1px solid;
+  border-bottom: 1px solid;
+}
+.dynamic-network-band {
+  position: absolute;
+  top: 28px;
+  bottom: 28px;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 22%;
+  padding: 16px 12px;
+  border: 1px dashed rgba(148, 163, 184, .2);
+  border-radius: 7px;
+  color: #cbd5e1;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.dynamic-network-band > svg {
+  flex: 0 0 auto;
+}
+.dynamic-network-band strong,
+.dynamic-network-band small {
+  display: block;
+}
+.dynamic-network-band strong {
+  font-size: .76rem;
+}
+.dynamic-network-band small {
+  margin-top: 3px;
+  color: #687b91;
+  font-size: .61rem;
+}
+.dynamic-network-band--trade {
+  border-color: rgba(251, 113, 133, .27);
+  color: #fb7185;
+}
+.dynamic-network-band--focus {
+  border-color: rgba(45, 212, 191, .22);
+  color: #2dd4bf;
+}
+.dynamic-network-band--contract {
+  border-color: rgba(245, 158, 11, .25);
+  color: #f59e0b;
+}
+.dynamic-network-band--application {
+  border-color: rgba(74, 222, 128, .24);
+  color: #4ade80;
+}
+.dynamic-network-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.dynamic-network-node {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 82px;
+  padding: 10px;
+  border: 1px solid #31425a;
+  border-left: 3px solid currentColor;
+  border-radius: 6px;
+  background: rgba(20, 31, 48, .97);
+  color: #94a3b8;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, .2);
+  transform: translate(-50%, -50%);
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+.dynamic-network-node:hover {
+  z-index: 8;
+  border-color: currentColor;
+  background: #18263a;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, .36);
+  transform: translate(-50%, calc(-50% - 4px)) scale(1.015);
+}
+.dynamic-network-node--trade { color: #fb7185; }
+.dynamic-network-node--focus { color: #2dd4bf; }
+.dynamic-network-node--contract { color: #f59e0b; }
+.dynamic-network-node--application { color: #4ade80; }
+.dynamic-network-node-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .025);
+}
+.dynamic-network-node > div {
+  min-width: 0;
+}
+.dynamic-network-node > div > span,
+.dynamic-network-node strong,
+.dynamic-network-node small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.dynamic-network-node > div > span {
+  margin-bottom: 4px;
+  color: currentColor;
+  font-size: .56rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.dynamic-network-node strong {
+  color: #edf4fc;
+  font-size: .7rem;
+  line-height: 1.34;
+}
+.dynamic-network-node small {
+  margin-top: 4px;
+  color: #8293a8;
+  font-size: .58rem;
+  line-height: 1.35;
+}
+
+.pump-chain-map {
+  min-height: 470px;
+  display: grid;
+  grid-template-columns: minmax(250px, 1.25fr) 80px minmax(220px, 1fr) 80px minmax(220px, 1fr) 80px minmax(250px, 1.15fr);
+  align-items: center;
+  gap: 8px;
+  padding: 44px 26px;
+  background-color: #0b1320;
+  background-image: linear-gradient(rgba(67, 91, 123, .09) 1px, transparent 1px), linear-gradient(90deg, rgba(67, 91, 123, .09) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.pump-chain-zone {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  border: 1px solid rgba(251, 113, 133, .28);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(75, 24, 38, .14);
+}
+.pump-chain-zone--application {
+  border-color: rgba(74, 222, 128, .28);
+  background: rgba(19, 78, 55, .14);
+}
+.pump-chain-zone-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fb7185;
+  font-size: .74rem;
+  font-weight: 800;
+}
+.pump-chain-zone--application .pump-chain-zone-title {
+  color: #4ade80;
+}
+.pump-chain-suppliers {
+  display: grid;
+  gap: 10px;
+}
+.pump-chain-node {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #31425a;
+  border-left: 3px solid #60a5fa;
+  border-radius: 7px;
+  padding: 14px;
+  background: #152135;
+  color: #60a5fa;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .2);
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+.pump-chain-node:hover {
+  transform: translateY(-4px);
+  border-color: #5c718d;
+  box-shadow: 0 20px 36px rgba(0, 0, 0, .32);
+}
+.pump-chain-node--supplier {
+  border-left-color: #fb7185;
+  color: #fb7185;
+}
+.pump-chain-node--integrator {
+  border-color: rgba(45, 212, 191, .65);
+  border-left-color: #2dd4bf;
+  color: #2dd4bf;
+}
+.pump-chain-node--epc {
+  border-left-color: #f59e0b;
+  color: #f59e0b;
+}
+.pump-chain-node--application {
+  border-left-color: #4ade80;
+  color: #4ade80;
+}
+.pump-chain-node > div {
+  min-width: 0;
+}
+.pump-chain-node span,
+.pump-chain-node strong,
+.pump-chain-node small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.pump-chain-node span {
+  margin-bottom: 5px;
+  font-size: .63rem;
+  font-weight: 800;
+}
+.pump-chain-node strong {
+  color: #edf4fc;
+  font-size: .8rem;
+  line-height: 1.4;
+}
+.pump-chain-node small {
+  margin-top: 6px;
+  color: #8798ad;
+  font-size: .66rem;
+  line-height: 1.45;
+}
+.pump-chain-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  color: #7e90a6;
+  font-size: .62rem;
+  font-weight: 700;
+  text-align: center;
+}
+.pump-chain-arrow i {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: visible;
+  background: linear-gradient(90deg, #2dd4bf 0 45%, transparent 45% 55%, #2dd4bf 55% 100%);
+  background-size: 18px 2px;
+  animation: pump-chain-flow 1.1s linear infinite;
+}
+.pump-chain-arrow i::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -1px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid #2dd4bf;
+}
+@keyframes pump-chain-flow {
+  to { background-position: 18px 0; }
+}
+@media (max-width: 1180px) {
+  .dynamic-chain-map {
+    flex-direction: column;
+    overflow-x: visible;
+    padding: 24px;
+  }
+  .dynamic-chain-stage {
+    width: 100%;
+    min-width: 0;
+    flex-basis: auto;
+  }
+  .dynamic-chain-bridge {
+    width: min(360px, 82%);
+    min-width: 0;
+    min-height: 72px;
+    flex-basis: auto;
+    justify-content: center;
+  }
+  .dynamic-chain-bridge-lines {
+    width: 100%;
+  }
+  .pump-chain-map {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+  .pump-chain-arrow {
+    min-height: 52px;
+    justify-content: center;
+  }
+  .pump-chain-arrow i {
+    width: 2px;
+    height: 34px;
+    background: linear-gradient(#2dd4bf 0 45%, transparent 45% 55%, #2dd4bf 55% 100%);
+    background-size: 2px 18px;
+  }
+  .pump-chain-arrow i::after {
+    top: auto;
+    right: -4px;
+    bottom: -1px;
+    border-top: 8px solid #2dd4bf;
+    border-right: 5px solid transparent;
+    border-bottom: 0;
+    border-left: 5px solid transparent;
+  }
 }
 .chain-network-node--program-one {
   top: 18%;
@@ -4416,6 +5128,118 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
   .chain-particle {
     display: none;
   }
+}
+
+/* Quadrant defense magnet network */
+.quadrant-network {
+  position: relative;
+  min-width: 1120px;
+  min-height: 620px;
+  overflow: hidden;
+  background: #0b1320;
+}
+.quadrant-network-grid {
+  position: absolute;
+  inset: 0;
+  opacity: .22;
+  background-image:
+    linear-gradient(rgba(122, 145, 173, .13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(122, 145, 173, .13) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.quadrant-network-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.quadrant-node--xmag {
+  top: 20%;
+  left: 3%;
+}
+.quadrant-node--hangzhou {
+  top: 59%;
+  left: 3%;
+}
+.quadrant-node--center {
+  top: 50%;
+  left: 36%;
+  width: 25%;
+  transform: translateY(-50%);
+}
+.quadrant-node--center:hover {
+  transform: translateY(calc(-50% - 4px)) scale(1.015);
+}
+.quadrant-node--component-one {
+  top: 20%;
+  left: 68%;
+  width: 19%;
+}
+.quadrant-node--component-two {
+  top: 59%;
+  left: 68%;
+  width: 19%;
+}
+.quadrant-programs {
+  position: absolute;
+  top: 50%;
+  right: 2%;
+  z-index: 4;
+  width: 10%;
+  min-width: 120px;
+  padding: 15px 12px;
+  border: 1px solid rgba(74, 222, 128, .5);
+  border-left: 3px solid #4ade80;
+  border-radius: 6px;
+  background: #14231f;
+  color: #4ade80;
+  transform: translateY(-50%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, .24);
+}
+.quadrant-programs div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .64rem;
+  font-weight: 800;
+}
+.quadrant-programs strong,
+.quadrant-programs small {
+  display: block;
+}
+.quadrant-programs strong {
+  margin-top: 10px;
+  color: #edf4fc;
+  font-size: .78rem;
+  line-height: 1.45;
+}
+.quadrant-programs small {
+  margin-top: 7px;
+  color: #8fa39a;
+  font-size: .62rem;
+  line-height: 1.45;
+}
+.quadrant-label--trade {
+  top: 37%;
+  left: 25%;
+  color: #fb7185;
+}
+.quadrant-label--group {
+  top: 61%;
+  left: 26%;
+  color: #c084fc;
+}
+.quadrant-label--supply {
+  top: 47%;
+  left: 62%;
+  color: #60a5fa;
+}
+.quadrant-label--application {
+  top: 47%;
+  right: 8%;
+  color: #4ade80;
 }
 
 /* High-purity rare-earth network */
@@ -4612,4 +5436,287 @@ button.chip--button:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .india-node--lockheed {
   top: 72%;
+}
+
+/* Dhaksha military logistics drone network */
+.chain-network--dhaksha .chain-path--personnel {
+  stroke: #c084fc;
+}
+.chain-network--dhaksha .chain-particle--personnel {
+  fill: #c084fc;
+  filter: drop-shadow(0 0 5px #c084fc);
+}
+.dhaksha-label--trade {
+  top: 48%;
+  left: 29%;
+  color: #fb7185;
+}
+.dhaksha-label--control {
+  top: 27%;
+  left: 50%;
+  color: #c084fc;
+  transform: translateX(-50%);
+}
+.dhaksha-label--contract {
+  top: 43%;
+  right: 28%;
+  color: #60a5fa;
+}
+.dhaksha-label--review {
+  top: 58%;
+  right: 4%;
+  color: #4ade80;
+}
+.dhaksha-node--supplier {
+  top: 40%;
+  left: 3.5%;
+}
+.dhaksha-node--parent {
+  top: 5%;
+  left: 39%;
+  width: 22%;
+}
+.dhaksha-node--integrator {
+  top: 50%;
+  left: 38%;
+  width: 25%;
+  transform: translateY(-50%);
+}
+.dhaksha-node--integrator:hover {
+  transform: translateY(calc(-50% - 4px)) scale(1.015);
+}
+.dhaksha-node--army,
+.dhaksha-node--review {
+  right: 3.5%;
+}
+.dhaksha-node--army {
+  top: 24%;
+}
+.dhaksha-node--review {
+  top: 62%;
+}
+
+/* Reusable evidence-bounded network for newly researched supply chains */
+.supply-chain-generic-map {
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.supply-chain-generic-map > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+  color: #f8fafc;
+  background: #10243d;
+}
+.supply-chain-generic-map > header span {
+  display: block;
+  margin-bottom: 5px;
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 700;
+}
+.supply-chain-generic-map > header h3 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0;
+}
+.supply-chain-generic-map > header small {
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+.generic-chain-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) 90px minmax(220px, 1.05fr) 90px minmax(210px, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 410px;
+  padding: 30px 24px;
+  background:
+    linear-gradient(#e2e8f0 1px, transparent 1px),
+    linear-gradient(90deg, #e2e8f0 1px, transparent 1px),
+    #f8fafc;
+  background-size: 28px 28px;
+}
+.generic-chain-column {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+}
+.generic-chain-column-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+.generic-chain-column article {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 70px;
+  padding: 13px;
+  border: 1px solid #cbd5e1;
+  border-left: 3px solid #ef4444;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .06);
+}
+.generic-chain-column--target article {
+  border-left-color: #16a34a;
+}
+.generic-chain-column article svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #ef4444;
+}
+.generic-chain-column--target article svg {
+  color: #16a34a;
+}
+.generic-chain-column article div {
+  min-width: 0;
+}
+.generic-chain-column article strong,
+.generic-chain-column article small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.generic-chain-column article strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.generic-chain-column article small {
+  margin-top: 5px;
+  color: #64748b;
+  line-height: 1.35;
+}
+.generic-chain-focus {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  min-height: 178px;
+  padding: 22px 18px;
+  border: 1px solid #60a5fa;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(30, 64, 175, .15);
+  text-align: center;
+}
+.generic-chain-focus > svg {
+  color: #2563eb;
+}
+.generic-chain-focus > span {
+  margin-top: 11px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+.generic-chain-focus > strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.generic-chain-focus > small {
+  margin-top: 8px;
+  color: #64748b;
+  line-height: 1.4;
+}
+.generic-chain-pulse {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border: 1px solid #60a5fa;
+  border-radius: 8px;
+  animation: generic-chain-pulse 2.8s ease-out infinite;
+}
+.generic-chain-flow {
+  position: relative;
+  height: 48px;
+}
+.generic-chain-flow span {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+}
+.generic-chain-flow i {
+  position: absolute;
+  top: 23px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, #ef4444 0 8px, transparent 8px 13px);
+}
+.generic-chain-flow--program i {
+  background: repeating-linear-gradient(90deg, #2563eb 0 8px, transparent 8px 13px);
+}
+.generic-chain-flow b {
+  position: absolute;
+  top: 17px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 12px #ef4444;
+  animation: generic-chain-travel 2.3s linear infinite;
+}
+.generic-chain-flow--program b {
+  background: #2563eb;
+  box-shadow: 0 0 12px #2563eb;
+  animation-delay: -1.15s;
+}
+.generic-chain-products {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+  overflow-x: auto;
+}
+.generic-chain-products strong {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 12px;
+}
+.generic-chain-products span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 4px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 11px;
+}
+@keyframes generic-chain-pulse {
+  0% { opacity: .55; transform: scale(1); }
+  70%, 100% { opacity: 0; transform: scale(1.08); }
+}
+@keyframes generic-chain-travel {
+  from { left: 0; }
+  to { left: calc(100% - 12px); }
+}
+@media (max-width: 980px) {
+  .generic-chain-stage {
+    grid-template-columns: 1fr;
+  }
+  .generic-chain-flow {
+    width: 48px;
+    margin: 0 auto;
+    transform: rotate(90deg);
+  }
 }

@@ -57,3 +57,26 @@ def test_fallback_queries_remain_topic_specific_when_model_is_unavailable(monkey
     assert queries
     assert all("关键矿产出口管制" in query for query in queries)
     assert any("2026-07-12" in query for query in queries)
+
+
+def test_customs_hotspot_topic_uses_stable_risk_mission_matrix(monkeypatch):
+    monkeypatch.setattr(
+        "app.research_planner.call_llm",
+        AsyncMock(side_effect=RuntimeError("offline")),
+    )
+
+    queries = asyncio.run(build_research_queries(
+        _topic(id="weekly-trade-current-affairs", name="涉进出口时政热点"),
+        "",
+        None,
+        max_queries=12,
+        window_days=20,
+        today=date(2026, 8, 4),
+    ))
+
+    assert len(queries) == 12
+    assert all("2026-07-15" in query and "2026-08-04" in query for query in queries)
+    assert all("China Chinese goods" in query for query in queries)
+    assert any("fuel shortage" in query and "smuggling" in query for query in queries)
+    assert any("fertilizer shortage" in query and "third country" in query for query in queries)
+    assert any("critical minerals" in query and "transshipment" in query for query in queries)

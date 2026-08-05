@@ -72,7 +72,7 @@ def score_featured_item(item: CollectedItem | Any, now: datetime | None = None) 
 
 def choose_featured_ids(
     saved_ids: list[str],
-    ranked: list[tuple[str, float, bool, datetime | None]],
+    ranked: list[tuple[Any, ...]],
     *,
     available_ids: set[str],
     limit: int = FEATURED_LIMIT,
@@ -111,12 +111,23 @@ def get_featured_items(
         CollectedItem.published_at.is_(None) & (CollectedItem.collected_at >= cutoff),
     )).order_by(CollectedItem.collected_at.desc()).limit(MAX_CANDIDATES).all()
     ranked = [
-        (item.id, result.score, _enforcement_review_approved(item), _item_time(item))
+        (
+            item.id,
+            result.score,
+            _enforcement_review_approved(item),
+            _china_relevance_rank(item),
+            _item_time(item),
+        )
         for item in candidates
         if (result := score_featured_item(item, now)).qualified
     ]
     ranked.sort(
-        key=lambda value: (value[2], value[3] or datetime.min.replace(tzinfo=timezone.utc), value[1]),
+        key=lambda value: (
+            value[3],
+            value[2],
+            value[4] or datetime.min.replace(tzinfo=timezone.utc),
+            value[1],
+        ),
         reverse=True,
     )
     available_ids = {item.id for item in [*saved_items, *candidates]}
@@ -154,6 +165,21 @@ def _enforcement_review_approved(item: CollectedItem | Any) -> bool:
         return False
     review = metadata.get("enforcement_review")
     return isinstance(review, dict) and str(review.get("decision") or "").lower() == "approve"
+
+
+def _china_relevance_rank(item: CollectedItem | Any) -> int:
+    metadata = getattr(item, "raw_metadata", None)
+    if not isinstance(metadata, dict):
+        return 0
+    review = metadata.get("enforcement_review")
+    if not isinstance(review, dict):
+        return 0
+    return {
+        "strong": 3,
+        "medium": 2,
+        "weak": 1,
+        "major_non_china": 0,
+    }.get(str(review.get("china_relevance_level") or "").lower(), 0)
 
 
 def _item_text(item: CollectedItem | Any) -> str:

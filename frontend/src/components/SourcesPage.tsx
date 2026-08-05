@@ -5,6 +5,7 @@ import { fetchSources, createSource, deleteSource, updateSource, validateSource,
 import type { Source, ConnectorInfo } from "../types";
 
 const GROUP_LABEL_L1: Record<string, string> = {
+  defense_procurement: "政府与军方采购",
   commodity: "商品",
   customs: "海关",
   enforcement: "执法",
@@ -26,6 +27,10 @@ const GROUP_LABEL_L1: Record<string, string> = {
 };
 
 const GROUP_LABEL_L2: Record<string, string> = {
+  procurement_notice: "采购公告",
+  contract_award: "合同结果",
+  opportunity: "采购机会",
+  supply_chain: "供应链合同",
   trade: "贸易",
   enforcement: "执法",
   regulation: "法规",
@@ -61,6 +66,7 @@ function displayGroupL2(name: string) {
 }
 
 const SOURCE_PRIMARY_LABELS: Record<string, string> = {
+  defense_procurement: "政府与军方采购",
   "official-policy": "官方政策法规",
   "customs-enforcement": "海关执法查发",
   "export-control-sanctions": "出口管制与制裁",
@@ -77,6 +83,10 @@ const SOURCE_PRIMARY_LABELS: Record<string, string> = {
 };
 
 const SOURCE_SECONDARY_LABELS: Record<string, string> = {
+  procurement_notice: "采购公告",
+  contract_award: "合同结果",
+  opportunity: "采购机会",
+  supply_chain: "供应链合同",
   official: "官方来源",
   international: "国际组织",
   government: "政府官网",

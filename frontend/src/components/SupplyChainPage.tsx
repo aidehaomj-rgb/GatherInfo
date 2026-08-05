@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Anchor, BatteryCharging, Building2, Crosshair, ExternalLink, Factory,
+  Anchor, BatteryCharging, Building2, ChevronDown, Crosshair, ExternalLink, Factory,
   FileSearch, FlaskConical, Landmark, Link2, Network, PackageSearch, Plus,
-  RadioTower, ShieldCheck, ShipWheel, Sparkles, Warehouse,
+  RadioTower, Search, ShieldCheck, ShipWheel, Sparkles, Warehouse, X,
 } from "lucide-react";
 
 import {
@@ -41,6 +41,9 @@ export function SupplyChainPage() {
   const [investigationId, setInvestigationId] = useState("");
   const [investigations, setInvestigations] = useState<SupplyChainInvestigation[]>([]);
   const [showInvestigationForm, setShowInvestigationForm] = useState(false);
+  const [showInvestigationPicker, setShowInvestigationPicker] = useState(false);
+  const [investigationQuery, setInvestigationQuery] = useState("");
+  const [investigationsLoading, setInvestigationsLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [dashboard, setDashboard] = useState(emptyDashboard);
   const [entities, setEntities] = useState<SupplyChainEntity[]>([]);
@@ -56,6 +59,7 @@ export function SupplyChainPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [form, setForm] = useState<"entity" | "case" | "shipment" | null>(null);
   const loadToken = useRef(0);
+  const investigationLoadToken = useRef(0);
 
   const load = useCallback(async () => {
     const token = ++loadToken.current;
@@ -83,14 +87,22 @@ export function SupplyChainPage() {
   }, [direction, investigationId]);
 
   useEffect(() => {
+    const token = ++investigationLoadToken.current;
+    setInvestigations([]);
+    setInvestigationId("");
+    setInvestigationsLoading(true);
     fetchSupplyChainInvestigations(direction)
       .then((rows) => {
+        if (token !== investigationLoadToken.current) return;
         setInvestigations(rows);
-        setInvestigationId((current) => (
-          rows.some((item) => item.id === current) ? current : (rows[0]?.id || "")
-        ));
+        setInvestigationId(rows[0]?.id || "");
+        setInvestigationsLoading(false);
       })
-      .catch((error) => setMessage(error instanceof Error ? error.message : "供应链项目加载失败"));
+      .catch((error) => {
+        if (token !== investigationLoadToken.current) return;
+        setInvestigationsLoading(false);
+        setMessage(error instanceof Error ? error.message : "供应链项目加载失败");
+      });
   }, [direction]);
 
   useEffect(() => {
@@ -124,6 +136,13 @@ export function SupplyChainPage() {
     () => investigations.find((item) => item.id === investigationId) || null,
     [investigations, investigationId],
   );
+  const filteredInvestigations = useMemo(() => {
+    const query = investigationQuery.trim().toLocaleLowerCase();
+    if (!query) return investigations;
+    return investigations.filter((item) =>
+      `${item.name} ${item.description || ""}`.toLocaleLowerCase().includes(query),
+    );
+  }, [investigationQuery, investigations]);
   const procurementFindings = useMemo(() => cases.map((item) => {
     const supplier = entityById.get(item.supplier_entity_id || "");
     const subject = supplier ? entityDisplayName(supplier) : (item.procurement_agency || "相关供应主体");
@@ -196,7 +215,13 @@ export function SupplyChainPage() {
                 key={item.id}
                 type="button"
                 className={direction === item.id ? "active" : ""}
-                onClick={() => { setDirection(item.id); setInvestigationId(""); setForm(null); }}
+                onClick={() => {
+                  setDirection(item.id);
+                  setInvestigationId("");
+                  setForm(null);
+                  setShowInvestigationPicker(false);
+                  setInvestigationQuery("");
+                }}
               >
                 {item.label}
               </button>
@@ -220,18 +245,61 @@ export function SupplyChainPage() {
 
       <div className="supply-chain-project-bar">
         <span className="supply-chain-project-label">当前供应链</span>
-        <div className="supply-chain-projects" role="group" aria-label="供应链项目">
-          {investigations.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={investigationId === item.id ? "active" : ""}
-              onClick={() => setInvestigationId(item.id)}
-              title={item.description || item.name}
-            >
-              {item.name}
-            </button>
-          ))}
+        <div className="supply-chain-project-selector">
+          <button
+            type="button"
+            className="supply-chain-project-trigger"
+            onClick={() => setShowInvestigationPicker((value) => !value)}
+            aria-expanded={showInvestigationPicker}
+            aria-haspopup="listbox"
+          >
+            <span>
+              <strong>{selectedInvestigation?.name || "请选择供应链"}</strong>
+              <small>{investigationsLoading ? "正在加载..." : `${investigations.length} 条供应链`}</small>
+            </span>
+            <ChevronDown size={17} />
+          </button>
+          {showInvestigationPicker && (
+            <div className="supply-chain-project-picker">
+              <header>
+                <div>
+                  <strong>{directions.find((item) => item.id === direction)?.label}供应链</strong>
+                  <small>{investigationsLoading ? "正在加载供应链..." : `共 ${investigations.length} 条，点击即可切换`}</small>
+                </div>
+                <button type="button" onClick={() => setShowInvestigationPicker(false)} aria-label="关闭供应链选择">
+                  <X size={17} />
+                </button>
+              </header>
+              <label className="supply-chain-project-search">
+                <Search size={16} />
+                <input
+                  value={investigationQuery}
+                  onChange={(event) => setInvestigationQuery(event.target.value)}
+                  placeholder="搜索供应链名称或关键内容"
+                  autoFocus
+                />
+              </label>
+              <div className="supply-chain-project-grid" role="listbox" aria-label="全部供应链">
+                {filteredInvestigations.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={investigationId === item.id}
+                    className={investigationId === item.id ? "active" : ""}
+                    onClick={() => {
+                      setInvestigationId(item.id);
+                      setShowInvestigationPicker(false);
+                      setInvestigationQuery("");
+                    }}
+                  >
+                    <strong>{item.name}</strong>
+                  </button>
+                ))}
+                {!investigationsLoading && !filteredInvestigations.length && <p>未找到匹配的供应链。</p>}
+              </div>
+            </div>
+          )}
         </div>
         <button type="button" className="btn btn-secondary" onClick={() => setShowInvestigationForm((value) => !value)}>
           <Plus size={15} />新增供应链
@@ -284,17 +352,44 @@ export function SupplyChainPage() {
                   <strong>链条概览</strong>
                   {selectedInvestigation.description || "该供应链项目的主体、采购、贸易和证据关系已纳入持续穿透分析。"}
                 </p>
+                <div className="supply-chain-completeness">
+                  <div>
+                    <strong>供应链证据完整度</strong>
+                    <span>{selectedInvestigation.completeness_level} · {selectedInvestigation.completeness_score}%</span>
+                  </div>
+                  <div className="supply-chain-completeness-track" aria-label={`供应链证据完整度 ${selectedInvestigation.completeness_score}%`}>
+                    <span style={{ width: `${selectedInvestigation.completeness_score}%` }} />
+                  </div>
+                  <div className="supply-chain-completeness-parts">
+                    {Object.entries(selectedInvestigation.completeness_details || {}).map(([label, value]) => (
+                      <span
+                        key={label}
+                        className={value === selectedInvestigation.completeness_maximums?.[label] ? "complete" : value ? "partial" : ""}
+                      >
+                        {label} {value}/{selectedInvestigation.completeness_maximums?.[label] || 0}
+                      </span>
+                    ))}
+                  </div>
+                  {!!selectedInvestigation.verification_gaps?.length && (
+                    <div className="supply-chain-verification-gaps">
+                      <strong>尚待核实</strong>
+                      <ul>
+                        {selectedInvestigation.verification_gaps.slice(0, 5).map((gap) => <li key={gap}>{gap}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
                 <div className="supply-chain-finding-grid">
                   <article>
                     <strong>军工项目与供应关系</strong>
                     {procurementFindings.length ? (
-                      <ul>{procurementFindings.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <ul>{procurementFindings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
                     ) : <p>尚未录入军方采购或合作项目。</p>}
                   </article>
                   <article>
                     <strong>跨境贸易产品与流向</strong>
                     {tradeFindings.length ? (
-                      <ul>{tradeFindings.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <ul>{tradeFindings.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
                     ) : <p>尚未录入可核验的跨境贸易记录。</p>}
                   </article>
                   <article>
@@ -320,15 +415,16 @@ export function SupplyChainPage() {
       )}
 
       {tab === "map" && (
-        investigationId === "inv-us-ultralife-battery"
-          ? <BatterySupplyChainMap />
-          : investigationId === "inv-us-gadolinium-oxide"
-            ? <GadoliniumSupplyChainMap />
-            : investigationId === "inv-india-csbc-pump-chain"
-              ? <IndiaShipComponentsMap />
-          : <Section title="供应链条展示" actions={null}>
-              <Empty text="当前供应链尚未构建可视化图谱。" />
-            </Section>
+        selectedInvestigation && (entities.length || cases.length || shipments.length)
+            ? <GenericSupplyChainMap
+                investigation={selectedInvestigation}
+                entities={entities}
+                cases={cases}
+                shipments={shipments}
+              />
+            : <Section title="供应链条展示" actions={null}>
+                <Empty text="当前供应链尚未构建可视化图谱。" />
+              </Section>
       )}
 
       {tab === "procurement" && (
@@ -750,9 +846,9 @@ function IndiaShipComponentsMap() {
       <header>
         <div>
           <span>INDIA INTEGRATED SUPPLY NETWORK</span>
-          <h3>涉印关键船配件供应链图谱</h3>
+          <h3>涉印—台船石化工程泵供应链图谱</h3>
         </div>
-        <small>中国产部件 → 印度泵组集成 → 台船项目交付与终端关联</small>
+        <small>中国产部件 → 印度泵组集成 → 台船EPC采购 → 中油石化储运项目</small>
       </header>
       <div className="chain-network chain-network--india">
         <div className="chain-network-grid" aria-hidden="true" />
@@ -765,7 +861,7 @@ function IndiaShipComponentsMap() {
         </div>
         <div className="chain-network-group chain-network-group--programs">
           <ShipWheel size={18} />
-          <div><strong>台船终端与项目关联</strong><small>船舶交付、无人艇及待核军工线索</small></div>
+          <div><strong>台船EPC与石化项目</strong><small>储槽、槽车装卸和码头装卸工艺系统</small></div>
         </div>
 
         <svg className="chain-network-lines" viewBox="0 0 1200 680" preserveAspectRatio="none" aria-hidden="true">
@@ -814,8 +910,8 @@ function IndiaShipComponentsMap() {
         <span className="chain-relation-label india-label--trade">配件输入</span>
         <span className="chain-relation-label india-label--group">集团关系</span>
         <span className="chain-relation-label india-label--delivery">泵组交付</span>
-        <span className="chain-relation-label india-label--application">终端关联</span>
-        <span className="chain-relation-label india-label--review">线索待核</span>
+        <span className="chain-relation-label india-label--application">EPC项目</span>
+        <span className="chain-relation-label india-label--review">军工排除</span>
 
         <NetworkNode
           className="india-node--pump"
@@ -853,25 +949,25 @@ function IndiaShipComponentsMap() {
         <NetworkNode
           className="india-node--csbc"
           icon={ShipWheel}
-          eyebrow="终端船舶企业"
+          eyebrow="石化工程EPC承包方"
           name="CSBC Corporation, Taiwan"
-          role="接收至少6批次、11台/套离心泵组"
+          role="接收至少6批次、11台/套石化工艺泵组"
           tone="distribution"
         />
         <NetworkNode
           className="india-node--manta"
-          icon={RadioTower}
-          eyebrow="军用级无人水面载具"
-          name="Endeavor Manta"
-          role="终端场景高度相关 · 具体安装尚未证实"
+          icon={Factory}
+          eyebrow="石化项目最终业主"
+          name="台湾中油大林石化油品储运中心"
+          role="26座石化储槽及槽车装卸工场统包工程"
           tone="application"
         />
         <NetworkNode
           className="india-node--lockheed"
           icon={ShieldCheck}
-          eyebrow="潜舰战斗系统关联线索"
-          name="Lockheed Martin Corporation"
-          role="高概率候选主体 · 需合同或设备资料终核"
+          eyebrow="已排除的军工关联"
+          name="奋进魔鬼鱼 / 海鲲潜艇"
+          role="泵型与标签指向石化工程，不纳入军工供应链"
           tone="contract"
         />
       </div>
@@ -879,11 +975,781 @@ function IndiaShipComponentsMap() {
         <span><i className="chain-dot chain-dot--trade" />中国产部件</span>
         <span><i className="chain-dot chain-dot--personnel" />集团控制关系</span>
         <span><i className="chain-dot chain-dot--distribution" />印度集成交付</span>
-        <span><i className="chain-dot chain-dot--application" />终端项目关联</span>
-        <p>贸易链路已经核实；具体泵组安装船号和军用项目用途仍需以装箱单、铭牌及验收文件确认。</p>
+        <span><i className="chain-dot chain-dot--application" />石化项目归属</span>
+        <p>贸易链路与石化EPC项目已经交叉核验；同一收货企业同时承接军民项目，不能据此推定货物进入军用平台。</p>
       </div>
     </section>
   );
+}
+
+function DhakshaDroneSupplyChainMap() {
+  return (
+    <section className="supply-chain-visual supply-chain-visual--dhaksha">
+      <header>
+        <div>
+          <span>INDIA MILITARY DRONE SUPPLY NETWORK</span>
+          <h3>Dhaksha军用物流无人机供应链</h3>
+        </div>
+        <small>中国测试设备供应端 → 印度无人机制造端 → 印度陆军采购项目</small>
+      </header>
+      <div className="chain-network chain-network--dhaksha">
+        <div className="chain-network-grid" aria-hidden="true" />
+        <div className="chain-network-orbit chain-network-orbit--one" aria-hidden="true" />
+        <div className="chain-network-orbit chain-network-orbit--two" aria-hidden="true" />
+
+        <div className="chain-network-group chain-network-group--suppliers">
+          <Factory size={18} />
+          <div><strong>中国设备供应端</strong><small>推力校准与生产检测设备</small></div>
+        </div>
+        <div className="chain-network-group chain-network-group--programs">
+          <ShieldCheck size={18} />
+          <div><strong>印度军方应用端</strong><small>陆军物流无人机采购与审查</small></div>
+        </div>
+
+        <svg className="chain-network-lines" viewBox="0 0 1200 680" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="dhaksha-arrow-trade" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--trade" />
+            </marker>
+            <marker id="dhaksha-arrow-control" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--personnel" />
+            </marker>
+            <marker id="dhaksha-arrow-contract" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--contract" />
+            </marker>
+            <marker id="dhaksha-arrow-review" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--application" />
+            </marker>
+          </defs>
+
+          <path id="dhaksha-trade" className="chain-path chain-path--trade" d="M286 338 C360 338 384 338 458 338" markerEnd="url(#dhaksha-arrow-trade)" />
+          <path id="dhaksha-control" className="chain-path chain-path--personnel" d="M600 150 C600 205 600 232 600 278" markerEnd="url(#dhaksha-arrow-control)" />
+          <path id="dhaksha-contract" className="chain-path chain-path--contract" d="M742 328 C816 312 832 225 900 214" markerEnd="url(#dhaksha-arrow-contract)" />
+          <path id="dhaksha-review" className="chain-path chain-path--application" d="M1020 280 C1020 338 1020 382 1020 430" markerEnd="url(#dhaksha-arrow-review)" />
+
+          <circle r="5" className="chain-particle chain-particle--trade">
+            <animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#dhaksha-trade" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--personnel">
+            <animateMotion dur="2.7s" repeatCount="indefinite"><mpath href="#dhaksha-control" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--contract">
+            <animateMotion dur="3s" repeatCount="indefinite"><mpath href="#dhaksha-contract" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--application">
+            <animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#dhaksha-review" /></animateMotion>
+          </circle>
+        </svg>
+
+        <span className="chain-relation-label dhaksha-label--trade">自华进口</span>
+        <span className="chain-relation-label dhaksha-label--control">控股关系</span>
+        <span className="chain-relation-label dhaksha-label--contract">200架采购</span>
+        <span className="chain-relation-label dhaksha-label--review">供应链审查</span>
+
+        <NetworkNode
+          className="dhaksha-node--supplier"
+          icon={Factory}
+          eyebrow="中国测试设备供应商"
+          name="天津新翼先进科技有限公司（待工商核名）"
+          role="LY-70KGF推力测试台、校准工具及AOI检测设备"
+          tone="trade"
+        />
+        <NetworkNode
+          className="dhaksha-node--parent"
+          icon={Building2}
+          eyebrow="印度控股母公司"
+          name="Coromandel International Limited"
+          role="Dhaksha控股与产业资源支持"
+          tone="personnel"
+        />
+        <NetworkNode
+          className="dhaksha-node--integrator"
+          icon={PackageSearch}
+          eyebrow="无人机研发制造与系统集成"
+          name="Dhaksha Unmanned Systems"
+          role="接收中国测试设备，承担物流无人机生产与交付"
+          tone="focus"
+          emphasis
+        />
+        <NetworkNode
+          className="dhaksha-node--army"
+          icon={ShieldCheck}
+          eyebrow="军方采购与最终用户"
+          name="Indian Army"
+          role="200架中空物流无人机采购项目"
+          tone="contract"
+        />
+        <NetworkNode
+          className="dhaksha-node--review"
+          icon={FileSearch}
+          eyebrow="供应链风险审查"
+          name="中国来源部件与设备核查"
+          role="合同一度因中国来源疑虑受到审查"
+          tone="application"
+        />
+      </div>
+      <div className="supply-chain-visual-note">
+        <span><i className="chain-dot chain-dot--trade" />已核实贸易记录</span>
+        <span><i className="chain-dot chain-dot--personnel" />企业控制关系</span>
+        <span><i className="chain-dot chain-dot--contract" />军方采购关系</span>
+        <span><i className="chain-dot chain-dot--application" />风险审查关系</span>
+        <p>贸易记录确认中国测试设备进入Dhaksha生产供应链；设备是否专用于印度陆军200架物流无人机合同仍需结合序列号、产线资料或合同附件核验。</p>
+      </div>
+    </section>
+  );
+}
+
+function QuadrantSupplyChainMap() {
+  return (
+    <section className="supply-chain-visual supply-chain-visual--quadrant">
+      <header>
+        <div>
+          <span>QUADRANT DEFENSE MAGNET NETWORK</span>
+          <h3>Quadrant稀土磁体军工供应链图谱</h3>
+        </div>
+        <small>中国制造与贸易节点 → Quadrant Magnetics → 美国零部件企业 → 军用装备</small>
+      </header>
+      <div className="quadrant-network">
+        <div className="quadrant-network-grid" aria-hidden="true" />
+        <svg className="quadrant-network-lines" viewBox="0 0 1280 620" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="quadrant-arrow-trade" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--trade" />
+            </marker>
+            <marker id="quadrant-arrow-group" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--personnel" />
+            </marker>
+            <marker id="quadrant-arrow-supply" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--contract" />
+            </marker>
+            <marker id="quadrant-arrow-application" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--application" />
+            </marker>
+          </defs>
+          <path id="quadrant-trade-link" className="chain-path chain-path--trade" d="M268 190 C350 190 365 300 458 310" markerEnd="url(#quadrant-arrow-trade)" />
+          <path id="quadrant-group-link" className="chain-path chain-path--personnel" d="M268 430 C350 430 365 340 458 330" markerEnd="url(#quadrant-arrow-group)" />
+          <path id="quadrant-component-one" className="chain-path chain-path--contract" d="M708 305 C790 275 800 190 872 185" markerEnd="url(#quadrant-arrow-supply)" />
+          <path id="quadrant-component-two" className="chain-path chain-path--contract" d="M708 335 C790 365 800 430 872 435" markerEnd="url(#quadrant-arrow-supply)" />
+          <path id="quadrant-program-one" className="chain-path chain-path--application" d="M1090 185 C1140 185 1155 235 1190 250" markerEnd="url(#quadrant-arrow-application)" />
+          <path id="quadrant-program-two" className="chain-path chain-path--application" d="M1090 435 C1140 435 1155 385 1190 370" markerEnd="url(#quadrant-arrow-application)" />
+          <circle r="5" className="chain-particle chain-particle--trade">
+            <animateMotion dur="3s" repeatCount="indefinite"><mpath href="#quadrant-trade-link" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--personnel">
+            <animateMotion dur="3.2s" begin="-1.4s" repeatCount="indefinite"><mpath href="#quadrant-group-link" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--contract">
+            <animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#quadrant-component-one" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--contract">
+            <animateMotion dur="2.8s" begin="-1.4s" repeatCount="indefinite"><mpath href="#quadrant-component-two" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--application">
+            <animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#quadrant-program-one" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--application">
+            <animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite"><mpath href="#quadrant-program-two" /></animateMotion>
+          </circle>
+        </svg>
+
+        <span className="chain-relation-label quadrant-label--trade">历史提单 · 稀土磁体</span>
+        <span className="chain-relation-label quadrant-label--group">集团制造节点</span>
+        <span className="chain-relation-label quadrant-label--supply">磁体供应</span>
+        <span className="chain-relation-label quadrant-label--application">组件进入装备</span>
+
+        <NetworkNode
+          className="quadrant-node--xmag"
+          icon={Factory}
+          eyebrow="中国历史贸易关联供应商"
+          name="杭州X-Mag公司"
+          role="2024年5月向Quadrant发运3,050千克稀土磁体"
+          tone="trade"
+        />
+        <NetworkNode
+          className="quadrant-node--hangzhou"
+          icon={Building2}
+          eyebrow="集团在华制造节点"
+          name="Quadrant杭州制造中心"
+          role="磁性技术、模块设计与量产中心"
+          tone="personnel"
+        />
+        <NetworkNode
+          className="quadrant-node--center"
+          icon={PackageSearch}
+          eyebrow="美国磁体设计与供应主体"
+          name="Quadrant Magnetics LLC"
+          role="进口中国制造稀土磁体，并向美国零部件企业供应"
+          tone="focus"
+          emphasis
+        />
+        <NetworkNode
+          className="quadrant-node--component-one"
+          icon={Factory}
+          eyebrow="美国下游零部件企业"
+          name="U.S. Component Company 1"
+          role="司法材料未披露企业名称"
+          tone="contract"
+        />
+        <NetworkNode
+          className="quadrant-node--component-two"
+          icon={Factory}
+          eyebrow="美国下游零部件企业"
+          name="U.S. Component Company 2"
+          role="司法材料未披露企业名称"
+          tone="contract"
+        />
+        <article className="quadrant-programs">
+          <div><ShieldCheck size={20} /><span>美国国防部装备端</span></div>
+          <strong>F-16 · F/A-18 · 其他国防资产</strong>
+          <small>美国司法部材料确认下游组件进入上述装备体系，具体部件与合同批次仍待穿透。</small>
+        </article>
+      </div>
+      <div className="supply-chain-visual-note">
+        <span><i className="chain-dot chain-dot--trade" />直接贸易记录</span>
+        <span><i className="chain-dot chain-dot--personnel" />集团制造关系</span>
+        <span><i className="chain-dot chain-dot--contract" />下游供应关系</span>
+        <span><i className="chain-dot chain-dot--application" />装备应用关系</span>
+        <p>2026年杭州X-Mag仍有对美出口，但公开记录未确认买方为Quadrant，暂不并入直接链路；匿名企业不作推测性命名。</p>
+      </div>
+    </section>
+  );
+}
+
+function GenericSupplyChainMap({
+  investigation, entities, cases, shipments,
+}: {
+  investigation: SupplyChainInvestigation;
+  entities: SupplyChainEntity[];
+  cases: SupplyChainCase[];
+  shipments: SupplyChainShipment[];
+}) {
+  const isUpstream = (item: SupplyChainEntity) => (
+    item.country === "China"
+    || ["component_supplier", "trading_company", "parent_company", "china_exporter"].includes(item.entity_type)
+  );
+  const isPumpChain = investigation.id === "inv-india-csbc-pump-chain";
+  const isPumpContextOnly = (item: SupplyChainEntity) => isPumpChain && item.id === "ent-sulzer-ltd";
+  const isEndUser = (item: SupplyChainEntity) => (
+    ["military_end_user", "government_end_user", "government_agency", "industrial_end_user", "end_user"].includes(item.entity_type)
+    || (!isPumpChain && item.entity_type === "terminal_shipyard")
+  );
+  const upstreamCandidates = entities.filter((item) => !isPumpContextOnly(item) && isUpstream(item));
+  const primaryCase = cases[0];
+  const integrator = entities.find((item) => item.id === primaryCase?.supplier_entity_id)
+    || entities.find((item) => ["integrator", "defense_supplier", "importer"].includes(item.entity_type))
+    || entities.find((item) => !upstreamCandidates.some((row) => row.id === item.id))
+    || entities[0];
+  const upstream = upstreamCandidates.filter((item) => item.id !== integrator?.id);
+  const endUsers = entities.filter((item) => item.id !== integrator?.id && !isPumpContextOnly(item) && isEndUser(item));
+  const downstream = entities.filter((item) => (
+    item.id !== integrator?.id
+    && !isPumpContextOnly(item)
+    && !upstream.some((row) => row.id === item.id)
+    && !endUsers.some((row) => row.id === item.id)
+  ));
+  const shipmentProducts = new Map<string, string[]>();
+  shipments.forEach((item) => {
+    const key = item.exporter_name.trim().toLocaleLowerCase();
+    const products = shipmentProducts.get(key) || [];
+    if (!products.includes(item.product)) products.push(item.product);
+    shipmentProducts.set(key, products);
+  });
+  const productsFor = (entity: SupplyChainEntity) => {
+    const products = [entity.name, entity.name_zh, ...(entity.aliases || [])]
+      .filter(Boolean)
+      .flatMap((name) => shipmentProducts.get(String(name).trim().toLocaleLowerCase()) || []);
+    return [...new Set(products)].join("；") || entity.defense_roles?.join(" · ") || "关联产品或供应关系待进一步细化";
+  };
+  const destinationCountry = downstream.find((item) => (
+    ["military_end_user", "government_end_user", "industrial_end_user", "terminal_shipyard", "end_user"].includes(item.entity_type)
+  ))?.country || shipments.find((item) => item.destination_country)?.destination_country || investigation.country;
+  const destinationLabel = directions.find((item) => item.id === destinationCountry)?.short || destinationCountry;
+  const stages: NetworkGraphStage[] = [
+    {
+      key: "upstream",
+      title: "上游供应端",
+      subtitle: `${upstream.length}个供应、制造或贸易节点`,
+      tone: "trade",
+      icon: Factory,
+      nodes: upstream.map((entity) => ({
+        id: entity.id,
+        eyebrow: entity.entity_type.replace(/_/g, " "),
+        name: entityDisplayName(entity),
+        detail: productsFor(entity),
+        icon: Factory,
+      })),
+    },
+    {
+      key: "integrator",
+      title: "核心整合端",
+      subtitle: "集成、生产与项目交付",
+      tone: "focus",
+      icon: Building2,
+      nodes: integrator ? [{
+        id: integrator.id,
+        eyebrow: "核心整合与交付节点",
+        name: entityDisplayName(integrator),
+        detail: integrator.defense_roles?.join(" · ") || primaryCase?.product || "供应链集成与项目交付",
+        icon: Building2,
+      }] : [],
+    },
+    {
+      key: "downstream",
+      title: "下游承接端",
+      subtitle: `${downstream.length}个制造、仓储或协作节点`,
+      tone: "contract",
+      icon: ShipWheel,
+      nodes: downstream.map((entity) => ({
+        id: entity.id,
+        eyebrow: entity.entity_type.replace(/_/g, " "),
+        name: entityDisplayName(entity),
+        detail: entity.defense_roles?.join(" · ") || "下游承接、制造或协作节点",
+        icon: ShipWheel,
+      })),
+    },
+    {
+      key: "application",
+      title: `${destinationLabel}应用端`,
+      subtitle: `${endUsers.length + cases.length}个最终用户或项目`,
+      tone: "application",
+      icon: Landmark,
+      nodes: [
+        ...endUsers.map((entity) => ({
+          id: entity.id,
+          eyebrow: entity.entity_type.replace(/_/g, " "),
+          name: entityDisplayName(entity),
+          detail: entity.defense_roles?.join(" · ") || "最终用户或装备应用节点",
+          icon: Landmark,
+        })),
+        ...cases.map((item) => ({
+          id: item.id,
+          eyebrow: item.procurement_agency || "采购或应用项目",
+          name: item.target_program || item.title,
+          detail: item.product || item.procurement_reference || "项目内容待补充",
+          icon: Crosshair,
+        })),
+      ],
+    },
+  ].filter((stage) => stage.nodes.length > 0) as NetworkGraphStage[];
+  const graphHeight = Math.max(620, Math.max(...stages.map((stage) => stage.nodes.length), 1) * 112 + 150);
+  const stagePositions = graphStagePositions(stages.length);
+  const positionedStages = stages.map((stage, stageIndex) => ({
+    ...stage,
+    x: stagePositions[stageIndex],
+    nodes: stage.nodes.map((node, nodeIndex) => ({
+      ...node,
+      x: stagePositions[stageIndex],
+      y: graphNodeY(nodeIndex, stage.nodes.length, graphHeight),
+    })),
+  }));
+  const graphEdges = positionedStages.slice(0, -1).flatMap((stage, stageIndex) => {
+    const nextStage = positionedStages[stageIndex + 1];
+    const tone = nextStage.key === "application" ? "application" : stage.key === "upstream" ? "trade" : "contract";
+    return connectGraphStages(stage.nodes, nextStage.nodes, tone);
+  });
+  const graphKey = investigation.id.replace(/[^a-zA-Z0-9_-]/g, "-");
+
+  return (
+    <section className="supply-chain-visual supply-chain-visual--network">
+      <header>
+        <div><span>SUPPLY CHAIN MAP</span><h3>供应链条展示</h3></div>
+        <small>{investigation.name} · {investigation.completeness_level} · 证据完整度 {investigation.completeness_score}%</small>
+      </header>
+      <div className="dynamic-network-map">
+        <div className="dynamic-network-canvas" style={{ height: graphHeight }}>
+          <div className="chain-network-orbit chain-network-orbit--one" aria-hidden="true" />
+          <div className="chain-network-orbit chain-network-orbit--two" aria-hidden="true" />
+          {positionedStages.map((stage) => (
+            <div
+              key={stage.key}
+              className={`dynamic-network-band dynamic-network-band--${stage.tone}`}
+              style={{ left: `${stage.x}%` }}
+            >
+              <stage.icon size={17} />
+              <div><strong>{stage.title}</strong><small>{stage.subtitle}</small></div>
+            </div>
+          ))}
+          <svg className="dynamic-network-lines" viewBox={`0 0 1000 ${graphHeight}`} preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              {(["trade", "contract", "application"] as const).map((tone) => (
+                <marker key={tone} id={`${graphKey}-${tone}-arrow`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" className={`chain-marker chain-marker--${tone}`} />
+                </marker>
+              ))}
+            </defs>
+            {graphEdges.map((edge, index) => {
+              const pathId = `${graphKey}-edge-${index}`;
+              const startX = edge.from.x * 10 + graphNodeHalfWidth(stages.length);
+              const endX = edge.to.x * 10 - graphNodeHalfWidth(stages.length);
+              const bend = Math.max(34, (endX - startX) * .42);
+              const d = `M${startX} ${edge.from.y} C${startX + bend} ${edge.from.y} ${endX - bend} ${edge.to.y} ${endX} ${edge.to.y}`;
+              return <g key={pathId}>
+                <path id={pathId} className={`chain-path chain-path--${edge.tone}`} d={d} markerEnd={`url(#${graphKey}-${edge.tone}-arrow)`} />
+                <circle r="4.5" className={`chain-particle chain-particle--${edge.tone}`}>
+                  <animateMotion dur={`${2.7 + (index % 4) * .22}s`} begin={`${index * -.31}s`} repeatCount="indefinite"><mpath href={`#${pathId}`} /></animateMotion>
+                </circle>
+              </g>;
+            })}
+          </svg>
+          {positionedStages.flatMap((stage) => stage.nodes.map((node) => (
+            <DynamicNetworkNode key={`${stage.key}-${node.id}`} node={node} tone={stage.tone} stageCount={stages.length} />
+          )))}
+        </div>
+      </div>
+      <div className="supply-chain-visual-note">
+        <span><i className="chain-dot chain-dot--trade" />上游贸易与供应</span>
+        <span><i className="chain-dot chain-dot--contract" />企业集成与承接</span>
+        <span><i className="chain-dot chain-dot--application" />合同及项目应用</span>
+        <p>图谱完整展示当前供应链已关联的全部主体和采购项目；证据等级及尚待核实事项以“供应链证据链”页面为准。</p>
+      </div>
+    </section>
+  );
+}
+
+type NetworkTone = "trade" | "focus" | "contract" | "application";
+type NetworkGraphNode = {
+  id: string;
+  eyebrow: string;
+  name: string;
+  detail: string;
+  icon: typeof Factory;
+};
+type PositionedNetworkGraphNode = NetworkGraphNode & { x: number; y: number };
+type NetworkGraphStage = {
+  key: string;
+  title: string;
+  subtitle: string;
+  tone: NetworkTone;
+  icon: typeof Factory;
+  nodes: NetworkGraphNode[];
+};
+
+function graphStagePositions(count: number) {
+  if (count <= 1) return [50];
+  if (count === 2) return [22, 78];
+  if (count === 3) return [14, 50, 86];
+  return [11.5, 37, 63, 88.5];
+}
+
+function graphNodeY(index: number, count: number, height: number) {
+  if (count <= 1) return height / 2 + 25;
+  const top = 130;
+  const bottom = height - 70;
+  return top + ((bottom - top) * index) / (count - 1);
+}
+
+function graphNodeHalfWidth(stageCount: number) {
+  return stageCount >= 4 ? 91 : stageCount === 3 ? 108 : 120;
+}
+
+function connectGraphStages(
+  fromNodes: PositionedNetworkGraphNode[],
+  toNodes: PositionedNetworkGraphNode[],
+  tone: "trade" | "contract" | "application",
+) {
+  const edgeCount = Math.max(fromNodes.length, toNodes.length);
+  return Array.from({ length: edgeCount }, (_, index) => ({
+    from: fromNodes[index % fromNodes.length],
+    to: toNodes[index % toNodes.length],
+    tone,
+  }));
+}
+
+function DynamicNetworkNode({ node, tone, stageCount }: {
+  node: PositionedNetworkGraphNode;
+  tone: NetworkTone;
+  stageCount: number;
+}) {
+  const Icon = node.icon;
+  return <article
+    className={`dynamic-network-node dynamic-network-node--${tone}`}
+    style={{ left: `${node.x}%`, top: node.y, width: `${graphNodeHalfWidth(stageCount) * .2}%` }}
+  >
+    <span className="dynamic-network-node-icon"><Icon size={17} /></span>
+    <div>
+      <span>{node.eyebrow}</span>
+      <strong>{node.name}</strong>
+      <small>{node.detail}</small>
+    </div>
+  </article>;
+}
+
+function LegacyGenericSupplyChainMap({
+  investigation, entities, cases, shipments,
+}: {
+  investigation: SupplyChainInvestigation;
+  entities: SupplyChainEntity[];
+  cases: SupplyChainCase[];
+  shipments: SupplyChainShipment[];
+}) {
+  const suppliers = entities.filter((item) => (
+    item.country === "China"
+    || item.entity_type === "component_supplier"
+    || item.entity_type === "trading_company"
+    || item.entity_type === "parent_company"
+  ));
+  const endUsers = entities.filter((item) => (
+    item.entity_type === "military_end_user"
+    || item.entity_type === "government_end_user"
+    || item.entity_type === "government_agency"
+    || item.entity_type === "industrial_end_user"
+    || item.entity_type === "terminal_shipyard"
+    || item.entity_type === "end_user"
+  ));
+  const primaryCase = cases[0];
+  const integrator = entities.find((item) => item.id === primaryCase?.supplier_entity_id)
+    || entities.find((item) => item.entity_type === "integrator")
+    || entities.find((item) => item.entity_type === "defense_supplier")
+    || entities.find((item) => !suppliers.some((supplier) => supplier.id === item.id))
+    || entities[0];
+  const shipmentByExporter = new Map(
+    shipments.map((item) => [item.exporter_name.trim().toLocaleLowerCase(), item]),
+  );
+  const visibleSuppliers = suppliers.filter((item) => item.id !== integrator?.id).slice(0, 3);
+  const projectNodes = [
+    ...endUsers.slice(0, 3).map((entity) => ({
+      id: entity.id,
+      name: entityDisplayName(entity),
+      eyebrow: "政府或军方最终用户",
+      role: entity.defense_roles?.[0] || "最终用户与装备应用端",
+      icon: Landmark,
+    })),
+    ...cases.map((item) => ({
+      id: item.id,
+      name: item.target_program || item.title,
+      eyebrow: item.procurement_agency || "军方采购项目",
+      role: item.product || "采购与项目供应关系",
+      icon: Crosshair,
+    })),
+  ].filter((item, index, rows) => rows.findIndex((row) => row.name === item.name) === index).slice(0, 3);
+  const targetCountry = directions.find((item) => item.id === investigation.country)?.short
+    || investigation.country;
+  const supplierPositions = [
+    "chain-network-node--supplier-one",
+    "chain-network-node--supplier-two",
+    "chain-network-node--supplier-three",
+  ];
+  const programPositions = [
+    "chain-network-node--program-one",
+    "chain-network-node--program-two",
+    "chain-network-node--program-three",
+  ];
+
+  return (
+    <section className="supply-chain-visual">
+      <header>
+        <div>
+          <span>SUPPLY CHAIN MAP</span>
+          <h3>供应链条展示</h3>
+        </div>
+        <small>{investigation.name} · {investigation.completeness_level} · 证据完整度 {investigation.completeness_score}%</small>
+      </header>
+      <div className="chain-network">
+        <div className="chain-network-grid" aria-hidden="true" />
+        <div className="chain-network-orbit chain-network-orbit--one" aria-hidden="true" />
+        <div className="chain-network-orbit chain-network-orbit--two" aria-hidden="true" />
+
+        <div className="chain-network-group chain-network-group--suppliers">
+          <Factory size={18} />
+          <div><strong>上游供应端</strong><small>集团、供应商、制造与贸易节点</small></div>
+        </div>
+        <div className="chain-network-group chain-network-group--programs">
+          <ShieldCheck size={18} />
+          <div><strong>{targetCountry}应用端</strong><small>采购合同、最终用户与装备项目</small></div>
+        </div>
+
+        <svg className="chain-network-lines" viewBox="0 0 1200 680" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="generic-arrow-trade" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--trade" />
+            </marker>
+            <marker id="generic-arrow-contract" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--contract" />
+            </marker>
+            <marker id="generic-arrow-application" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" className="chain-marker chain-marker--application" />
+            </marker>
+          </defs>
+          <path id="generic-trade-1" className="chain-path chain-path--trade" d="M286 196 C360 196 372 300 458 318" markerEnd="url(#generic-arrow-trade)" />
+          <path id="generic-trade-2" className="chain-path chain-path--trade" d="M286 338 C356 338 384 338 458 338" markerEnd="url(#generic-arrow-trade)" />
+          <path id="generic-trade-3" className="chain-path chain-path--trade" d="M286 480 C360 480 374 382 458 358" markerEnd="url(#generic-arrow-trade)" />
+          <path id="generic-contract" className="chain-path chain-path--contract" d="M600 150 C600 204 600 235 600 276" markerEnd="url(#generic-arrow-contract)" />
+          <path id="generic-application-1" className="chain-path chain-path--application" d="M742 318 C816 306 830 196 900 196" markerEnd="url(#generic-arrow-application)" />
+          <path id="generic-application-2" className="chain-path chain-path--application" d="M742 338 C816 338 830 338 900 338" markerEnd="url(#generic-arrow-application)" />
+          <path id="generic-application-3" className="chain-path chain-path--application" d="M742 358 C816 370 830 480 900 480" markerEnd="url(#generic-arrow-application)" />
+          <circle r="5" className="chain-particle chain-particle--trade">
+            <animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#generic-trade-1" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--trade">
+            <animateMotion dur="3.2s" begin="-1.6s" repeatCount="indefinite"><mpath href="#generic-trade-3" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--contract">
+            <animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#generic-contract" /></animateMotion>
+          </circle>
+          <circle r="5" className="chain-particle chain-particle--application">
+            <animateMotion dur="3s" repeatCount="indefinite"><mpath href="#generic-application-2" /></animateMotion>
+          </circle>
+        </svg>
+
+        <span className="chain-relation-label chain-relation-label--trade">跨境输入</span>
+        <span className="chain-relation-label chain-relation-label--contract">合同授予</span>
+        <span className="chain-relation-label chain-relation-label--application">项目供应</span>
+
+        {visibleSuppliers.map((entity, index) => {
+          const shipment = shipmentByExporter.get(entity.name.trim().toLocaleLowerCase())
+            || (entity.name_zh ? shipmentByExporter.get(entity.name_zh.trim().toLocaleLowerCase()) : undefined);
+          return <NetworkNode
+            key={entity.id}
+            className={supplierPositions[index]}
+            icon={Factory}
+            eyebrow={
+              entity.entity_type === "parent_company" ? "集团控制与技术节点"
+                : entity.entity_type === "trading_company" ? "贸易供应节点"
+                  : "制造供应节点"
+            }
+            name={entityDisplayName(entity)}
+            role={shipment?.product || entity.defense_roles?.[0] || "部件或设备供应"}
+            tone="trade"
+          />;
+        })}
+        {!visibleSuppliers.length && <NetworkNode
+          className="chain-network-node--supplier-two"
+          icon={Factory}
+          eyebrow="待穿透节点"
+          name="上游供应主体待识别"
+          role="需补充完整提单、制造商或出口商信息"
+          tone="trade"
+        />}
+        {primaryCase && <NetworkNode
+          className="chain-network-node--dla"
+          icon={Landmark}
+          eyebrow={primaryCase.procurement_agency || "政府采购机构"}
+          name={primaryCase.title}
+          role={primaryCase.procurement_reference || primaryCase.product || "采购合同"}
+          tone="contract"
+        />}
+        <NetworkNode
+          className="chain-network-node--center"
+          icon={Building2}
+          eyebrow="核心整合与交付节点"
+          name={integrator ? entityDisplayName(integrator) : "核心企业待识别"}
+          role={integrator?.defense_roles?.join(" · ") || primaryCase?.product || "供应链集成与项目交付"}
+          tone="focus"
+          emphasis
+        />
+        {projectNodes.map((item, index) => <NetworkNode
+          key={item.id}
+          className={programPositions[index]}
+          icon={item.icon}
+          eyebrow={item.eyebrow}
+          name={item.name}
+          role={item.role}
+          tone="application"
+        />)}
+      </div>
+      <div className="supply-chain-visual-note">
+        <span><i className="chain-dot chain-dot--trade" />跨境贸易关系</span>
+        <span><i className="chain-dot chain-dot--contract" />政府采购合同</span>
+        <span><i className="chain-dot chain-dot--application" />装备应用关系</span>
+        <p>图中贸易记录证明相关产品进入企业供应链；除非另有物料清单或最终用途文件，不代表该批货物已被确认用于具体军方项目。</p>
+      </div>
+    </section>
+  );
+}
+
+function CsbcPumpSupplyChainMap({
+  investigation, entities, cases, shipments,
+}: {
+  investigation: SupplyChainInvestigation;
+  entities: SupplyChainEntity[];
+  cases: SupplyChainCase[];
+  shipments: SupplyChainShipment[];
+}) {
+  const byId = new Map(entities.map((item) => [item.id, item]));
+  const sulzerIndia = byId.get("ent-sulzer-pumps-india");
+  const csbc = byId.get("ent-csbc-taiwan");
+  const endUser = byId.get("ent-cpc-dalin-petrochemical-center");
+  const upstream = [byId.get("ent-sulzer-suzhou"), byId.get("ent-wolong-nanyang")]
+    .filter((item): item is SupplyChainEntity => Boolean(item));
+  const productByExporter = new Map(
+    shipments.map((item) => [item.exporter_name.trim().toLocaleLowerCase(), item.product]),
+  );
+  const delivery = shipments.find((item) => item.importer_entity_id === csbc?.id)
+    || shipments.find((item) => item.destination_country === "Taiwan");
+  const project = cases[0];
+
+  return (
+    <section className="supply-chain-visual supply-chain-visual--pump">
+      <header>
+        <div>
+          <span>SUPPLY CHAIN MAP</span>
+          <h3>供应链条展示</h3>
+        </div>
+        <small>{investigation.name} · {investigation.completeness_level} · 证据完整度 {investigation.completeness_score}%</small>
+      </header>
+      <div className="pump-chain-map">
+        <div className="pump-chain-zone pump-chain-zone--upstream">
+          <div className="pump-chain-zone-title"><Factory size={17} /><span>中国上游供应端</span></div>
+          <div className="pump-chain-suppliers">
+            {upstream.map((entity) => (
+              <article key={entity.id} className="pump-chain-node pump-chain-node--supplier">
+                <Factory size={18} />
+                <div>
+                  <strong>{entityDisplayName(entity)}</strong>
+                  <small>{productByExporter.get(entity.name.trim().toLocaleLowerCase()) || entity.defense_roles?.[0] || "泵组部件及配套产品"}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <FlowArrow label="部件供应" />
+
+        <article className="pump-chain-node pump-chain-node--integrator">
+          <Building2 size={20} />
+          <div>
+            <span>印度集成与交付节点</span>
+            <strong>{sulzerIndia?.name || "Sulzer Pumps India"}</strong>
+            <small>{sulzerIndia?.defense_roles?.join(" · ") || "接收中国产泵体、电机等部件，完成泵组集成与项目交付"}</small>
+          </div>
+        </article>
+
+        <FlowArrow label="泵组交付" />
+
+        <article className="pump-chain-node pump-chain-node--epc">
+          <ShipWheel size={20} />
+          <div>
+            <span>中国台湾EPC承接端</span>
+            <strong>{csbc?.name || "CSBC Corporation, Taiwan"}</strong>
+            <small>{delivery?.product || "接收石化工艺泵组并承担项目工程实施"}</small>
+          </div>
+        </article>
+
+        <FlowArrow label="项目安装应用" />
+
+        <div className="pump-chain-zone pump-chain-zone--application">
+          <div className="pump-chain-zone-title"><Landmark size={17} /><span>中国台湾应用端</span></div>
+          <article className="pump-chain-node pump-chain-node--application">
+            <Landmark size={20} />
+            <div>
+              <strong>{endUser?.name || "CPC Dalin Petrochemical Storage Center"}</strong>
+              <small>{project?.target_program || project?.product || "台湾中油大林石化油品储运中心项目"}</small>
+            </div>
+          </article>
+        </div>
+      </div>
+      <div className="supply-chain-visual-note">
+        <span><i className="chain-dot chain-dot--trade" />中国部件输入</span>
+        <span><i className="chain-dot chain-dot--contract" />泵组集成交付</span>
+        <span><i className="chain-dot chain-dot--application" />EPC项目应用</span>
+        <p>链条终点为台湾中油大林石化储运中心项目；台船在该链条中是EPC承接和项目实施节点，不是军用最终用户。</p>
+      </div>
+    </section>
+  );
+}
+
+function FlowArrow({ label }: { label: string }) {
+  return <div className="pump-chain-arrow" aria-label={label}><span>{label}</span><i /></div>;
 }
 
 function NetworkNode({

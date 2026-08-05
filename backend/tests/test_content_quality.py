@@ -91,3 +91,27 @@ def test_quality_gate_rejects_incomplete_model_output(monkeypatch) -> None:
 
     assert not approved
     assert rejected[0].reason == "大模型未确认文章完整性或海关业务价值"
+
+
+def test_customs_hotspot_uses_conservative_rule_fallback_without_model() -> None:
+    item = FetchItem(
+        title="Fuel shortage raises China border smuggling concerns after refinery attacks",
+        url="https://example.com/energy/shortage",
+        content=(
+            "Refinery attacks caused a regional diesel and gasoline shortage and a sharp price increase. "
+            "China border authorities warned that customs inspections would focus on fuel smuggling, auxiliary "
+            "vehicle tanks and false export declarations. The disruption changed import and export routes "
+            "and created a black market price differential across the border. "
+        ) * 3,
+        summary="Fuel supply disruption created a cross-border price gap and customs enforcement concern.",
+    )
+    context = {"topic_id": "weekly-trade-current-affairs"}
+
+    approved, rejected = asyncio.run(curate_article_candidates([item], None, context))
+
+    assert not rejected
+    assert len(approved) == 1
+    review = approved[0].raw_metadata["customs_hotspot_review"]
+    assert review["method"] == "rule_fallback"
+    assert "边境走私" in review["customs_risk"]
+    assert review["is_inference"] is True

@@ -22,6 +22,7 @@ type SourceTreeGroup = {
 const MODELS_GROUP_ID = "__models__";
 
 const PRIMARY_CATEGORY_LABELS: Record<string, string> = {
+  defense_procurement: "政府与军方采购",
   commodity: "商品与大宗商品",
   customs: "海关监管",
   enforcement: "执法风险",
@@ -61,6 +62,7 @@ const PRIMARY_CATEGORY_LABELS: Record<string, string> = {
 };
 
 const PRIMARY_CATEGORY_ORDER = [
+  "defense_procurement",
   "official-policy",
   "customs-enforcement",
   "export-control-sanctions",

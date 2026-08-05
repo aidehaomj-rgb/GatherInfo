@@ -361,9 +361,14 @@ export interface SupplyChainInvestigation {
   shipment_ids: string[];
   evidence_ids: string[];
   open_source_evidence_ids: string[];
-  report_ids: string[];
-  created_at: string | null;
-}
+    report_ids: string[];
+    completeness_score: number;
+    completeness_level: string;
+    completeness_details: Record<string, number>;
+    completeness_maximums: Record<string, number>;
+    verification_gaps: string[];
+    created_at: string | null;
+  }
 
 export interface SupplyChainEntity {
   id: string;

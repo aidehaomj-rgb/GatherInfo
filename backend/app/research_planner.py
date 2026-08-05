@@ -52,6 +52,21 @@ ENFORCEMENT_SEARCH_MISSIONS = (
     ("Global", "", "customs border major seizure drugs firearms wildlife tobacco counterfeit organized crime"),
 )
 
+CUSTOMS_HOTSPOT_SEARCH_MISSIONS = (
+    "oil refinery attack fuel shortage price surge border smuggling black market customs",
+    "fertilizer shortage price surge port congestion China third country import transshipment customs",
+    "chemical feedstock shortage temporary tariff exemption customs misdeclaration trade risk",
+    "critical minerals export control third country transshipment false declaration customs",
+    "dual use export restrictions hidden end user intermediary procurement customs",
+    "sanctions evasion ship to ship transfer origin laundering customs Asia trade",
+    "gold precious metal concealed electronic equipment VAT fraud customs",
+    "rice grain food price surge export restriction origin fraud phytosanitary customs",
+    "agricultural input shortage counterfeit fertilizer smuggling customs Asia",
+    "trade remedy anti dumping duty circumvention third country customs China",
+    "supply disruption commodity price differential border illicit trade customs China",
+    "海关 走私 风险 价格上涨 供应短缺 第三国 转口 原产地 近一个月",
+)
+
 
 async def build_research_queries(
     topic: Topic,
@@ -78,6 +93,13 @@ async def build_research_queries(
         # A fixed geographic mission matrix is more reliable than asking a
         # sometimes-slow model to invent a new plan for every weekly run. The
         # model remains authoritative at the evidence-review stage.
+        return _fallback_queries(
+            topic, current_date, safe_window_days, max_queries,
+        )
+    if topic.id == "weekly-trade-current-affairs":
+        # The customs-risk chain must be represented even when query-planning
+        # models are unavailable. A stable mission matrix also makes recurring
+        # runs comparable across periods.
         return _fallback_queries(
             topic, current_date, safe_window_days, max_queries,
         )
@@ -184,6 +206,13 @@ def _fallback_queries(
                     f"{directives} || {query} {year_hint}{exclusions}"
                 )[:420]
             )
+        return queries[:max_queries]
+
+    if topic.id == "weekly-trade-current-affairs":
+        queries = [
+            f"{mission} China Chinese goods company border trade {date_hint}"
+            for mission in CUSTOMS_HOTSPOT_SEARCH_MISSIONS
+        ]
         return queries[:max_queries]
 
     keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]

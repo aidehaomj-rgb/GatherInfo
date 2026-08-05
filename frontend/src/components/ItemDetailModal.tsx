@@ -31,8 +31,10 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
   ].filter((entry) => entry[1] != null && String(entry[1]).trim()) : [];
 
   // 清洗内容：过滤导航菜单噪音
-  const translatedSummary = cleanContent(item.summary_zh) || "";
-  const translatedContent = cleanContent(item.content_zh) || "";
+  // Translations are curated text. Preserve the stored value when the generic
+  // page cleaner is too aggressive with a short translated paragraph.
+  const translatedSummary = cleanContent(item.summary_zh) || item.summary_zh?.trim() || "";
+  const translatedContent = cleanContent(item.content_zh) || item.content_zh?.trim() || "";
   const originalSummary = cleanContent(item.summary) || "";
   const originalContent = cleanContent(item.content) || "";
 
@@ -113,6 +115,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
           {/* 正文 */}
           {displayContent ? (
             <div className="reading-content">
+              {hasTranslation && <strong>中文译文</strong>}
               <div style={{ whiteSpace: "pre-wrap", fontSize: "0.9rem", lineHeight: 1.8 }}>
                 {displayContent}
               </div>

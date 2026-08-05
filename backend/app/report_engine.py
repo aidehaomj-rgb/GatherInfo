@@ -238,6 +238,11 @@ def _build_item_context(
             if isinstance(metadata.get("enforcement_review"), dict)
             else {}
         )
+        customs_hotspot_review = (
+            metadata.get("customs_hotspot_review")
+            if isinstance(metadata.get("customs_hotspot_review"), dict)
+            else {}
+        )
         translated_content = str(translation.get("content_zh") or it.content or "")
         context.append({
             "id": it.id,
@@ -259,6 +264,7 @@ def _build_item_context(
             "quality_score": it.quality_score or 0.0,
             "relevance_score": it.relevance_score or 0.0,
             "enforcement_review": enforcement_review,
+            "customs_hotspot_review": customs_hotspot_review,
         })
     return context
 

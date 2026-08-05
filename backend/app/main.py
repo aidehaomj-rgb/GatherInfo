@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # ── Rate limiting middleware ───────────────────────────────────────────
 
-_RATE_LIMIT_MAX = 120
+_RATE_LIMIT_MAX = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "600"))
 _RATE_LIMIT_WINDOW = 60
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 

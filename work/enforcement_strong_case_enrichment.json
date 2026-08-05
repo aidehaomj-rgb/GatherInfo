@@ -1,0 +1,142 @@
+{
+  "a5128dfb24239123": {
+    "languages": "中文、英文",
+    "findings": "关联报道进一步确认，案件涉及约50台Super Micro服务器，部分货物被指经日本转运至香港或中国大陆；台湾地区检方还搜索了Super Micro台湾、撼讯科技（Albatron Technology）和Chief Telecom等地点。另有美国司法案件披露以空箱、虚假标签和过手公司规避芯片出口管制的相似手法，但该案与本案不是同一案件，不能混同定性。",
+    "multimodal": "公开报道配图以企业、服务器及执法示意图为主，未发现能够识别设备序列号、箱号、提单号或运输标签的案件原始图片。",
+    "assessment": "核心事实由多家媒体和检方信息交叉印证；具体芯片型号、报关单号、设备序列号和最终用户仍待案卷核验。",
+    "sources": [
+      ["AP：台湾检方调查服务器转运案", "https://apnews.com/article/taiwan-china-nvidia-chips-smuggling-supermicro-servers-4db99d2285450091580d710450b5e97d"],
+      ["Reuters转载：Super Micro台湾办公室被搜索", "https://www.reuters.com/world/asia-pacific/taiwan-prosecutors-search-super-micro-offices-chip-smuggling-probe-2026-07-30/"]
+    ]
+  },
+  "472a75422de01d1b": {
+    "languages": "英文",
+    "findings": "补充检索确认该票货物由中国发往纽约州锡拉丘兹，经芝加哥奥黑尔机场入境，含10412片药物以及生长激素、类固醇等制剂。执法部门将其描述为“主纸箱嵌套”模式：外箱内装多件未列舱单、已贴美国境内配送标签的小包裹，随后移交国土安全调查局。",
+    "multimodal": "已核验3张CBP证物照片，可见药盒、瓶装制剂及1.2862千克、984.3克、4.0234千克等称重画面；照片未展示外包装标签，无法读取主运单、分运单或包裹追踪号。",
+    "assessment": "数量、路线和拆包手法可信度高；寄件人、收件人、中国供应商及单证编号未公开。",
+    "sources": [["CBS Chicago原始报道及CBP照片", "https://www.cbsnews.com/chicago/news/federal-agents-seize-cornucopia-unapproved-medications-ohare/"]]
+  },
+  "c9697ddf3b5ae6e1": {
+    "languages": "英文",
+    "findings": "补充报道确认休斯敦IAH执法行动查获近2万件假冒世界杯相关商品，包括球衣、足球及其他FIFA标识商品，建议零售价接近900万美元；报道指多数货物来自中国，但这是阶段性集中执法成果，并非单一集装箱案件。",
+    "multimodal": "可检索到的新闻配图为执法展示图，分辨率及构图不足以识别包裹面单、运单号或进口主体。",
+    "assessment": "货物规模和中国来源关系有公开报道支持；生产商、寄件企业、进口商及包裹级数据未公开。",
+    "sources": [["Houston Business Journal报道", "https://www.bizjournals.com/houston/news/2026/07/27/cbp-counterfeit-fifa-world-cup-merchandise-iah.html"]]
+  },
+  "codex-us-chinese-meth-australia-20260724": {
+    "languages": "英文",
+    "findings": "美国司法部披露Jing Tang Li在2023年2月至12月间参与7票洛杉矶至澳大利亚货运，使用虚假公司和虚假品名：2个托盘、23箱地毯和橡胶垫夹藏855.5公斤冰毒；家具腿金属管夹藏32.5公斤；铸造机夹藏202.5公斤；另有两票以轮毂测试设备名义各夹藏102.8公斤。其2024年8月在洛杉矶仓储枢纽外被捕，车辆中另有约957.7克冰毒。",
+    "multimodal": "司法部页面未提供可用于识别集装箱、托盘唛头或提单号的案件原图。“shipment containers”在案情中指夹藏载体或包装结构，不足以证明使用了ISO海运集装箱。",
+    "assessment": "人物、数量、虚假品名和路线由司法部确认；7票货物的虚假公司名称、提单号、承运人和澳大利亚收货人未公开。",
+    "sources": [["美国司法部判刑通报", "https://www.justice.gov/usao-cdca/pr/chinese-national-sentenced-over-7-years-federal-prison-role-group-attempted-ship-over"]]
+  },
+  "codex-us-chinese-turtle-trafficking-20260723": {
+    "languages": "英文、中文",
+    "findings": "司法部确认Kin Keung Ho和Lihua Owen Ma居住在纽约史坦顿岛。Ho在2024年6月1日至2025年11月13日期间寄出约99个包裹、共578只龟，虚假申报为水晶或石头，物种包括东部箱龟、西部箱龟、三趾箱龟、斑点龟和钻纹龟。",
+    "multimodal": "公开页面未展示带追踪号的邮包标签或海关申报单图片，无法从图片提取包裹编号。",
+    "assessment": "人员、包裹数量、物种和虚假申报方式由司法部确认；香港收件人、交易平台、支付账户和邮包追踪号仍未公开。",
+    "sources": [["美国司法部认罪通报", "https://www.justice.gov/opa/pr/two-chinese-nationals-plead-guilty-trafficking-turtles-hong-kong"]]
+  },
+  "codex-us-unapproved-chinese-drugs-20260723": {
+    "languages": "英文",
+    "findings": "司法部确认Brandon Piper（35岁，密歇根州Gobles）被判21个月监禁，其先通过加拿大网站、后通过MilestonePurity.com销售中国来源的司美格鲁肽和替尔泊肽等产品，部分产品标注“仅供研究”或虚假标注“美国制造”，缺少处方、使用说明及黑框警告。共同被告Mayze Nichols另案等待判决。",
+    "multimodal": "公开通报和量刑材料未展示中国发货标签、快递面单、批号或生产企业标签，无法通过图片补齐供应商和运单。",
+    "assessment": "销售网站、被告、产品和标签手法有司法文件支持；中国生产商、采购订单、快递承运人及运单号未公开。",
+    "sources": [
+      ["美国司法部判刑通报", "https://www.justice.gov/usao-wdmi/pr/2026_0723_Piper_Sentencing_PR"],
+      ["案件量刑材料", "https://npr.brightspotcdn.com/87/c3/b8a35af24624853e0f1f9807a7fd/usa-v-piper-penalty-sheet.pdf"]
+    ]
+  },
+  "codex-thailand-origin-fraud-20260722": {
+    "languages": "泰文、英文、中文",
+    "findings": "泰国政府及海关材料确认案件包括中国来源TWOMOON香烟537万支，以及中国来源美工刀、多功能工具等商品虚假标注“泰国制造”；部分报道将多批执法成果合并统计，因此香烟案和工具案应按各自批次核对，不能仅凭总额推定为同一票货。林查班港和自由区是后续核查重点。",
+    "multimodal": "可检索图片主要为执法展示和包装照片，未发现清晰展示箱门、箱号、封志号、提单页或原产地证书编号的原图。",
+    "assessment": "中国来源、虚假原产地标签和主要货物数量可信；进口商、出口商、箱号及原产地证书编号未公开。",
+    "sources": [
+      ["泰国政府公共关系部英文通报", "https://thailand.prd.go.th/en/content/category/detail/id/2078/iid/524617"],
+      ["泰国海关材料", "https://www.customs.go.th/data_files/70e750f80c366d0fc4ed2090f42cf701.pdf"]
+    ]
+  },
+  "codex-ph-china-frozen-food-20260721": {
+    "languages": "英文、菲律宾语",
+    "findings": "菲律宾海关确认5个中国来源货柜在马尼拉港被3份装载前控制令和2份预警令拦截并实施100%查验。申报品名包括Fu Hua Lao Jiang经典鱿鱼丸、鱼豆腐、鱼籽丸和千页豆腐，实货包括去皮鸡胸、冻鸽、北京鸭及冻鸭肉；货值17030697.28比索，税费6238192.46比索，合计23268889.74比索。",
+    "multimodal": "已核验3张现场照片，仅见官员、仓库和袋装鸡肉，未出现货柜箱门或提单文件，不能从图片读取5个货柜的箱号、封志号和提单号。",
+    "assessment": "货柜数量、来源、申报品名、实货和金额由菲律宾海关确认；进口商、发货人和箱单编号仍待执法案卷。",
+    "sources": [
+      ["菲律宾海关官方通报", "https://customs.gov.ph/boc-seizes-%E2%82%B123-million-worth-of-misdeclared-frozen-agricultural-products-and-foodstuffs-through-coordinated-efforts-with-da/"],
+      ["菲律宾通讯社报道", "https://www.pna.gov.ph/articles/1279936"]
+    ]
+  },
+  "codex-sri-lanka-chinese-cigarettes-20260717": {
+    "languages": "英文、僧伽罗语关键词检索",
+    "findings": "多轮检索确认斯里兰卡海关中央情报部门查获约360万支中国来源香烟，估值约4.5亿斯里兰卡卢比，藏于申报为冷库板/保温板的货物内部，报道指货物拟交付德希瓦拉一家企业。",
+    "multimodal": "图片检索返回多张斯里兰卡既往香烟查获照片，但无法确认与本案同一批次，已排除作为证据；当前未找到可核验且能显示箱号或提单号的案件对应原图。",
+    "assessment": "数量、藏匿方式、中国来源及交付地区有多家报道交叉支持；收货企业、中国发货人、集装箱号、船名航次未公开。",
+    "sources": [
+      ["FrontPage Sri Lanka报道", "https://frontpage.lk/amp/chilled-panels-hot-cargo-sri-lanka-seize-rs-450-million-chinese-cigarette-haul/"],
+      ["Sri Lanka News Papers关联报道", "https://www.lankanewspapers.com/2026/07/15/sri-lanka-customs-bust-rs-450-million-chinese-cigarette-smuggling-operation-hidden-in-cold-storage-panels"]
+    ]
+  },
+  "8d7c2ec3714b5419": {
+    "languages": "中文、英文",
+    "findings": "香港特区政府及香港海关通报显示，两名菲律宾籍女子自曼谷抵港，行李内共藏约12公斤大麻花；另有一名47岁中国籍男子由曼谷经马尼拉抵港，寄舱行李内藏约10公斤大麻花。两案合计约22公斤，估值约410万港元。",
+    "multimodal": "官方附图为毒品及行李证物展示，公开版本未清晰展示旅客姓名、航班号、行李牌或托运行李条码，不宜通过图像推断具体航班和身份。",
+    "assessment": "国籍、路线、重量和查获地点由官方通报确认；姓名、航班、护照及行李牌信息未公开。",
+    "sources": [
+      ["香港特区政府新闻公报", "https://www.info.gov.hk/gia/general/202607/16/P2026071600885p.htm"],
+      ["香港海关新闻稿", "https://www.customs.gov.hk/sc/customs-announcement/press-release/index_id_5467.html"]
+    ]
+  },
+  "codex-portugal-ipr-bags-20260710": {
+    "languages": "葡萄牙语、英文",
+    "findings": "葡萄牙税务及海关部门确认，Alfandega de Alverca在2026年第二季度扣停一票来自中国的250个箱包，商业价值8747.50欧元；权利人代表确认侵权后，货物被销毁。",
+    "multimodal": "官方页面附有箱包照片，但未展示外箱标签、承运单、集装箱或进口申报文件，无法识别发货企业、进口商和运输编号。",
+    "assessment": "来源、数量、价值、侵权确认及处置由官方页面支持；品牌、收发货主体和单证编号未披露。",
+    "sources": [["葡萄牙税务及海关官方通报", "https://info.portaldasfinancas.gov.pt/pt/destaques/Paginas/Direitos_propriedade_intelectual_10_07.aspx"]]
+  },
+  "codex-indonesia-illegal-used-phones-20260710": {
+    "languages": "印度尼西亚语、英文、中文",
+    "findings": "印尼警方材料进一步披露，案件涉及76756部中国来源二手手机，报道估值约2358亿印尼盾，经泗水朱安达机场货运渠道入境。已披露人员包括中国籍控制人DCP（又称PR）、中国籍分销人员SJ、PT TSL负责人MT及被通缉的PT TSI负责人TW；警方还调查与海关环节有关的行贿问题。",
+    "multimodal": "公开搜查及证物图片未见可可靠读取的航空主运单、分运单或手机序列号清单，无法由图片还原单票物流记录。",
+    "assessment": "数量、路线、涉案企业及人员缩写获警方和通讯社报道支持；人员全名、中国供货企业、AWB号及每批次IMEI清单未公开。",
+    "sources": [
+      ["印尼警方案件进展", "https://www.humas.polri.go.id/news/detail/2454574-penyidikan-jaringan-impor-ilegal-ponsel-bekas-rampung-tiga-tersangka-sudah-p-21-dan-satu-buron"],
+      ["ANTARA新增嫌疑人报道", "https://www.antaranews.com/berita/5586887/polri-tetapkan-dua-tersangka-baru-dalam-kasus-impor-ilegal-ponsel"]
+    ]
+  },
+  "codex-indonesia-gold-smuggling-20260709": {
+    "languages": "印度尼西亚语、英文、中文",
+    "findings": "印尼海关披露，中国籍旅客GP于7月1日约17时30分在苏丹伊斯坎达穆达国际机场准备乘商业航班前往马来西亚时被查，随身小包内有两块金条，总重2989克、估值约72.54亿印尼盾，未申报。案件移交亚齐警方，黄金来源仍在调查。",
+    "multimodal": "已核验ANTARA现场图，可见执法人员和铝箔包裹/黄金证物，但图片未显示可识别的金条序列号、航班号、登机牌或行李标签。",
+    "assessment": "国籍、人员缩写、时间地点、目的地、重量和价值由官方引用报道支持；黄金来源、航班及交易对手未查明。",
+    "sources": [["ANTARA印尼海关通报", "https://www.antaranews.com/berita/5641907/bea-cukai-gagalkan-penyelundupan-emas-29-kilogram-ke-malaysia"]]
+  },
+  "codex-us-fentanyl-from-china-20260708": {
+    "languages": "英文、中文关键词检索",
+    "findings": "美国司法部披露Devito Duran Young和Trace Davrin Works获刑，关联人员包括Andreaus Benard Oliver Sr.、Andreaus Benard Oliver Jr.以及中国籍在逃人员Xin Wang、Gao Yong。案件号为美国佐治亚中区法院3:25-cr-00002。Young被指在狱中使用违禁手机从中国订购芬太尼，执法搜查还发现175个以上用于浸泡合成大麻素纸张的金属盘。",
+    "multimodal": "公开通报未展示中国寄出包裹、邮政标签或付款凭证图片，无法识别包裹追踪号、寄件地址和承运渠道。",
+    "assessment": "人员、案件号和从中国采购事实由司法部确认；中国寄件主体、包裹编号、付款账户和具体入境口岸未公开。",
+    "sources": [
+      ["美国司法部判刑通报", "https://www.justice.gov/usao-mdga/pr/two-georgians-sentenced-trafficking-fentanyl-china"],
+      ["PACER案件索引", "https://www.pacermonitor.com/public/case/59447106/USA_v_YOUNG_et_al"]
+    ]
+  },
+  "codex-singapore-gold-carousel-20260708": {
+    "languages": "英文、中文",
+    "findings": "新加坡警方披露Seow Choon Pheng、Seow Choon Lien、Chu Tung Wu和Tan Kui Moi被起诉，相关企业包括Macropac System Pte Ltd、Megaspeed Services Pte Ltd和Seg Metallic Electronics Trading Pte Ltd。网络从两家由中国团伙控制的供应商进口信号转换器，设备内夹藏黄金并虚高出口价格骗取中国出口退税；黄金在新加坡拆出出售，主板再经香港公司返回中国组装并循环使用。",
+    "multimodal": "警方通报未公开信号转换器拆解照片、金条编号、发票、提单或香港中转公司文件，不能从公开图片补齐闭环单证。",
+    "assessment": "新加坡人员、企业及循环贸易模式由警方确认；中国供应商、香港公司、发票和物流编号未公开。",
+    "sources": [["新加坡警察部队通报", "https://www.police.gov.sg/Media-Hub/News/2026/07/20260708_four_persons_charged_in_multi_national_trade_based_money_laundering_scheme"]]
+  },
+  "codex-ph-china-vapes-20260708": {
+    "languages": "英文、菲律宾语、中文",
+    "findings": "菲律宾海关确认马尼拉国际集装箱港9个中国来源货柜被预警令拦截并100%查验，申报为纸箱、配件、包装袋、厨具、内衣、衣架、鞋盒及鞋类，实货为电子烟套装、一次性电子烟和烟弹，估值136924250比索。同期图集可辨识XBLACK Elite 25000、XBLACK Elite 30000等产品包装，以及外包装上的S-SAM批次/序列标签，可作为后续串并同品牌、同包装批次和同出口主体的检索字段。",
+    "multimodal": "进一步检索发现Daily Tribune同日发布的独立图片图集，共10张原图。图集照片1000160546.jpg右侧粉红色高柜箱门可清晰读取完整柜号CAAU 630269-2；按ISO 6346规则复算校验位为2，与照片一致。同图还能看到GCXU 50252…和CAOU 96270…等残缺标识，但末位被锁杆或构图遮挡，不能可靠补齐，暂不作为完整柜号录入。其余图片可辨识XBLACK Elite 25000、XBLACK Elite 30000及S-SAM包装标签，但未发现提单号、封志号或其余完整柜号。",
+    "assessment": "货柜数量、来源、申报品名、实货及金额由菲律宾海关确认；现已通过案件同期原始图集确认至少一个涉案柜号CAAU 630269-2。另将GCXU 50252…、CAOU 96270…作为残缺柜号线索提示，不视为完整柜号，也不通过算法猜补缺失位。进口商、发货人、提单号、封志号及其余柜号仍未公开或无法从现有图片完整辨识。",
+    "sources": [
+      ["菲律宾海关官方通报", "https://customs.gov.ph/boc-seizes-%E2%82%B1137m-worth-of-smuggled-vape-products-at-micp/"],
+      ["Daily Tribune案件图片图集", "https://tribune.net.ph/2026/07/08/boc-seizes-p137m-in-misdeclared-vapes"],
+      ["2Firsts关联报道", "https://www.2firsts.com/news/philippine-customs-seizes-222-million-in-misdeclared-vape-products-from-china"]
+    ]
+  }
+}

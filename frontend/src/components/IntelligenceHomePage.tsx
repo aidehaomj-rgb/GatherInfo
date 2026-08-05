@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { ArrowRight, BookOpenText, CalendarDays, FileText, Globe2, Newspaper } from "lucide-react";
-import { collectTopic, fetchDashboard, fetchFeaturedItems, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
+import { collectTopic, fetchDashboard, fetchFeaturedItems, fetchItem, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
 import { useToast } from "./ToastProvider";
 import type { CollectedItem, DashboardData, Report, Source, Topic } from "../types";
 import { getDisplayTitle } from "../utils/title";
@@ -128,6 +128,14 @@ export function IntelligenceHomePage() {
 
   const handleCollect = useCallback(() => setCollectDialogOpen(true), []);
   const handleReports = useCallback(() => setViewReportsOpen(true), []);
+  const openItemDetail = useCallback((item: CollectedItem) => {
+    setReadingItem(item);
+    void fetchItem(item.id)
+      .then((fullItem) => setReadingItem((current) => current?.id === item.id ? fullItem : current))
+      .catch(() => {
+        // Keep the list payload visible if the detail request is unavailable.
+      });
+  }, []);
 
   const runCollection = useCallback(async (topicIds: string[]) => {
     if (!topicIds.length) return;
@@ -185,7 +193,7 @@ export function IntelligenceHomePage() {
               const summary = item.summary_zh || item.summary || item.content_zh || item.content || "";
               const date = item.published_at || item.collected_at;
               return (
-                <article key={item.id} className="featured-card" onClick={() => setReadingItem(item)}>
+                <article key={item.id} className="featured-card" onClick={() => openItemDetail(item)}>
                   <div className="featured-card-image" style={{ backgroundImage: `url(${imageUrl})` }} />
                   <div className="featured-card-body">
                     <span className="featured-card-date">
@@ -193,7 +201,7 @@ export function IntelligenceHomePage() {
                       {date ? formatBeijingDate(date, { month: "short", day: "numeric" }) : "未知日期"}
                     </span>
                     <strong className="featured-card-title">{clip(title, 60)}</strong>
-                    <p className="featured-card-summary">{clip(summary, 100)}</p>
+                    <p className="featured-card-summary">{clip(summary, 160)}</p>
                     <div className="featured-card-meta">
                       <span>{source?.name || item.source_id}</span>
                       <span className="featured-card-read">
@@ -237,15 +245,19 @@ export function IntelligenceHomePage() {
                       <span className="news-source-icon">{source?.name?.charAt(0) || "?"}</span>
                       <span>{source?.name || item.source_id}</span>
                       {item.category && <span className="news-badge">{item.category}</span>}
-                      {item.language && <span className="news-badge news-badge--lang">{item.language}</span>}
+                      {(item.title_zh || item.summary_zh || item.content_zh) ? (
+                        <span className="news-badge news-badge--lang">中文译文</span>
+                      ) : item.language ? (
+                        <span className="news-badge news-badge--lang">{item.language}</span>
+                      ) : null}
                       <span className="news-relative-time">入库 {relativeTime}</span>
                     </div>
-                    <button type="button" className="news-title-button" onClick={() => setReadingItem(item)}>
+                    <button type="button" className="news-title-button" onClick={() => openItemDetail(item)}>
                       {title}
                     </button>
                     {summary && <p>{clip(summary, index === 0 ? 240 : 150)}</p>}
                   </div>
-                  <button type="button" className="news-read-button" onClick={() => setReadingItem(item)}>
+                  <button type="button" className="news-read-button" onClick={() => openItemDetail(item)}>
                     <BookOpenText size={14} /> 全文
                   </button>
                 </article>
