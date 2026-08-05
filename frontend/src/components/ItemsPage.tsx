@@ -502,7 +502,20 @@ function ItemCard({ item }: { item: CollectedItem }) {
               <ExternalLink size={12} />
             </a>
           )}
-          {hasTranslation && <span className="chip chip--green"><Languages size={12} /> 译文</span>}
+          {hasTranslation && (
+            <button
+              type="button"
+              className="chip chip--green chip--button"
+              title="查看中文译文和源文件内容"
+              aria-label={`查看中文译文：${displayTitle}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                window.dispatchEvent(new CustomEvent("open-reading", { detail: item }));
+              }}
+            >
+              <Languages size={12} /> 中文译文
+            </button>
+          )}
           {item.quality_review && <span className="chip chip--green"><ShieldCheck size={12} /> AI整理</span>}
           {item.enforcement_review && <span className="chip chip--green">AI审核</span>}
           <span className="chip">{item.language ?? "?"}</span>

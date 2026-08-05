@@ -338,6 +338,124 @@ export interface AutoDiscoverResult {
   providers: DiscoveredProvider[];
 }
 
+export interface SupplyChainDashboard {
+  country: string;
+  investigation_id?: string | null;
+  entities: number;
+  cases: number;
+  shipments: number;
+  evidence: number;
+  open_source_evidence: number;
+  reportable: number;
+  reports: number;
+}
+
+export interface SupplyChainInvestigation {
+  id: string;
+  country: string;
+  name: string;
+  description: string | null;
+  status: string;
+  entity_ids: string[];
+  case_ids: string[];
+  shipment_ids: string[];
+  evidence_ids: string[];
+  open_source_evidence_ids: string[];
+    report_ids: string[];
+    completeness_score: number;
+    completeness_level: string;
+    completeness_details: Record<string, number>;
+    completeness_maximums: Record<string, number>;
+    verification_gaps: string[];
+    created_at: string | null;
+  }
+
+export interface SupplyChainEntity {
+  id: string;
+  name: string;
+  name_zh: string | null;
+  country: string;
+  entity_type: string;
+  aliases: string[];
+  parent_id: string | null;
+  defense_roles: string[];
+  source_url: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface SupplyChainCase {
+  id: string;
+  country: string;
+  title: string;
+  procurement_agency: string | null;
+  procurement_reference: string | null;
+  procurement_date: string | null;
+  supplier_entity_id: string | null;
+  product: string | null;
+  target_program: string | null;
+  source_url: string | null;
+  source_excerpt: string | null;
+  status: string;
+}
+
+export interface SupplyChainShipment {
+  id: string;
+  exporter_name: string;
+  importer_entity_id: string | null;
+  importer_name: string;
+  product: string;
+  hs_code: string | null;
+  shipment_date: string | null;
+  weight_kg: number | null;
+  origin_country: string | null;
+  destination_country: string | null;
+  bill_no: string | null;
+  source_name: string | null;
+  source_url: string | null;
+}
+
+export interface SupplyChainEvidence {
+  id: string;
+  case_id: string;
+  shipment_id: string;
+  relation_type: string;
+  evidence_grade: "A" | "B" | "C";
+  score: number;
+  status: string;
+  reasoning: string | null;
+  model_review: Record<string, unknown> | null;
+  is_reportable: boolean;
+}
+
+export interface SupplyChainOpenSourceEvidence {
+  id: string;
+  case_id: string | null;
+  title: string;
+  source_type: string;
+  source_publisher: string | null;
+  source_url: string;
+  source_excerpt: string | null;
+  verified_facts: Record<string, unknown> | null;
+  evidence_grade: "A" | "B" | "C";
+  status: string;
+  limitations: string[];
+}
+
+export interface SupplyChainReport {
+  id: string;
+  country: string;
+  title: string;
+  case_ids: string[];
+  evidence_ids: string[];
+  model_id: string | null;
+  status: string;
+  content: string | null;
+  summary: string | null;
+  error_log: string | null;
+  generated_at: string | null;
+}
+
 // ── Search Tool Config ─────────────────────────────────────────────────
 
 export interface SearchToolConfig {

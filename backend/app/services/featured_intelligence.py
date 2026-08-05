@@ -24,6 +24,16 @@ DOMAIN_SIGNALS = (
 )
 
 
+DOMAIN_SIGNALS = (
+    ("海关监管", 22, ("海关", "海关监管", "通关", "申报", "查验", "稽查", "缉私", "customs", "border force", "border protection", "cbp")),
+    ("执法查发", 22, ("查获", "扣押", "没收", "逮捕", "调查", "处罚", "走私", "瞒报", "伪报", "seize", "seized", "seizure", "arrest", "detain", "detained", "smuggl", "false declaration", "enforcement")),
+    ("风险防控", 18, ("风险防控", "风险管理", "违规", "异常", "risk", "violation", "compliance")),
+    ("出口管制", 18, ("出口管制", "两用物项", "制裁", "禁运", "实体清单", "许可证", "export control", "dual-use", "sanction", "entity list", "license")),
+    ("涉华贸易影响", 18, ("涉华", "中国企业", "中国出口", "中国进口", "中国产", "中国籍", "供应链", "china trade", "chinese company", "made in china", "china-origin")),
+    ("贸易监管措施", 14, ("关税", "反倾销", "反补贴", "贸易救济", "原产地", "技术性贸易措施", "tbt", "sps", "tariff", "anti-dumping", "countervailing")),
+)
+
+
 @dataclass(frozen=True)
 class FeaturedScore:
     score: float
@@ -55,19 +65,20 @@ def score_featured_item(item: CollectedItem | Any, now: datetime | None = None) 
     ) * 5)
     recency_score = _recency_score(item, now)
     total = min(100.0, domain_score + review_score + content_score + model_score + recency_score)
-    qualified = bool(matched) and total >= MIN_FEATURED_SCORE and content_score >= 8
+    qualified_review = _enforcement_review_approved(item)
+    qualified = bool(matched) and total >= MIN_FEATURED_SCORE and (content_score >= 8 or qualified_review)
     return FeaturedScore(round(total, 2), qualified, matched)
 
 
 def choose_featured_ids(
     saved_ids: list[str],
-    ranked: list[tuple[str, float]],
+    ranked: list[tuple[Any, ...]],
     *,
     available_ids: set[str],
     limit: int = FEATURED_LIMIT,
 ) -> list[str]:
     valid_saved = [item_id for item_id in saved_ids if item_id in available_ids]
-    ranked_ids = [item_id for item_id, _ in ranked if item_id in available_ids]
+    ranked_ids = [item_id for item_id, *_ in ranked if item_id in available_ids]
     if not ranked_ids:
         return valid_saved[:limit]
 
@@ -99,13 +110,24 @@ def get_featured_items(
         CollectedItem.published_at >= cutoff,
         CollectedItem.published_at.is_(None) & (CollectedItem.collected_at >= cutoff),
     )).order_by(CollectedItem.collected_at.desc()).limit(MAX_CANDIDATES).all()
-    ranked = sorted(
+    ranked = [
         (
-            (item.id, result.score)
-            for item in candidates
-            if (result := score_featured_item(item, now)).qualified
+            item.id,
+            result.score,
+            _enforcement_review_approved(item),
+            _china_relevance_rank(item),
+            _item_time(item),
+        )
+        for item in candidates
+        if (result := score_featured_item(item, now)).qualified
+    ]
+    ranked.sort(
+        key=lambda value: (
+            value[3],
+            value[2],
+            value[4] or datetime.min.replace(tzinfo=timezone.utc),
+            value[1],
         ),
-        key=lambda value: value[1],
         reverse=True,
     )
     available_ids = {item.id for item in [*saved_items, *candidates]}
@@ -137,6 +159,29 @@ def _quality_review(item: CollectedItem | Any) -> dict[str, Any]:
     return review if isinstance(review, dict) else {}
 
 
+def _enforcement_review_approved(item: CollectedItem | Any) -> bool:
+    metadata = getattr(item, "raw_metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    review = metadata.get("enforcement_review")
+    return isinstance(review, dict) and str(review.get("decision") or "").lower() == "approve"
+
+
+def _china_relevance_rank(item: CollectedItem | Any) -> int:
+    metadata = getattr(item, "raw_metadata", None)
+    if not isinstance(metadata, dict):
+        return 0
+    review = metadata.get("enforcement_review")
+    if not isinstance(review, dict):
+        return 0
+    return {
+        "strong": 3,
+        "medium": 2,
+        "weak": 1,
+        "major_non_china": 0,
+    }.get(str(review.get("china_relevance_level") or "").lower(), 0)
+
+
 def _item_text(item: CollectedItem | Any) -> str:
     metadata = getattr(item, "raw_metadata", None)
     translation = metadata.get("translation_zh", {}) if isinstance(metadata, dict) else {}
@@ -154,13 +199,17 @@ def _content_completeness_score(item: CollectedItem | Any) -> float:
 
 
 def _recency_score(item: CollectedItem | Any, now: datetime) -> float:
-    value = getattr(item, "published_at", None) or getattr(item, "collected_at", None)
+    value = _item_time(item)
     if not isinstance(value, datetime):
         return 0.0
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     age_days = max(0.0, (now - value).total_seconds() / 86400)
     return max(0.0, 8.0 - age_days * 0.8)
+
+
+def _item_time(item: CollectedItem | Any) -> datetime | None:
+    return getattr(item, "published_at", None) or getattr(item, "collected_at", None)
 
 
 def _number(value: Any) -> float:

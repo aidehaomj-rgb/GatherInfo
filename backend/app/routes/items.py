@@ -1,6 +1,7 @@
 """Items, Runs, Batches — queries, history, delete."""
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -11,6 +12,7 @@ from app.collection_schemas import (
     ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
     RunOut,
 )
+from app.connectors.base import FetchItem
 from app.database import get_db
 from app.models import (
     Category, CollectedItem, CollectionRun, JobStatus, ModelConfig,
@@ -23,6 +25,14 @@ from app.engine import _web_translation_model
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
+BEIJING_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _format_batch_label_time(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    utc_value = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return utc_value.astimezone(BEIJING_TIME_ZONE).strftime("%Y-%m-%d %H:%M")
 
 
 # ── Runs ────────────────────────────────────────────────────────────────
@@ -105,10 +115,10 @@ def list_batches(
 
         batch_label = None
         if topic:
-            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            ts = _format_batch_label_time(started_at)
             batch_label = f"{topic.name}_{ts}"
         elif runs[0].source_id:
-            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            ts = _format_batch_label_time(started_at)
             batch_label = f"{runs[0].source_id}_{ts}"
 
         current_item_count = db.query(CollectedItem).filter(
@@ -403,12 +413,25 @@ def list_featured_items(db: Session = Depends(get_db)):
 
 
 def _item_out(it: CollectedItem) -> ItemOut:
+    metadata = it.raw_metadata if isinstance(it.raw_metadata, dict) else {}
+    enforcement_review = metadata.get("enforcement_review")
+    if it.topic_id == "weekly-enforcement-intelligence":
+        from app.enforcement_review import enrich_enforcement_review_metadata
+
+        enforcement_review = enrich_enforcement_review_metadata(FetchItem(
+            title=it.title,
+            content=it.content,
+            summary=it.summary,
+            url=it.url,
+            raw_metadata=metadata,
+        ))
     return ItemOut(
         id=it.id, source_id=it.source_id, run_id=it.run_id,
+        topic_id=it.topic_id,
         title=it.title, content=it.content, summary=it.summary, url=it.url,
         **item_translation_fields(it),
-        enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
-        quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
+        enforcement_review=enforcement_review,
+        quality_review=metadata.get("quality_review"),
         language=it.language, category=it.category, tags=_item_tags(it),
         entities=it.entities,
         quality_score=it.quality_score or 0,
@@ -547,19 +570,7 @@ def search_items(
     ).order_by(CollectedItem.collected_at.desc()).all()
 
     return ItemListOut(
-        items=[ItemOut(
-            id=it.id, source_id=it.source_id, run_id=it.run_id,
-            title=it.title, content=it.content, summary=it.summary, url=it.url,
-            **item_translation_fields(it),
-            enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
-            quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
-            language=it.language, category=it.category, tags=_item_tags(it),
-            entities=it.entities,
-            quality_score=it.quality_score or 0,
-            relevance_score=it.relevance_score or 0,
-            status=it.status if it.status else "raw",
-            collected_at=it.collected_at, published_at=it.published_at,
-        ) for it in items],
+        items=[_item_out(it) for it in items],
         total=total, page=page, page_size=page_size,
     )
 
@@ -567,19 +578,7 @@ def search_items(
 def get_item(item_id: str, db: Session = Depends(get_db)):
     from app.services.item_service import get_item as _get_item
     it = _get_item(db, item_id)
-    return ItemOut(
-        id=it.id, source_id=it.source_id, run_id=it.run_id,
-        title=it.title, content=it.content, summary=it.summary, url=it.url,
-        **item_translation_fields(it),
-        enforcement_review=(it.raw_metadata or {}).get("enforcement_review") if isinstance(it.raw_metadata, dict) else None,
-        quality_review=(it.raw_metadata or {}).get("quality_review") if isinstance(it.raw_metadata, dict) else None,
-        language=it.language, category=it.category, tags=_item_tags(it),
-        entities=it.entities,
-        quality_score=it.quality_score or 0,
-        relevance_score=it.relevance_score or 0,
-        status=it.status if it.status else "raw",
-        collected_at=it.collected_at, published_at=it.published_at,
-    )
+    return _item_out(it)
 
 
 @router.post("/items/batch-delete")

@@ -32,6 +32,15 @@ from app._models_config import (
     SystemConfig,
 )
 from app._models_handoff import MaterialSet, HandoffRun
+from app._models_supply_chain import (
+    SupplyChainInvestigation,
+    SupplyChainEntity,
+    SupplyChainCase,
+    SupplyChainShipment,
+    SupplyChainEvidence,
+    SupplyChainOpenSourceEvidence,
+    SupplyChainReport,
+)
 
 __all__ = [
     "SourceChannel",
@@ -51,4 +60,11 @@ __all__ = [
     "SystemConfig",
     "MaterialSet",
     "HandoffRun",
+    "SupplyChainInvestigation",
+    "SupplyChainEntity",
+    "SupplyChainCase",
+    "SupplyChainShipment",
+    "SupplyChainEvidence",
+    "SupplyChainOpenSourceEvidence",
+    "SupplyChainReport",
 ]

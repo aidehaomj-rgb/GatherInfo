@@ -102,14 +102,22 @@ class BaseCollector(ABC):
     def _new_run_id(self) -> str:
         return f"run-{uuid4().hex[:12]}"
 
-    async def execute(self, run: CollectionRun, keywords: list[str]) -> CollectResult:
+    async def execute(
+        self,
+        run: CollectionRun,
+        keywords: list[str],
+        max_items: int | None = None,
+    ) -> CollectResult:
         """Full lifecycle: fetch → populate run record → return result."""
         start = time.monotonic()
         run.status = JobStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
 
         try:
-            result = await self.fetch(keywords, max_items=self.config.max_items_per_run)
+            result = await self.fetch(
+                keywords,
+                max_items=max_items or self.config.max_items_per_run,
+            )
         except Exception as exc:
             run.status = JobStatus.FAILED
             run.completed_at = datetime.now(timezone.utc)

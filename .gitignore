@@ -13,7 +13,10 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 backend/data/
-data/gather.db*
+data/gather*.db*
+data/enforcement_review_queue.json
+data/previews/
+data/reports/**/qa-*/
 logs/
 .dev-pids
 pptx_build/node_modules/
