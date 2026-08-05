@@ -132,6 +132,8 @@ def migrate_schema(engine):
                 conn.execute(text(
                     "ALTER TABLE topics ADD COLUMN weekly_digest_min_items INTEGER DEFAULT 60"
                 ))
+            if "prompt_template_ids" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN prompt_template_ids JSON"))
             conn.commit()
 
     # Older schedule rows predate explicit timezone support.  Keep the existing

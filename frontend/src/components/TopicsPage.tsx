@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { Plus, RefreshCw, Trash2, Edit3, BrainCircuit, Clock } from "lucide-react";
-import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories } from "../api";
+import { fetchTopics, createTopic, deleteTopic, updateTopic, collectTopic, generateReport, fetchModels, fetchSources, fetchCategories, fetchPromptTemplates } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import type { Topic, CollectResult, ModelConfig, Source } from "../types";
+import type { Topic, CollectResult, ModelConfig, Source, PromptTemplate } from "../types";
 import { TopicForm } from "./TopicForm";
 import { formatBeijingDateTime } from "../utils/date";
 
@@ -39,6 +39,7 @@ export function TopicsPage() {
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [aiPromptTopic, setAiPromptTopic] = useState<Topic | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -48,16 +49,18 @@ export function TopicsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [t, ms, srcs, cats] = await Promise.all([
+      const [t, ms, srcs, cats, prompts] = await Promise.all([
         fetchTopics(),
         fetchModels().catch(() => []),
         fetchSources().catch(() => []),
         fetchCategories().catch(() => []),
+        fetchPromptTemplates().catch(() => []),
       ]);
       setTopics(t);
       setModels(ms);
       setSources(srcs);
       setCategories(cats);
+      setPromptTemplates(prompts);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -275,6 +278,7 @@ export function TopicsPage() {
           sources={sources}
           models={models}
           categories={categories}
+          promptTemplates={promptTemplates}
           onSave={async (data) => {
             if (editing) {
               await updateTopic(editing.id, data);

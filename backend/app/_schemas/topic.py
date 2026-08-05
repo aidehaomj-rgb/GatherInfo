@@ -16,6 +16,7 @@ class TopicCreate(BaseModel):
     focus_languages: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
+    prompt_template_ids: list[str] | None = None
     target_urls: list[str] | None = None
     auto_tag_rules: list[dict] | None = None
     schedule_cron: str | None = None
@@ -52,6 +53,7 @@ class TopicUpdate(BaseModel):
     categories: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
+    prompt_template_ids: list[str] | None = None
     target_urls: list[str] | None = None
     auto_tag_rules: list[dict] | None = None
     schedule_cron: str | None = None
@@ -86,6 +88,7 @@ class TopicOut(BaseModel):
     focus_languages: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
+    prompt_template_ids: list[str] | None = None
     target_urls: list[str] | None = None
     auto_tag_rules: list[dict] | None = None
     collect_window_days: int = 7
@@ -107,6 +110,33 @@ class TopicOut(BaseModel):
     current_item_count: int = 0
     last_run_at: IsoDT = None
     next_run_at: IsoDT = None
+    created_at: IsoDT = None
+    updated_at: IsoDT = None
+    model_config = {"from_attributes": True}
+
+
+class PromptTemplateCreate(BaseModel):
+    id: str | None = Field(default=None, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    content: str = Field(min_length=1, max_length=50000)
+    is_active: bool = True
+
+
+class PromptTemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    content: str | None = Field(default=None, min_length=1, max_length=50000)
+    is_active: bool | None = None
+
+
+class PromptTemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    content: str
+    is_active: bool = True
+    topic_count: int = 0
     created_at: IsoDT = None
     updated_at: IsoDT = None
     model_config = {"from_attributes": True}

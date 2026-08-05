@@ -3,7 +3,7 @@ import type {
   Source, Topic, Schedule, Tag, TagStats, Stats,
   DashboardData, CollectedItem, ItemList, NotificationConfig,
   CollectResult, ConnectorInfo, CollectRun, RunFailure,
-  ItemInventory,
+  ItemInventory, PromptTemplate,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -144,6 +144,15 @@ export const createTopic = (data: Partial<Topic> & { name: string }) =>
 export const updateTopic = (id: string, data: Partial<Topic>) =>
   put<Topic>(`/topics/${id}`, data);
 export const deleteTopic = (id: string) => del(`/topics/${id}`);
+
+// ── Prompt templates ───────────────────────────────────────────────────
+
+export const fetchPromptTemplates = () => get<PromptTemplate[]>("/prompt-templates");
+export const createPromptTemplate = (data: Partial<PromptTemplate> & { name: string; content: string }) =>
+  post<PromptTemplate>("/prompt-templates", data);
+export const updatePromptTemplate = (id: string, data: Partial<PromptTemplate>) =>
+  put<PromptTemplate>(`/prompt-templates/${id}`, data);
+export const deletePromptTemplate = (id: string) => del(`/prompt-templates/${id}`);
 
 // ── Categories ──────────────────────────────────────────────────────────
 
