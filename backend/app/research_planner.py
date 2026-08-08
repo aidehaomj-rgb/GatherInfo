@@ -53,18 +53,18 @@ ENFORCEMENT_SEARCH_MISSIONS = (
 )
 
 CUSTOMS_HOTSPOT_SEARCH_MISSIONS = (
-    "oil refinery attack fuel shortage price surge border smuggling black market customs",
-    "fertilizer shortage price surge port congestion China third country import transshipment customs",
-    "chemical feedstock shortage temporary tariff exemption customs misdeclaration trade risk",
-    "critical minerals export control third country transshipment false declaration customs",
-    "dual use export restrictions hidden end user intermediary procurement customs",
-    "sanctions evasion ship to ship transfer origin laundering customs Asia trade",
-    "gold precious metal concealed electronic equipment VAT fraud customs",
-    "rice grain food price surge export restriction origin fraud phytosanitary customs",
-    "agricultural input shortage counterfeit fertilizer smuggling customs Asia",
-    "trade remedy anti dumping duty circumvention third country customs China",
-    "supply disruption commodity price differential border illicit trade customs China",
-    "海关 走私 风险 价格上涨 供应短缺 第三国 转口 原产地 近一个月",
+    "Russia refinery outage fuel shortage price differential China Russia border gasoline diesel smuggling",
+    "Kazakhstan Russia Mongolia commodity shortage export restriction China land border customs illicit trade",
+    "fertilizer sulfur ammonia shortage export ban China import route port border misdeclaration",
+    "grain edible oil meat shortage disease export ban China import substitution quarantine origin fraud",
+    "crude oil LNG shipping disruption cargo bound for China ship to ship transfer AIS origin customs",
+    "China export control dual use drone rare earth hidden end user third country procurement license",
+    "China import restriction quarantine food safety overseas supply diversion false certificate customs",
+    "gold precious metal currency price gap concealed shipment entering leaving China border customs",
+    "sanctions evasion vessel cargo ultimately shipped to China false flag bill of lading origin laundering",
+    "counterfeit hazardous chemical waste scrap rerouted into China customs bonded zone misdeclaration",
+    "cross-border e-commerce tax rebate fraud low value parcel China customs enforcement emerging route",
+    "境外 供应中断 价差 禁运 中国进境 出境 边境 口岸 保税 走私 伪报 可核查 数据",
 )
 
 
@@ -248,7 +248,7 @@ def _fallback_queries(
 
     if topic.id == "weekly-trade-current-affairs":
         queries = [
-            f"{mission} China Chinese goods company border trade {date_hint}"
+            f"{mission} {date_hint}"
             for mission in CUSTOMS_HOTSPOT_SEARCH_MISSIONS
         ]
         return queries[:max_queries]

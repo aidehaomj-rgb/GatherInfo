@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Download, Upload, AlertTriangle, CheckCircle, X, Save, FolderOpen, Folder, Check } from "lucide-react";
 import { exportConfig, importConfig, fetchSettings, updateSettings } from "../api";
 import type { SystemConfig } from "../types";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { Modal } from "./shared/Modal";
 
 const ALL_FORMATS = ["docx", "pdf"];
@@ -124,9 +125,11 @@ export function SettingsPage() {
       <div className="page-header">
         <div>
           <h2>系统配置</h2>
-          <p className="text-muted">导出当前配置备份，或从备份文件导入配置。</p>
+          <p className="text-muted">管理界面显示、报告输出及配置备份。</p>
         </div>
       </div>
+
+      <AppearanceSettings />
 
       {resultMsg && (
         <div className="toast" onClick={() => setResultMsg(null)} style={{ marginBottom: 16 }}>

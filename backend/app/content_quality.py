@@ -287,12 +287,9 @@ async def _review_batch(
 拒绝以下内容：标签页、栏目页、搜索结果页、广告/博彩/导流页、多个标题或链接堆叠页、无法辨认原始来源的转载拼贴、正文过短、不能说明主体/行为/对象/时间或影响的片段。不得根据常识补充原文没有的事实。
 
 对每条候选仅返回 JSON：
-{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"china_nexus_score":0-100,"china_nexus":"原文明确显示的中国来源/目的地、涉华企业人员、中国口岸路线或对华政策影响；没有则留空","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","facts":"仅依据原文概括的事实","customs_risk":"由供需、价差、管制或物流变化推导的海关风险，明确使用可能、或等研判措辞","data_checks":"建议核查的商品、国别、路线、量价、企业或原产地指标","risk_level":"高|中高|中"}]}。
+{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"china_customs_score":0-100,"transmission_evidence_score":0-100,"executable_check_score":0-100,"foreign_enforcement_only":false,"china_customs_stage":"中国进境|中国出境|中外陆路边境|中国港口与舱单|保税监管|中国出口管制|中国检验检疫|跨境电商|无直接落点","transmission_chain":"境外事件→供需/价差/物流/政策变化→具体对华贸易路线或主体→中国海关监管风险","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","facts":"仅依据原文概括的事实","customs_risk":"明确落在中国海关监管环节的风险，使用可能、或等研判措辞","data_checks":"至少包括数据表或单证、商品/国别/路线范围、异常指标和下一步核查动作","risk_level":"高|中高|中"}]}。
 
-只有在 independence_score、completeness_score 均不低于 70，customs_value_score 不低于 60；如给出了采集主题，topic_relevance_score 也不低于 60；且能写出不臆测的完整中文整理稿时才允许 approve。对于“涉进出口时政热点”主题，china_nexus_score必须不低于70，且china_nexus必须能从原文直接验证；仅与俄罗斯、中亚或其他国家有关、需要分析人员自行假设可能影响中国的信息必须拒绝。整理稿必须清楚交代信息来源主体、关键行为/措施、涉及对象或范围、时间/地点/数据（原文有则保留）以及对海关监管、通关、稽查或风险研判的具体参考点。只输出 JSON，不要 Markdown。
-{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串"}]}。
-
-只有在 independence_score、completeness_score 均不低于 70，customs_value_score 不低于 60 时才允许 approve；如给出了采集主题，则用于周报出版的 customs_value_score、topic_relevance_score 和 publishability 必须都不低于 70。整理稿必须能写成不臆测的完整中文信息，清楚交代信息来源主体、关键行为/措施、涉及对象或范围、时间/地点/数据（原文有则保留）以及对海关监管、通关、稽查或风险研判的具体参考点。必须区分页面发布日期与主事件日期：时间线、综述、月度汇编等页面用 artifact_type=timeline/roundup，并把该条情报所述核心事件真实发生日期写入 primary_event_date；不得把页面更新时间当成旧事件的新发生日期。结构化字段只能依据候选原文填写；无依据时返回空字符串、空数组或 0，evidence_quotes 必须是原文短摘录。只输出 JSON，不要 Markdown。
+只有在 independence_score、completeness_score 均不低于70，且能写出不臆测的完整中文整理稿时才允许 approve。对于"涉进出口时政热点"主题另须同时满足：customs_value_score、topic_relevance_score、china_customs_score、transmission_evidence_score、executable_check_score均不低于75；china_customs_stage不能是"无直接落点"；transmission_chain必须说明风险如何落到中国进境、出境、陆路边境、港口舱单、保税、出口管制、检验检疫或跨境电商监管；data_checks必须明确数据表或单证、商品/国别/路线范围、异常指标及下一步动作。原文不必出现中国，但从境外事件到中国海关风险的传导必须有贸易方向、地理邻接、价差、现有航线、管制对象或供应依赖等客观依据。仅影响外国海关征税、外国贸易救济、外国市场准入或外国进口商合规，foreign_enforcement_only应为true并必须拒绝；不得把一般性的"可能影响中国"作为入选理由。整理稿必须区分原文事实与分析推演。整理稿须区分页面发布日期与主事件日期：时间线、综述、月度汇编等页面用 artifact_type=timeline/roundup，并把该条情报所述核心事件真实发生日期写入 primary_event_date；不得把页面更新时间当成旧事件的新发生日期。只输出 JSON，不要 Markdown。
 
 CANDIDATES:\n""" + topic_block + "\n" + json.dumps(candidates, ensure_ascii=False)
     async with REVIEW_SEMAPHORE:
@@ -310,17 +307,27 @@ def _curate_approved_item(
     item: FetchItem,
     decision: dict[str, Any],
     require_topic_relevance: bool,
-    require_china_nexus: bool = False,
+    require_china_customs_value: bool = False,
 ) -> FetchItem | None:
     if str(decision.get("decision", "")).lower() != "approve":
         return None
     if _quality_score_rejection_reason(decision, require_topic_relevance):
         return None
-    if require_china_nexus and (
-        _score(decision, "china_nexus_score") < 70
-        or len(_clean_text(decision.get("china_nexus"))) < 4
-    ):
-        return None
+    if require_china_customs_value:
+        if bool(decision.get("foreign_enforcement_only")):
+            return None
+        if min(
+            _score(decision, "china_customs_score"),
+            _score(decision, "transmission_evidence_score"),
+            _score(decision, "executable_check_score"),
+        ) < 75:
+            return None
+        if _clean_text(decision.get("china_customs_stage")) in ("", "无直接落点"):
+            return None
+        if len(_clean_text(decision.get("transmission_chain"))) < 20:
+            return None
+        if len(_clean_text(decision.get("data_checks"))) < 30:
+            return None
     title = _clean_text(decision.get("title_zh"))
     summary = _clean_text(decision.get("summary_zh"))
     content = _clean_text(decision.get("content_zh"))
@@ -347,6 +354,9 @@ def _curate_approved_item(
         "completeness_score": _score(decision, "completeness_score"),
         "customs_value_score": _score(decision, "customs_value_score"),
         "topic_relevance_score": _score(decision, "topic_relevance_score"),
+        "china_customs_score": _score(decision, "china_customs_score"),
+        "transmission_evidence_score": _score(decision, "transmission_evidence_score"),
+        "executable_check_score": _score(decision, "executable_check_score"),
         "topic_relevance_reason": _clean_text(decision.get("topic_relevance_reason"))[:500],
         "reason": _clean_text(decision.get("reason"))[:500],
     }
@@ -361,8 +371,12 @@ def _curate_approved_item(
         "customs_risk": _clean_text(decision.get("customs_risk"))[:1500],
         "data_checks": _clean_text(decision.get("data_checks"))[:1500],
         "risk_level": _clean_text(decision.get("risk_level"))[:20],
-        "china_nexus": _clean_text(decision.get("china_nexus"))[:1000],
-        "china_nexus_score": _score(decision, "china_nexus_score"),
+        "china_customs_stage": _clean_text(decision.get("china_customs_stage"))[:100],
+        "transmission_chain": _clean_text(decision.get("transmission_chain"))[:1200],
+        "china_customs_score": _score(decision, "china_customs_score"),
+        "transmission_evidence_score": _score(decision, "transmission_evidence_score"),
+        "executable_check_score": _score(decision, "executable_check_score"),
+        "foreign_enforcement_only": bool(decision.get("foreign_enforcement_only")),
         "is_inference": True,
     }
     previous = _build_intelligence_profile(metadata.get("intelligence_profile"), None)
@@ -403,6 +417,8 @@ def _decision_rejection_reason(
     require_topic_relevance: bool,
 ) -> str:
     if str(decision.get("decision", "")).lower() == "approve":
+        if bool(decision.get("foreign_enforcement_only")):
+            return "风险主要落在外国海关或外国市场准入，缺少中国海关直接监管抓手"
         return (
             _quality_score_rejection_reason(decision, require_topic_relevance)
             or "大模型未确认文章完整性或海关业务价值"
@@ -431,7 +447,7 @@ def _quality_score_rejection_reason(
         return None
     if _score(decision, "topic_relevance_score") < MIN_WEEKLY_PUBLICATION_SCORE:
         return "候选信息与主题语义方向关联不足"
-    if _score(decision, "publishability") < MIN_WEEKLY_PUBLICATION_SCORE:
+    if "publishability" in decision and _score(decision, "publishability") < MIN_WEEKLY_PUBLICATION_SCORE:
         return "发布适用性评分低于周报门槛"
     return None
 
@@ -622,10 +638,21 @@ def _rule_curate_customs_hotspot(item: FetchItem) -> FetchItem | None:
         "china", "chinese", "sino-", "from china", "to china", "china-origin",
         "中国", "中国企业", "中国来源", "对华", "中俄", "中哈", "中印", "中国口岸",
     )
+    china_customs_stage_terms = (
+        "china border", "chinese border", "to china", "from china", "china-bound",
+        "china customs", "chinese customs", "中国边境", "中国口岸", "输华", "自华",
+        "对华出口", "中国进口", "中国出口", "中国海关", "保税区", "跨境电商",
+    )
+    foreign_only_terms = (
+        "anti-dumping", "antidumping", "countervailing duty", "circumvention inquiry",
+        "foreign importer", "反倾销", "反补贴", "反规避调查",
+    )
     if (
         not any(term in text for term in shock_terms)
         or not any(term in text for term in customs_terms)
         or not any(term in text for term in china_terms)
+        or not any(term in text for term in china_customs_stage_terms)
+        or any(term in text for term in foreign_only_terms)
     ):
         return None
 
@@ -657,6 +684,8 @@ def _rule_curate_customs_hotspot(item: FetchItem) -> FetchItem | None:
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "confidence": 72, "independence_score": 70, "completeness_score": 70,
         "customs_value_score": 75, "topic_relevance_score": 78,
+        "china_customs_score": 78, "transmission_evidence_score": 76,
+        "executable_check_score": 78,
         "reason": "同时出现供需/价格/管制冲击与跨境监管路径，保守纳入待数据验证。",
     }
     metadata["customs_hotspot_review"] = {
@@ -664,8 +693,12 @@ def _rule_curate_customs_hotspot(item: FetchItem) -> FetchItem | None:
         "facts": _meaningful_text(item.summary or item.content or "")[:1500],
         "customs_risk": risk_type, "data_checks": checks,
         "risk_level": risk_level, "is_inference": True,
-        "china_nexus": _china_nexus_evidence(text),
-        "china_nexus_score": 72,
+        "china_customs_stage": "中国进境或出境",
+        "transmission_chain": _china_nexus_evidence(text),
+        "china_customs_score": 78,
+        "transmission_evidence_score": 76,
+        "executable_check_score": 78,
+        "foreign_enforcement_only": False,
     }
     return replace(
         item,
