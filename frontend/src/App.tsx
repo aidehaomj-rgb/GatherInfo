@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, ChevronLeft, ChevronRight, Keyboard, Network, FileCode2,
+  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -175,10 +175,22 @@ function AppInner() {
   }, []);
 
   const itemsToday = dashData?.summary?.items_today ?? 0;
+  const activeView = views.find((item) => item.id === view) || views[0];
 
   return (
     <div className="app-shell">
       <aside className={`side-rail${sidebarCollapsed ? " side-rail--collapsed" : ""}`}>
+        <span className="side-rail__scan" aria-hidden="true" />
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-pressed={sidebarCollapsed}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
         <div className="brand">
           <AppLogo size={sidebarCollapsed ? 32 : 44} />
           {!sidebarCollapsed && (
@@ -188,7 +200,7 @@ function AppInner() {
             </>
           )}
         </div>
-        <nav>
+        <nav aria-label="系统功能导航">
           {views.map((v) => {
             const Icon = v.icon;
             const isActive = view === v.id;
@@ -207,26 +219,31 @@ function AppInner() {
             );
           })}
         </nav>
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={toggleSidebar}
-          title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
-        >
-          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
       </aside>
       <main className={`workspace${collectionPanelOpen ? " workspace--activity-open" : ""}`}>
         <header className="workspace-header">
-          <div className="header-greeting">
-            <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
+          <div className="header-context">
+            <span className="header-context__eyebrow">GLOBAL RISK INTELLIGENCE / {activeView.label}</span>
+            <div className="header-greeting">
+              <strong className="header-view-title">{activeView.label}</strong>
+              <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
+            </div>
           </div>
           <div className="header-actions">
+            <div className={`system-status${dashData ? "" : " system-status--syncing"}`} aria-live="polite">
+              <span className="system-status__pulse" aria-hidden="true" />
+              <Activity size={15} />
+              <div>
+                <small>SYSTEM STATUS</small>
+                <strong>{dashData ? "数据链路在线" : "数据同步中"}</strong>
+              </div>
+            </div>
             <CollectionActivityIndicator open={collectionPanelOpen} onOpenChange={setCollectionPanelOpen} />
             <button
               type="button"
               className="btn-icon header-action-btn"
               title="打开命令面板 (Cmd+K)"
+              aria-label="打开命令面板"
               onClick={() => setCommandOpen(true)}
             >
               <Keyboard size={18} />
@@ -235,32 +252,35 @@ function AppInner() {
               type="button"
               className="btn-icon header-action-btn"
               title="刷新仪表盘"
+              aria-label="前往仪表盘"
               onClick={() => { setView("dashboard"); }}
             >
               <LayoutDashboard size={18} />
             </button>
           </div>
         </header>
-        <section className="view-frame">
-          <ErrorBoundary key={view}>
-            <Suspense fallback={<PageLoader />}>
-              {view === "home" && <IntelligenceHomePage />}
-              {view === "dashboard" && <DashboardPage />}
-              {view === "categories" && <CategoriesPage />}
-              {view === "topics" && <TopicsPage />}
-              {view === "prompts" && <PromptTemplatesPage />}
-              {view === "sources" && <SourcesPage />}
-              {view === "items" && <ItemsPage />}
-              {view === "tags" && <TagsPage />}
-              {view === "reports" && <ReportsPage />}
-              {view === "supply-chain" && <SupplyChainPage />}
-              {view === "models" && <ModelConfigPage />}
-              {view === "history" && <HistoryPage />}
-              {view === "notifications" && <NotificationsPage />}
-              {view === "settings" && <SettingsPage />}
-              {view === "schedules" && <SchedulesPage />}
-            </Suspense>
-          </ErrorBoundary>
+        <section className="view-frame" data-view={view}>
+          <div className="view-transition" key={view}>
+            <ErrorBoundary key={view}>
+              <Suspense fallback={<PageLoader />}>
+                {view === "home" && <IntelligenceHomePage />}
+                {view === "dashboard" && <DashboardPage />}
+                {view === "categories" && <CategoriesPage />}
+                {view === "topics" && <TopicsPage />}
+                {view === "prompts" && <PromptTemplatesPage />}
+                {view === "sources" && <SourcesPage />}
+                {view === "items" && <ItemsPage />}
+                {view === "tags" && <TagsPage />}
+                {view === "reports" && <ReportsPage />}
+                {view === "supply-chain" && <SupplyChainPage />}
+                {view === "models" && <ModelConfigPage />}
+                {view === "history" && <HistoryPage />}
+                {view === "notifications" && <NotificationsPage />}
+                {view === "settings" && <SettingsPage />}
+                {view === "schedules" && <SchedulesPage />}
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         </section>
       </main>
       <CommandPalette

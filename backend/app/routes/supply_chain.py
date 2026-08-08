@@ -629,16 +629,20 @@ def list_open_source_evidence(
     investigation_id: str | None = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(SupplyChainOpenSourceEvidence).join(
-        SupplyChainCase, SupplyChainCase.id == SupplyChainOpenSourceEvidence.case_id
-    ).filter(SupplyChainCase.country == country)
     investigation = _get_investigation(db, country, investigation_id)
     if investigation:
-        query = query.filter(
+        # Investigation-level evidence may intentionally have no case_id.  Its
+        # explicit attachment to the investigation is the scoping boundary.
+        query = db.query(SupplyChainOpenSourceEvidence).filter(
             SupplyChainOpenSourceEvidence.id.in_(
                 investigation.open_source_evidence_ids or []
             )
         )
+    else:
+        query = db.query(SupplyChainOpenSourceEvidence).join(
+            SupplyChainCase,
+            SupplyChainCase.id == SupplyChainOpenSourceEvidence.case_id,
+        ).filter(SupplyChainCase.country == country)
     rows = query.order_by(
         SupplyChainOpenSourceEvidence.evidence_grade,
         SupplyChainOpenSourceEvidence.created_at.desc(),

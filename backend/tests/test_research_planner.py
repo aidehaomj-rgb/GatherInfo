@@ -76,7 +76,8 @@ def test_customs_hotspot_topic_uses_stable_risk_mission_matrix(monkeypatch):
 
     assert len(queries) == 12
     assert all("2026-07-15" in query and "2026-08-04" in query for query in queries)
-    assert all("China Chinese goods" in query for query in queries)
+    assert any("China Russia border" in query for query in queries)
+    assert any("cargo bound for China" in query for query in queries)
     assert any("fuel shortage" in query and "smuggling" in query for query in queries)
-    assert any("fertilizer shortage" in query and "third country" in query for query in queries)
-    assert any("critical minerals" in query and "transshipment" in query for query in queries)
+    assert any("fertilizer sulfur ammonia" in query and "China import route" in query for query in queries)
+    assert any("dual use drone rare earth" in query and "third country procurement" in query for query in queries)

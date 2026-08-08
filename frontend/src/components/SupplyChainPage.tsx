@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Anchor, BatteryCharging, Building2, ChevronDown, Crosshair, ExternalLink, Factory,
+  Activity, Anchor, BatteryCharging, Building2, ChevronDown, Crosshair, ExternalLink, Factory,
   FileSearch, FlaskConical, Landmark, Link2, Network, PackageSearch, Plus,
-  RadioTower, Search, ShieldCheck, ShipWheel, Sparkles, Warehouse, X,
+  Pause, Play, RadioTower, Route, Search, ShieldCheck, ShipWheel, Sparkles, Warehouse, X,
 } from "lucide-react";
 
 import {
@@ -58,6 +58,7 @@ export function SupplyChainPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [form, setForm] = useState<"entity" | "case" | "shipment" | null>(null);
+  const [motionEnabled, setMotionEnabled] = useState(true);
   const loadToken = useRef(0);
   const investigationLoadToken = useRef(0);
 
@@ -203,7 +204,7 @@ export function SupplyChainPage() {
   };
 
   return (
-    <div className="page supply-chain-page">
+    <div className={`page supply-chain-page${motionEnabled ? "" : " supply-chain-page--motion-paused"}`}>
       <div className="page-header supply-chain-header">
         <div className="supply-chain-heading-copy">
           <span className="supply-chain-eyebrow">DEFENSE SUPPLY CHAIN INTELLIGENCE</span>
@@ -234,10 +235,10 @@ export function SupplyChainPage() {
             {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
           </select>
           <button type="button" className="btn btn-secondary" onClick={() => void analyze()} disabled={busy}>
-            <Link2 size={16} />构建证据链
+            <Link2 size={16} />{busy ? "正在处理" : "构建证据链"}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => void generate()} disabled={busy}>
-            <Sparkles size={16} />生成报告
+            <Sparkles size={16} />{busy ? "智能分析中" : "生成报告"}
           </button>
         </div>
       </div>
@@ -316,7 +317,14 @@ export function SupplyChainPage() {
         />
       )}
 
-      <nav className="supply-chain-tabs">
+      <ChainStatusStrip
+        investigation={selectedInvestigation}
+        dashboard={dashboard}
+        entityCount={entities.length}
+        relationCount={shipments.length + cases.length + evidence.length}
+      />
+
+      <nav className="supply-chain-tabs" aria-label="供应链分析视图">
         {([
           ["overview", "供应链总览", Building2], ["map", "供应链条展示", Network],
           ["procurement", "军用采购项目", FileSearch],
@@ -374,7 +382,7 @@ export function SupplyChainPage() {
                     <div className="supply-chain-verification-gaps">
                       <strong>尚待核实</strong>
                       <ul>
-                        {selectedInvestigation.verification_gaps.slice(0, 5).map((gap) => <li key={gap}>{gap}</li>)}
+                        {selectedInvestigation.verification_gaps.map((gap) => <li key={gap}>{gap}</li>)}
                       </ul>
                     </div>
                   )}
@@ -400,7 +408,7 @@ export function SupplyChainPage() {
               </div>
             ) : reports.length ? (
               <div className="supply-chain-finding-list">
-                {reports.slice(0, 4).map((report) => (
+                {reports.map((report) => (
                   <article key={report.id}>
                     <strong>{report.title}</strong>
                     <p>{report.summary || "报告已生成，暂无摘要。"}</p>
@@ -421,6 +429,8 @@ export function SupplyChainPage() {
                 entities={entities}
                 cases={cases}
                 shipments={shipments}
+                motionEnabled={motionEnabled}
+                onMotionChange={setMotionEnabled}
               />
             : <Section title="供应链条展示" actions={null}>
                 <Empty text="当前供应链尚未构建可视化图谱。" />
@@ -526,6 +536,31 @@ function Field({ label, value, set, type = "text", required = false }: { label: 
   return <label>{label}<input type={type} value={value} onChange={(event) => set(event.target.value)} required={required} /></label>;
 }
 function Empty({ text }: { text: string }) { return <div className="supply-chain-empty">{text}</div>; }
+
+function ChainStatusStrip({ investigation, dashboard, entityCount, relationCount }: {
+  investigation: SupplyChainInvestigation | null;
+  dashboard: SupplyChainDashboard;
+  entityCount: number;
+  relationCount: number;
+}) {
+  const score = investigation?.completeness_score || 0;
+  const statusText = !investigation
+    ? "等待选择供应链"
+    : score >= 80 ? "链路证据充足" : score >= 50 ? "持续核验中" : "重点补证中";
+  return (
+    <section className="supply-chain-status-strip" aria-label="当前供应链运行状态">
+      <div className="supply-chain-status-main">
+        <span className="supply-chain-live-dot" aria-hidden="true" />
+        <Activity size={16} />
+        <div><small>CHAIN STATUS</small><strong>{statusText}</strong></div>
+      </div>
+      <div><small>证据完整度</small><strong>{investigation ? `${score}%` : "—"}</strong></div>
+      <div><small>穿透节点</small><strong>{entityCount.toLocaleString("zh-CN")}</strong></div>
+      <div><small>已识别关系</small><strong>{relationCount.toLocaleString("zh-CN")}</strong></div>
+      <div><small>可报告证据</small><strong>{dashboard.reportable.toLocaleString("zh-CN")}</strong></div>
+    </section>
+  );
+}
 
 function BatterySupplyChainMap() {
   return (
@@ -1216,18 +1251,21 @@ function QuadrantSupplyChainMap() {
 }
 
 function GenericSupplyChainMap({
-  investigation, entities, cases, shipments,
+  investigation, entities, cases, shipments, motionEnabled, onMotionChange,
 }: {
   investigation: SupplyChainInvestigation;
   entities: SupplyChainEntity[];
   cases: SupplyChainCase[];
   shipments: SupplyChainShipment[];
+  motionEnabled: boolean;
+  onMotionChange: (enabled: boolean) => void;
 }) {
   const isUpstream = (item: SupplyChainEntity) => (
     item.country === "China"
     || ["component_supplier", "trading_company", "parent_company", "china_exporter"].includes(item.entity_type)
   );
   const isPumpChain = investigation.id === "inv-india-csbc-pump-chain";
+  const isRejectedRossellCandidate = investigation.id === "inv-india-rossell-china-cables-ah64-taiwan";
   const isPumpContextOnly = (item: SupplyChainEntity) => isPumpChain && item.id === "ent-sulzer-ltd";
   const isEndUser = (item: SupplyChainEntity) => (
     ["military_end_user", "government_end_user", "government_agency", "industrial_end_user", "end_user"].includes(item.entity_type)
@@ -1235,25 +1273,38 @@ function GenericSupplyChainMap({
   );
   const upstreamCandidates = entities.filter((item) => !isPumpContextOnly(item) && isUpstream(item));
   const primaryCase = cases[0];
-  const integrator = entities.find((item) => item.id === primaryCase?.supplier_entity_id)
+  const fixedIntegratorIds: Record<string, string> = {
+    "inv-taiwan-lead-moog-tianhe-pac3-magnets": "ent-taiwan-moog",
+    "inv-taiwan-quadrant-china-magnets-f16": "ent-us-lead-quadrant-fighter-magnets",
+    "inv-taiwan-m1a2-china-samarium": "ent-taiwan-m1a2-us-smco-maker",
+    "inv-india-rossell-china-cables-ah64-taiwan": "ent-india-rossell-techsys",
+  };
+  const fixedIntegratorId = fixedIntegratorIds[investigation.id] || null;
+  const integrator = entities.find((item) => item.id === fixedIntegratorId)
+    || entities.find((item) => item.id === primaryCase?.supplier_entity_id)
     || entities.find((item) => ["integrator", "defense_supplier", "importer"].includes(item.entity_type))
     || entities.find((item) => !upstreamCandidates.some((row) => row.id === item.id))
     || entities[0];
   const upstream = upstreamCandidates.filter((item) => item.id !== integrator?.id);
   const endUsers = entities.filter((item) => item.id !== integrator?.id && !isPumpContextOnly(item) && isEndUser(item));
+  const entityOnlyApplicationInvestigations = new Set([
+    "inv-taiwan-lead-moog-tianhe-pac3-magnets",
+    "inv-taiwan-quadrant-china-magnets-f16",
+    "inv-taiwan-m1a2-china-samarium",
+    "inv-india-rossell-china-cables-ah64-taiwan",
+  ]);
+  const applicationCases = entityOnlyApplicationInvestigations.has(investigation.id) ? [] : cases;
   const downstream = entities.filter((item) => (
     item.id !== integrator?.id
     && !isPumpContextOnly(item)
     && !upstream.some((row) => row.id === item.id)
     && !endUsers.some((row) => row.id === item.id)
   ));
-  const shipmentProducts = new Map<string, string[]>();
-  shipments.forEach((item) => {
+  const shipmentProducts = shipments.reduce<Map<string, string[]>>((rows, item) => {
     const key = item.exporter_name.trim().toLocaleLowerCase();
-    const products = shipmentProducts.get(key) || [];
-    if (!products.includes(item.product)) products.push(item.product);
-    shipmentProducts.set(key, products);
-  });
+    const products = rows.get(key) || [];
+    return new Map(rows).set(key, products.includes(item.product) ? products : [...products, item.product]);
+  }, new Map());
   const productsFor = (entity: SupplyChainEntity) => {
     const products = [entity.name, entity.name_zh, ...(entity.aliases || [])]
       .filter(Boolean)
@@ -1273,7 +1324,7 @@ function GenericSupplyChainMap({
       icon: Factory,
       nodes: upstream.map((entity) => ({
         id: entity.id,
-        eyebrow: entity.entity_type.replace(/_/g, " "),
+        eyebrow: entityTypeLabel(entity.entity_type),
         name: entityDisplayName(entity),
         detail: productsFor(entity),
         icon: Factory,
@@ -1301,7 +1352,7 @@ function GenericSupplyChainMap({
       icon: ShipWheel,
       nodes: downstream.map((entity) => ({
         id: entity.id,
-        eyebrow: entity.entity_type.replace(/_/g, " "),
+        eyebrow: entityTypeLabel(entity.entity_type),
         name: entityDisplayName(entity),
         detail: entity.defense_roles?.join(" · ") || "下游承接、制造或协作节点",
         icon: ShipWheel,
@@ -1310,18 +1361,18 @@ function GenericSupplyChainMap({
     {
       key: "application",
       title: `${destinationLabel}应用端`,
-      subtitle: `${endUsers.length + cases.length}个最终用户或项目`,
+      subtitle: `${endUsers.length + applicationCases.length}个最终用户或项目`,
       tone: "application",
       icon: Landmark,
       nodes: [
         ...endUsers.map((entity) => ({
           id: entity.id,
-          eyebrow: entity.entity_type.replace(/_/g, " "),
+          eyebrow: entityTypeLabel(entity.entity_type),
           name: entityDisplayName(entity),
           detail: entity.defense_roles?.join(" · ") || "最终用户或装备应用节点",
           icon: Landmark,
         })),
-        ...cases.map((item) => ({
+        ...applicationCases.map((item) => ({
           id: item.id,
           eyebrow: item.procurement_agency || "采购或应用项目",
           name: item.target_program || item.title,
@@ -1331,7 +1382,7 @@ function GenericSupplyChainMap({
       ],
     },
   ].filter((stage) => stage.nodes.length > 0) as NetworkGraphStage[];
-  const graphHeight = Math.max(620, Math.max(...stages.map((stage) => stage.nodes.length), 1) * 112 + 150);
+  const graphHeight = Math.max(660, Math.max(...stages.map((stage) => stage.nodes.length), 1) * 148 + 170);
   const stagePositions = graphStagePositions(stages.length);
   const positionedStages = stages.map((stage, stageIndex) => ({
     ...stage,
@@ -1342,21 +1393,56 @@ function GenericSupplyChainMap({
       y: graphNodeY(nodeIndex, stage.nodes.length, graphHeight),
     })),
   }));
-  const graphEdges = positionedStages.slice(0, -1).flatMap((stage, stageIndex) => {
+  const graphEdges = isRejectedRossellCandidate ? [] : positionedStages.slice(0, -1).flatMap((stage, stageIndex) => {
     const nextStage = positionedStages[stageIndex + 1];
     const tone = nextStage.key === "application" ? "application" : stage.key === "upstream" ? "trade" : "contract";
     return connectGraphStages(stage.nodes, nextStage.nodes, tone);
   });
   const graphKey = investigation.id.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const allNodes = positionedStages.flatMap((stage) => stage.nodes.map((node) => ({
+    ...node,
+    stageTitle: stage.title,
+    tone: stage.tone,
+  })));
+  const hasActiveNode = activeNodeId ? allNodes.some((node) => node.id === activeNodeId) : false;
+  const effectiveActiveNodeId = hasActiveNode ? activeNodeId : integrator?.id || allNodes[0]?.id || null;
+  const activeNode = allNodes.find((node) => node.id === effectiveActiveNodeId) || null;
 
   return (
     <section className="supply-chain-visual supply-chain-visual--network">
       <header>
         <div><span>SUPPLY CHAIN MAP</span><h3>供应链条展示</h3></div>
-        <small>{investigation.name} · {investigation.completeness_level} · 证据完整度 {investigation.completeness_score}%</small>
+        <div className="supply-chain-map-toolbar">
+          <span><Network size={14} />{allNodes.length} 个节点</span>
+          <span><Route size={14} />{graphEdges.length} 条关系</span>
+          <button
+            type="button"
+            onClick={() => onMotionChange(!motionEnabled)}
+            aria-pressed={!motionEnabled}
+            title={motionEnabled ? "暂停图谱动态效果" : "启用图谱动态效果"}
+          >
+            {motionEnabled ? <Pause size={14} /> : <Play size={14} />}
+            {motionEnabled ? "暂停动态" : "启用动态"}
+          </button>
+        </div>
       </header>
+      <div className="supply-chain-map-context">
+        <div>
+          <span className="supply-chain-live-dot" aria-hidden="true" />
+          <strong>{investigation.name}</strong>
+        </div>
+        <span>{investigation.completeness_level}</span>
+        <span>证据完整度 {investigation.completeness_score}%</span>
+      </div>
+      {isRejectedRossellCandidate && (
+        <div className="supply-chain-map-context" role="note">
+          <span>排歧结论：贸易记录保留，但现有料号证据不支持连接至AH-64或台湾机队，跨层关系已断开。</span>
+        </div>
+      )}
       <div className="dynamic-network-map">
         <div className="dynamic-network-canvas" style={{ height: graphHeight }}>
+          <div className="dynamic-network-scan" aria-hidden="true" />
           <div className="chain-network-orbit chain-network-orbit--one" aria-hidden="true" />
           <div className="chain-network-orbit chain-network-orbit--two" aria-hidden="true" />
           {positionedStages.map((stage) => (
@@ -1392,8 +1478,39 @@ function GenericSupplyChainMap({
             })}
           </svg>
           {positionedStages.flatMap((stage) => stage.nodes.map((node) => (
-            <DynamicNetworkNode key={`${stage.key}-${node.id}`} node={node} tone={stage.tone} stageCount={stages.length} />
+            <DynamicNetworkNode
+              key={`${stage.key}-${node.id}`}
+              node={node}
+              tone={stage.tone}
+              stageCount={stages.length}
+              active={node.id === effectiveActiveNodeId}
+              onSelect={setActiveNodeId}
+            />
           )))}
+        </div>
+      </div>
+      {activeNode && (
+        <div className={`supply-chain-node-inspector supply-chain-node-inspector--${activeNode.tone}`} aria-live="polite">
+          <span>{activeNode.stageTitle}</span>
+          <div><strong>{activeNode.name}</strong><p>{activeNode.detail}</p></div>
+          <small>{activeNode.eyebrow}</small>
+        </div>
+      )}
+      <div className="supply-chain-map-ledger" aria-label="穿透链路完整清单">
+        <header><div><span>FULL PATH LEDGER</span><strong>穿透链路清单</strong></div><small>完整展示当前图谱全部节点</small></header>
+        <div>
+          {positionedStages.map((stage) => (
+            <section key={stage.key} className={`supply-chain-ledger-stage supply-chain-ledger-stage--${stage.tone}`}>
+              <header><stage.icon size={15} /><div><strong>{stage.title}</strong><small>{stage.nodes.length} 个节点</small></div></header>
+              <div>
+                {stage.nodes.map((node) => (
+                  <button key={node.id} type="button" onClick={() => setActiveNodeId(node.id)}>
+                    <strong>{node.name}</strong><span>{node.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
       </div>
       <div className="supply-chain-visual-note">
@@ -1455,15 +1572,20 @@ function connectGraphStages(
   }));
 }
 
-function DynamicNetworkNode({ node, tone, stageCount }: {
+function DynamicNetworkNode({ node, tone, stageCount, active, onSelect }: {
   node: PositionedNetworkGraphNode;
   tone: NetworkTone;
   stageCount: number;
+  active: boolean;
+  onSelect: (id: string) => void;
 }) {
   const Icon = node.icon;
-  return <article
-    className={`dynamic-network-node dynamic-network-node--${tone}`}
+  return <button
+    type="button"
+    className={`dynamic-network-node dynamic-network-node--${tone}${active ? " dynamic-network-node--active" : ""}`}
     style={{ left: `${node.x}%`, top: node.y, width: `${graphNodeHalfWidth(stageCount) * .2}%` }}
+    onClick={() => onSelect(node.id)}
+    aria-pressed={active}
   >
     <span className="dynamic-network-node-icon"><Icon size={17} /></span>
     <div>
@@ -1471,7 +1593,7 @@ function DynamicNetworkNode({ node, tone, stageCount }: {
       <strong>{node.name}</strong>
       <small>{node.detail}</small>
     </div>
-  </article>;
+  </button>;
 }
 
 function LegacyGenericSupplyChainMap({
@@ -1777,6 +1899,28 @@ function NetworkNode({
 
 function entityDisplayName(entity: SupplyChainEntity) {
   return entity.country === "China" ? (entity.name_zh || entity.name) : entity.name;
+}
+
+function entityTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    china_exporter: "中国出口主体",
+    component_supplier: "上游部件供应商",
+    trading_company: "贸易协调主体",
+    parent_company: "集团母公司",
+    subsidiary: "集团关联企业",
+    manufacturer: "制造企业",
+    importer: "进口与承接主体",
+    integrator: "系统集成商",
+    defense_supplier: "军工供应商",
+    warehouse: "仓储与分拨节点",
+    terminal_shipyard: "终端船厂",
+    industrial_end_user: "工业最终用户",
+    military_end_user: "军事最终用户",
+    government_end_user: "政府最终用户",
+    government_agency: "政府机构",
+    end_user: "最终用户",
+  };
+  return labels[type] || type.replace(/_/g, " ");
 }
 
 function tradePartyName(
