@@ -106,7 +106,12 @@ def normalize_report_output_dir(value: str | None) -> str | None:
     normalized = value.strip()
     if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
         normalized = normalized[1:-1].strip()
-    return os.path.abspath(os.path.expanduser(normalized)) if normalized else None
+    if not normalized:
+        return None
+    expanded = os.path.expanduser(normalized)
+    if os.name == "nt" and expanded.startswith("/"):
+        return expanded
+    return os.path.abspath(expanded)
 
 
 def approved_report_roots() -> tuple[str, ...]:

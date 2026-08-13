@@ -15,6 +15,7 @@ from app.models import (
     ScheduleConfig, SearchToolConfig, SourceConfig,
     SystemConfig, Tag, Topic,
 )
+from app.source_taxonomy import SOURCE_GROUP_INPUT_CODES, determine_source_group
 from app.time_utils import beijing_day_bounds_utc
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ class ImportConflict(BaseModel):
 def export_config(db: Session = Depends(get_db)):
     sources = [
         {"id": s.id, "name": s.name, "channel": s.channel, "is_active": s.is_active,
+         "source_group": s.source_group,
          "base_url": s.base_url, "api_endpoint": s.api_endpoint,
          "default_keywords": s.default_keywords, "languages": s.languages,
          "country_focus": s.country_focus,
@@ -195,6 +197,10 @@ def import_config(data: dict, db: Session = Depends(get_db)):
             "origin_resolution_required": True,
             "verified_at": None,
         }
+        source_group = item.get("source_group") or determine_source_group(item)
+        if source_group not in SOURCE_GROUP_INPUT_CODES:
+            raise HTTPException(400, f"未知的信息源业务分类: {source_group}")
+        item["source_group"] = source_group
         existing = db.query(SourceConfig).filter(SourceConfig.id == item["id"]).first()
         if existing:
             if mode == "skip":

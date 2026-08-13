@@ -21,6 +21,9 @@ class SourceConfig(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     channel = Column(SAEnum(SourceChannel), nullable=False)
+    source_group = Column(
+        String(80), nullable=False, default="other", server_default="other"
+    )
     is_active = Column(Boolean, default=True)
     is_configured = Column(Boolean, default=False)
 

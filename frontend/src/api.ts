@@ -4,6 +4,7 @@ import type {
   DashboardData, CollectedItem, ItemList, NotificationConfig,
   CollectResult, ConnectorInfo, CollectRun, RunFailure,
   ItemInventory, PromptTemplate,
+  ResearchJob,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -144,6 +145,18 @@ export const createTopic = (data: Partial<Topic> & { name: string }) =>
 export const updateTopic = (id: string, data: Partial<Topic>) =>
   put<Topic>(`/topics/${id}`, data);
 export const deleteTopic = (id: string) => del(`/topics/${id}`);
+
+// ── Multi-round research ───────────────────────────────────────────────
+
+export const fetchResearchJobs = () => get<ResearchJob[]>("/research/jobs");
+export const fetchResearchJob = (id: string) => get<ResearchJob>(`/research/jobs/${id}`);
+export const createResearchJob = (data: {
+  topic_id: string; objective: string; model_id?: string;
+  max_rounds: number; target_items: number;
+}) => post<ResearchJob>("/research/jobs", data);
+export const fetchResearchItems = (id: string) =>
+  get<Array<{ id: string; title: string; url: string; summary: string | null; quality_score: number | null }>>(`/research/jobs/${id}/items`);
+export const resumeResearchJob = (id: string) => post<ResearchJob>(`/research/jobs/${id}/resume`);
 
 // ── Prompt templates ───────────────────────────────────────────────────
 
@@ -408,6 +421,7 @@ export const createSearchTool = (data: Partial<import("./types").SearchToolConfi
 export const updateSearchTool = (id: string, data: Partial<import("./types").SearchToolConfig>) =>
   put<import("./types").SearchToolConfig>(`/search-tools/${id}`, data);
 export const deleteSearchTool = (id: string) => del(`/search-tools/${id}`);
+export const fetchMCPToolCatalog = () => get<import("./types").MCPToolCatalog>("/research/tools/catalog");
 
 // ── Tag Management ────────────────────────────────────────────────────
 

@@ -38,7 +38,7 @@ DEFAULT_CANDIDATES_PER_SOURCE = 9
 MAX_CANDIDATES_PER_SOURCE = 160
 SOURCE_COLLECTION_CONCURRENCY = 4
 SOURCE_EXECUTION_TIMEOUT_SECONDS = 90
-SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS = 300
+SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS = 600
 ENFORCEMENT_DISCOVERY_KEYWORDS = (
     "seiz", "intercept", "apprehend", "arrest", "charg", "detain",
     "confiscat", "contraband", "counterfeit", "undeclared", "unreported",
@@ -1086,9 +1086,29 @@ class CollectionEngine:
         selected: list[FetchItem] = []
         selected_counts: Counter[str] = Counter()
         seen_urls: set[str] = set()
-        for item in ranked:
+        strong = [item for item in ranked if infer_candidate_china_relevance(item) == "strong"]
+        weak = [item for item in ranked if infer_candidate_china_relevance(item) == "weak"]
+        non_china = [item for item in ranked if infer_candidate_china_relevance(item) == "major_non_china"]
+        non_china_groups: dict[str, list[FetchItem]] = {}
+        for item in non_china:
+            non_china_groups.setdefault(infer_enforcement_jurisdiction(item), []).append(item)
+        diversified_non_china: list[FetchItem] = []
+        while any(non_china_groups.values()):
+            for jurisdiction in list(non_china_groups):
+                if non_china_groups[jurisdiction]:
+                    diversified_non_china.append(non_china_groups[jurisdiction].pop(0))
+        non_china = diversified_non_china
+        strong_target = max(1, int(slots * 0.5))
+        china_target = max(strong_target, int(slots * 0.6))
+        quota_ranked = [*strong[:strong_target], *weak[:max(0, china_target - min(len(strong), strong_target))]]
+        quota_ranked.extend(item for item in [*strong, *weak, *non_china] if item not in quota_ranked)
+        non_china_cap = max(1, int(slots * 0.4))
+        non_china_selected = 0
+        for item in quota_ranked:
             jurisdiction = infer_enforcement_jurisdiction(item)
             relevance = infer_candidate_china_relevance(item)
+            if relevance == "major_non_china" and non_china_selected >= non_china_cap:
+                continue
             if relevance == "strong":
                 jurisdiction_cap = 10
             elif relevance == "weak":
@@ -1110,6 +1130,8 @@ class CollectionEngine:
                 continue
             seen_urls.add(url_key)
             selected.append(item)
+            if relevance == "major_non_china":
+                non_china_selected += 1
             selected_counts[jurisdiction] += 1
             if len(selected) >= slots:
                 break

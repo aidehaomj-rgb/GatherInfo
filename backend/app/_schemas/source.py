@@ -10,6 +10,7 @@ class SourceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     channel: str = Field(description="official | rss | commercial | web_scrape | api_search | ai_research | social | deepweb | manual")
+    source_group: str = Field(default="other", min_length=1, max_length=80)
     is_active: bool = True
     base_url: str | None = None
     api_endpoint: str | None = None
@@ -33,6 +34,7 @@ class SourceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     channel: str | None = None
+    source_group: str | None = Field(default=None, min_length=1, max_length=80)
     is_active: bool | None = None
     base_url: str | None = None
     api_endpoint: str | None = None
@@ -71,6 +73,7 @@ class SourceOut(BaseModel):
     name: str
     description: str | None = None
     channel: str
+    source_group: str = "other"
     is_active: bool
     base_url: str | None = None
     api_endpoint: str | None = None

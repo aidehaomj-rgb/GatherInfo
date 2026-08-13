@@ -58,6 +58,28 @@ def _filter_llm_approved_items(items: list[CollectedItem]) -> list[CollectedItem
     return [item for item in items if _source_allows_llm(item)]
 
 
+def _topic_items_query(db: Session, topic_id: str):
+    """Query items for a topic, including cross-topic membership rows.
+
+    Items that reference the topic directly via ``topic_id`` or through an
+    ``ItemTopicMembership`` record are both considered part of the topic.
+    """
+    return (
+        db.query(CollectedItem)
+        .outerjoin(
+            ItemTopicMembership,
+            ItemTopicMembership.item_id == CollectedItem.id,
+        )
+        .filter(
+            or_(
+                CollectedItem.topic_id == topic_id,
+                ItemTopicMembership.topic_id == topic_id,
+            )
+        )
+        .distinct()
+    )
+
+
 async def generate_report(
     topic_id: str,
     model_id: str | None = None,

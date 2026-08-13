@@ -143,6 +143,13 @@ class TavilyCollector(BaseCollector):
                             else search_snippet
                         )
                         url = r.get("url", "")
+                        path = urlparse(url).path.strip("/")
+                        score = float(r.get("score") or 0)
+                        # Homepages and very weak generic matches consume the
+                        # expensive enforcement hydration/review budget without
+                        # representing a concrete case page.
+                        if not path or score < 0.08:
+                            continue
 
                         pub_date = r.get("published_date", None)
                         if pub_date and isinstance(pub_date, str):
@@ -226,8 +233,8 @@ class TavilyCollector(BaseCollector):
                             language=detect_lang(f"{url} {content}"),
                             category=infer_category(title, content),
                             suggested_tags=build_tags(title, content),
-                            quality_score=r.get("score", 0.5),
-                            relevance_score=r.get("score", 0.5),
+                            quality_score=score,
+                            relevance_score=score,
                             raw_metadata={
                                 "engine": "tavily",
                                 "query": query_text,

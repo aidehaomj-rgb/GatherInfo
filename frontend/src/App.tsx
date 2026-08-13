@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen,
+  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen, Wrench,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -28,6 +28,7 @@ const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ d
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 const SupplyChainPage = lazy(() => import("./components/SupplyChainPage").then(m => ({ default: m.SupplyChainPage })));
 const PromptTemplatesPage = lazy(() => import("./components/PromptTemplatesPage").then(m => ({ default: m.PromptTemplatesPage })));
+const MCPToolsPage = lazy(() => import("./components/MCPToolsPage").then(m => ({ default: m.MCPToolsPage })));
 
 function PageLoader() {
   return (
@@ -40,7 +41,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "home" | "dashboard" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "mcp-tools" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -55,6 +56,7 @@ const views: ViewDef[] = [
   { id: "topics", label: "主题管理", icon: BarChart3 },
   { id: "prompts", label: "提示词库", icon: FileCode2 },
   { id: "sources", label: "信息源", icon: Globe },
+  { id: "mcp-tools", label: "MCP工具", icon: Wrench },
   { id: "items", label: "采集条目", icon: Database },
   { id: "tags", label: "标签系统", icon: Tags },
   { id: "reports", label: "智能报告", icon: FileText },
@@ -265,6 +267,7 @@ function AppInner() {
               <Suspense fallback={<PageLoader />}>
                 {view === "home" && <IntelligenceHomePage />}
                 {view === "dashboard" && <DashboardPage />}
+                {view === "mcp-tools" && <MCPToolsPage />}
                 {view === "categories" && <CategoriesPage />}
                 {view === "topics" && <TopicsPage />}
                 {view === "prompts" && <PromptTemplatesPage />}

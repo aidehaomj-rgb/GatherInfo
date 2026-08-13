@@ -14,8 +14,21 @@ def migrate_schema(engine):
         with engine.connect() as conn:
             if "api_key" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN api_key VARCHAR(500)"))
+                cols.add("api_key")
             if "homepage_url" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN homepage_url VARCHAR(800)"))
+                cols.add("homepage_url")
+            source_group_added = "source_group" not in cols
+            if source_group_added:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN "
+                    "source_group VARCHAR(80) NOT NULL DEFAULT 'other'"
+                ))
+                cols.add("source_group")
+            from app.source_taxonomy import backfill_source_groups
+            backfill_source_groups(
+                conn, available_columns=cols, replace_other=source_group_added
+            )
             if "is_configured" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN is_configured BOOLEAN DEFAULT 0"))
                 # Auto-set: web_scrape/official/rss/manual sources are always configured
@@ -184,25 +197,34 @@ def migrate_schema(engine):
                 "ALTER TABLE item_topic_memberships "
                 "ADD COLUMN relevance_score FLOAT"
             ))
-        conn.execute(text("""
-            INSERT OR IGNORE INTO item_topic_memberships (
-                item_id, topic_id, first_run_id, last_run_id, relevance_score,
-                first_seen_at, last_seen_at
-            )
-            SELECT id, topic_id, run_id, run_id, relevance_score, collected_at, updated_at
-            FROM collected_items
-            WHERE topic_id IS NOT NULL
-        """))
-        conn.execute(text("""
-            UPDATE item_topic_memberships
-            SET relevance_score = (
-                SELECT collected_items.relevance_score
+        if "collected_items" in existing_tables:
+            conn.execute(text("""
+                INSERT OR IGNORE INTO item_topic_memberships (
+                    item_id, topic_id, first_run_id, last_run_id, relevance_score,
+                    first_seen_at, last_seen_at
+                )
+                SELECT id, topic_id, run_id, run_id, relevance_score, collected_at, updated_at
                 FROM collected_items
-                WHERE collected_items.id = item_topic_memberships.item_id
-            )
-            WHERE relevance_score IS NULL
-        """))
+                WHERE topic_id IS NOT NULL
+            """))
+            conn.execute(text("""
+                UPDATE item_topic_memberships
+                SET relevance_score = (
+                    SELECT collected_items.relevance_score
+                    FROM collected_items
+                    WHERE collected_items.id = item_topic_memberships.item_id
+                )
+                WHERE relevance_score IS NULL
+            """))
         conn.commit()
+    if "research_jobs" in existing_tables:
+        cols = {c["name"] for c in inspector.get_columns("research_jobs")}
+        with engine.connect() as conn:
+            if "acceptance_policy" not in cols:
+                conn.execute(text("ALTER TABLE research_jobs ADD COLUMN acceptance_policy JSON"))
+            if "acceptance_result" not in cols:
+                conn.execute(text("ALTER TABLE research_jobs ADD COLUMN acceptance_result JSON"))
+            conn.commit()
 
     # Add scope columns to `reports` table if it exists
     if "reports" in existing_tables:

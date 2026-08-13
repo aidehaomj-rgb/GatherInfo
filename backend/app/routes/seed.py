@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Category, ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
+from app.source_taxonomy import determine_source_group
 from app.verified_source_catalog import install_verified_global_sources
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def seed_defaults(db: Session = Depends(get_db)):
     created_sources = 0
     updated_sources = 0
     for cfg in _default_sources():
+        cfg = {**cfg, "source_group": cfg.get("source_group") or determine_source_group(cfg)}
         existing = db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first()
         if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
             # Bundled definitions are the only fresh rows allowed to enter the
@@ -63,6 +65,8 @@ def seed_defaults(db: Session = Depends(get_db)):
                 if field in cfg:
                     setattr(existing, field, cfg[field])
             existing.is_configured = bool(existing.base_url or existing.api_endpoint or existing.homepage_url)
+            if not existing.source_group or existing.source_group == "other":
+                existing.source_group = cfg["source_group"]
             updated_sources += 1
 
     created_topics = 0

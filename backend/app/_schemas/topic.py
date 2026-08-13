@@ -51,6 +51,8 @@ class TopicUpdate(BaseModel):
     keywords: list[str] | None = None
     synonyms: list[str] | None = None
     categories: list[str] | None = None
+    focus_countries: list[str] | None = None
+    focus_languages: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
     prompt_template_ids: list[str] | None = None
