@@ -528,6 +528,20 @@ def test_topic_collect_window_days() -> None:
     upd = client.put(f"/api/v1/topics/{tid}", json={"collect_window_days": 30})
     assert upd.status_code == 200
     assert upd.json()["collect_window_days"] == 30
+
+
+def test_topic_focus_languages_can_be_updated() -> None:
+    tid = "multilingual-topic"
+    created = client.post("/api/v1/topics", json={"id": tid, "name": "Multilingual"})
+    assert created.status_code == 201
+
+    updated = client.put(
+        f"/api/v1/topics/{tid}",
+        json={"focus_languages": ["zh", "en", "es"], "focus_countries": ["CN", "US"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["focus_languages"] == ["zh", "en", "es"]
+    assert updated.json()["focus_countries"] == ["CN", "US"]
     client.delete(f"/api/v1/topics/{tid}")
 
 

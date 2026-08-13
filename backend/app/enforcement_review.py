@@ -224,7 +224,7 @@ def prioritize_enforcement_candidates(
     max_items: int = MAX_REVIEW_CANDIDATES,
     existing_counts: dict[str, int] | None = None,
 ) -> list[FetchItem]:
-    """Round-robin candidates by jurisdiction before the model sees them."""
+    """Reserve review budget for China-nexus candidates, then diversify regions."""
     groups: dict[str, list[FetchItem]] = {}
     seen: set[str] = set()
     for item in items:
@@ -236,12 +236,11 @@ def prioritize_enforcement_candidates(
         seen.add(key)
         jurisdiction = infer_enforcement_jurisdiction(item)
         bucket = groups.setdefault(jurisdiction, [])
-        per_jurisdiction_limit = 8 if jurisdiction != "Unknown" else 5
-        if len(bucket) < per_jurisdiction_limit:
-            bucket.append(item)
+        bucket.append(item)
 
-    for bucket in groups.values():
+    for jurisdiction, bucket in groups.items():
         bucket.sort(key=_candidate_review_priority, reverse=True)
+        groups[jurisdiction] = bucket[:8 if jurisdiction != "Unknown" else 5]
 
     ordered: list[FetchItem] = []
     jurisdictions = list(groups)
@@ -252,6 +251,15 @@ def prioritize_enforcement_candidates(
                 jurisdiction == "Unknown",
             )
         )
+    all_ranked = [item for bucket in groups.values() for item in bucket]
+    nexus_candidates = [item for item in all_ranked if infer_candidate_china_relevance(item) == "strong"]
+    nexus_candidates.sort(key=_candidate_review_priority, reverse=True)
+    nexus_target = min(len(nexus_candidates), max(1, int(max_items * 0.5)))
+    for item in nexus_candidates[:nexus_target]:
+        if item not in ordered:
+            ordered.append(item)
+            groups[infer_enforcement_jurisdiction(item)].remove(item)
+
     while jurisdictions and len(ordered) < max_items:
         next_round: list[str] = []
         for jurisdiction in jurisdictions:
@@ -266,11 +274,12 @@ def prioritize_enforcement_candidates(
     return ordered
 
 
-def _candidate_review_priority(item: FetchItem) -> tuple[int, int, float]:
+def _candidate_review_priority(item: FetchItem) -> tuple[int, int, int, float]:
     text = " ".join(
         str(value or "") for value in (item.title, item.content, item.summary)
     )
     return (
+        {"strong": 3, "weak": 2, "major_non_china": 0}[infer_candidate_china_relevance(item)],
         int(_has_concrete_action_evidence(text))
         + int(_has_major_enforcement_evidence(text)),
         int(bool(re.search(r"\b\d+(?:[.,]\d+)?\b", text))),

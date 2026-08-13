@@ -183,61 +183,61 @@ export function TopicsPage() {
         </div>
       )}
 
-      <div className="card-list">
+      <div className="topic-card-grid">
         {topics.map((t) => {
           const keywords = t.keywords ?? [];
-          const visibleKeywords = keywords.slice(0, 6);
+          const visibleKeywords = keywords.slice(0, 4);
           const hiddenKeywordCount = Math.max(0, keywords.length - visibleKeywords.length);
           return (
-          <article key={t.id} className="card-item">
-            <div className="card-item-header">
-              <div>
-                <h4>{t.name}</h4>
-              </div>
-              <div className="card-item-actions">
+          <article key={t.id} className="card-item topic-card">
+            <div className="card-item-header topic-card__header">
+              <div className="topic-card__title">
+                <h4 title={t.name}>{t.name}</h4>
                 <span className={`badge ${t.is_active ? "badge--green" : "badge--gray"}`}>
                   {t.is_active ? "活跃" : "停用"}
                 </span>
-                {t.is_scheduled && (
-                  <span className="badge badge--blue">定时: {t.schedule_cron}</span>
-                )}
+              </div>
+              <div className="card-item-actions topic-card__schedule">
                 <button
                   type="button"
                   className={`btn btn-sm ${t.is_scheduled ? "btn-secondary" : "btn-ghost"}`}
                   onClick={() => void handleToggleSchedule(t)}
-                  title={t.is_scheduled ? "关闭该主题的定期采集" : "开启该主题的定期采集"}
+                  title={t.is_scheduled
+                    ? `关闭定期采集（${humanizeCron(t.schedule_cron)}）`
+                    : "开启该主题的定期采集"}
                 >
                   <Clock size={12} />
-                  {t.is_scheduled ? "关闭定期采集" : "开启定期采集"}
+                  {t.is_scheduled ? humanizeCron(t.schedule_cron) : "开启定期"}
                 </button>
               </div>
             </div>
 
-            <div className="card-item-meta">
-              <div>
+            <div className="card-item-meta topic-card__meta">
+              <div className="topic-card__keywords">
                 <strong>关键词:</strong>{" "}
                 <span className="topic-keyword-list">
-                  {visibleKeywords.map((kw) => (
-                    <span key={kw} className="chip">{kw}</span>
+                  {visibleKeywords.map((kw, index) => (
+                    <span key={`${kw}-${index}`} className="chip topic-keyword-chip" title={kw}>{kw}</span>
                   ))}
                   {hiddenKeywordCount > 0 && (
-                    <span className="chip">+{hiddenKeywordCount}</span>
+                    <span className="chip topic-keyword-more" title={keywords.slice(visibleKeywords.length).join("、")}>+{hiddenKeywordCount}</span>
                   )}
+                  {keywords.length === 0 && <span className="text-muted small">无</span>}
                 </span>
               </div>
-              <div className="text-muted small">
+              <div className="text-muted small topic-card__facts">
                 采集窗口: {t.collect_window_days} 天 · {t.is_scheduled ? humanizeCron(t.schedule_cron) : "手动"}
                 {" · "}自动报告: {t.auto_report
                   ? <span className="badge badge--green">开启</span>
                   : <span className="text-muted">关闭</span>}
               </div>
-              <div className="text-muted small">
+              <div className="text-muted small topic-card__facts">
                 当前条目: {t.current_item_count} 条
                 {t.last_run_at && <> · 最后运行: {formatBeijingDateTime(t.last_run_at)}</>}
               </div>
             </div>
 
-            <div className="card-item-footer">
+            <div className="card-item-footer topic-card__footer">
               <button type="button" className="btn btn-sm btn-primary" onClick={() => handleCollect(t.id)} disabled={runningTopicIds.has(t.id)}>
                 <RefreshCw size={12} className={runningTopicIds.has(t.id) ? "spin" : ""} />
                 {runningTopicIds.has(t.id) ? "采集中..." : "立即采集"}

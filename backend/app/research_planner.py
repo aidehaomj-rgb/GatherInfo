@@ -52,6 +52,52 @@ ENFORCEMENT_SEARCH_MISSIONS = (
     ("Global", "", "customs border major seizure drugs firearms wildlife tobacco counterfeit organized crime"),
 )
 
+CHINA_NEXUS_SEARCH_MISSIONS = (
+    ("United States", "united states", 'site:cbp.gov seizure "from China" OR "China-origin"'),
+    ("United States", "united states", 'site:justice.gov smuggling "Chinese national" OR "Chinese company"'),
+    ("Canada", "canada", 'site:canada.ca CBSA seizure shipment "from China"'),
+    ("Spain", "spain", 'site:agenciatributaria.es aduanas incautación mercancía China ciudadano chino'),
+    ("Portugal", "portugal", 'site:gov.pt alfandega apreensão carga da China cidadão chinês'),
+    ("Australia", "australia", 'site:abf.gov.au seizure "Chinese national" OR "from China"'),
+    ("United Kingdom", "united kingdom", 'site:gov.uk Border Force seizure China shipment'),
+    ("Philippines", "philippines", 'site:customs.gov.ph seizure shipment China'),
+    ("Singapore", "singapore", 'site:customs.gov.sg seizure China shipment'),
+    ("Japan", "japan", 'site:customs.go.jp 税関 摘発 中国 中国人 中国製'),
+    ("South Korea", "south korea", 'site:customs.go.kr 세관 적발 중국산 중국인'),
+    ("India", "india", 'site:dri.nic.in seizure Chinese national China origin'),
+    ("Pakistan", "pakistan", 'site:fbr.gov.pk customs seizure Chinese national China cargo'),
+    ("Brazil", "brazil", 'site:gov.br receita federal apreensão carga da China cidadão chinês'),
+    ("France", "france", 'site:douane.gouv.fr saisie marchandises Chine ressortissant chinois'),
+    ("Germany", "germany", 'site:zoll.de Beschlagnahme Waren aus China chinesischer Staatsangehöriger'),
+    ("Global", "", 'customs seizure counterfeit "made in China" exporter importer'),
+    ("Global", "", 'customs seizure fentanyl precursor chemical supplier China'),
+    ("Global", "", 'customs seizure vape tobacco shipment Shenzhen China'),
+    ("Global", "", 'customs seizure firearms parts shipment China'),
+    ("Global", "", 'customs detention forced labor goods China exporter'),
+    ("Global", "", 'export control sanctions evasion Chinese company customs seizure'),
+    ("Global", "", 'customs seizure drone electronics dual use China origin'),
+    ("Global", "", 'customs seizure wildlife products route China Hong Kong'),
+    ("Global", "", 'customs seizure low value parcels ecommerce China'),
+    ("Global", "", 'customs seizure hazardous waste scrap shipment to China'),
+    ("Global", "", 'customs seizure Shanghai Ningbo Shenzhen Yantian Qingdao Xiamen'),
+    ("Global", "", 'customs seizure Shekou Nansha Tianjin Guangzhou Hong Kong transshipment'),
+    ("Global", "", 'customs seizure Chinese exporter importer bill of lading container number'),
+    ("Global", "", 'customs arrest Chinese citizen airport cash gold undeclared'),
+    ("Global", "", 'customs seizure China manufacturer counterfeit trademark parcel'),
+    ("Global", "", 'customs seizure China route vessel IMO bill of lading'),
+    ("Mexico", "mexico", 'site:gob.mx aduanas aseguramiento mercancía China ciudadano chino'),
+    ("Argentina", "argentina", 'site:argentina.gob.ar aduana incautación mercadería China ciudadano chino'),
+)
+
+WEAK_CHINA_SEARCH_MISSIONS = (
+    ("Hong Kong", "", "Hong Kong Customs seizure smuggling arrest company shipment"),
+    ("Taiwan", "", "台灣 海關 查獲 走私 中國製 中國來源"),
+    ("Macao", "", "Alfândega Macau apreensão contrabando mercadoria China"),
+    ("Global", "", 'customs seizure "via Hong Kong" OR "Hong Kong transit"'),
+    ("Global", "", 'customs seizure Chinese brand Chinese packaging origin certificate'),
+    ("Global", "", 'customs seizure WeChat Alipay Chinese phone number logistics label'),
+)
+
 CUSTOMS_HOTSPOT_SEARCH_MISSIONS = (
     "Russia refinery outage fuel shortage price differential China Russia border gasoline diesel smuggling",
     "Kazakhstan Russia Mongolia commodity shortage export restriction China land border customs illicit trade",
@@ -90,6 +136,13 @@ async def build_research_queries(
     request = f"{request}\n\n{time_constraint}"
 
     if topic.id == "weekly-enforcement-intelligence":
+        followups = _parse_followup_queries(user_prompt)
+        if followups:
+            # Later Research Agent rounds are evidence-led. Keep a small
+            # geographic baseline while spending most of the budget on gaps
+            # and named entities discovered in earlier rounds.
+            baseline = _enforcement_quota_queries(current_date, min(12, max_queries))
+            return list(dict.fromkeys([*followups, *baseline]))[:max_queries]
         # A fixed geographic mission matrix is more reliable than asking a
         # sometimes-slow model to invent a new plan for every weekly run. The
         # model remains authoritative at the evidence-review stage.
@@ -166,6 +219,20 @@ Analyst request: {request}
     return cleaned or _fallback_queries(topic, current_date, safe_window_days, max_queries)
 
 
+def _parse_followup_queries(prompt: str) -> list[str]:
+    marker = "[FOLLOWUP_QUERIES]"
+    if marker not in (prompt or ""):
+        return []
+    raw = prompt.split(marker, 1)[1].strip().splitlines()[0].strip()
+    try:
+        values = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(values, list):
+        return []
+    return [re.sub(r"\s+", " ", str(value)).strip()[:420] for value in values if str(value).strip()][:32]
+
+
 def _collection_instruction(topic: Topic, user_prompt: str) -> str:
     explicit = (user_prompt or "").strip()
     if explicit:
@@ -196,17 +263,7 @@ def _fallback_queries(
             " -site:baike.baidu.com -site:baijiahao.baidu.com"
         )
         year_hint = str(today.year)
-        queries = []
-        for jurisdiction, country, query in ENFORCEMENT_SEARCH_MISSIONS:
-            directives = f"jurisdiction={jurisdiction}"
-            if country:
-                directives += f";country={country}"
-            queries.append(
-                (
-                    f"{directives} || {query} {year_hint}{exclusions}"
-                )[:420]
-            )
-        return queries[:max_queries]
+        return _enforcement_quota_queries(today, max_queries)
 
     if topic.id == "weekly-trade-current-affairs":
         queries = [
@@ -228,6 +285,44 @@ def _fallback_queries(
         for index, direction in enumerate(directions)
     ]
     return list(dict.fromkeys(queries))[:max_queries]
+
+
+def _enforcement_quota_queries(today: date, max_queries: int) -> list[str]:
+    exclusions = " -site:customs.gov.cn -site:*.customs.gov.cn -site:renrendoc.com -site:doc88.com -site:wenku.baidu.com -site:baike.baidu.com -site:baijiahao.baidu.com"
+    strong_budget = max(1, int(max_queries * 0.70))
+    weak_budget = max(1, int(max_queries * 0.20))
+    general_budget = max(0, max_queries - strong_budget - weak_budget)
+    if max_queries <= 12:
+        selected = []
+        seen_jurisdictions = set()
+        for mission in CHINA_NEXUS_SEARCH_MISSIONS:
+            if mission[0] in seen_jurisdictions:
+                continue
+            selected.append(mission); seen_jurisdictions.add(mission[0])
+            if len(selected) >= max_queries:
+                break
+    else:
+        selected = [
+            *CHINA_NEXUS_SEARCH_MISSIONS[:strong_budget],
+            *WEAK_CHINA_SEARCH_MISSIONS[:weak_budget],
+        ]
+    if general_budget and max_queries > 12:
+        selected.extend(ENFORCEMENT_SEARCH_MISSIONS[-general_budget:])
+    if max_queries >= 35:
+        local_language = [
+            next(m for m in ENFORCEMENT_SEARCH_MISSIONS if m[0] == jurisdiction)
+            for jurisdiction in ("Thailand", "Indonesia", "Japan", "South Korea", "United Arab Emirates")
+        ]
+        selected[-len(local_language):] = local_language
+    while len(selected) < max_queries:
+        selected.append(CHINA_NEXUS_SEARCH_MISSIONS[len(selected) % len(CHINA_NEXUS_SEARCH_MISSIONS)])
+    queries = []
+    for jurisdiction, country, query in selected:
+        directives = f"jurisdiction={jurisdiction}"
+        if country:
+            directives += f";country={country}"
+        queries.append(f"{directives} || {query} {today.year}{exclusions}"[:420])
+    return queries[:max_queries]
 
 
 def _parse_query_json(content: str) -> list[str]:

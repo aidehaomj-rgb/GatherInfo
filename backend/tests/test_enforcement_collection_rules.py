@@ -202,6 +202,13 @@ def test_enforcement_candidates_prioritize_low_coverage_jurisdictions():
     ] == ["Canada", "Brazil", "Australia"]
 
 
+def test_enforcement_review_reserves_budget_for_china_nexus():
+    china = [FetchItem(title=f"Shipment from China seized {i}", content="Customs seized goods shipped from China.", url=f"https://china.example/{i}") for i in range(5)]
+    general = [FetchItem(title=f"Cocaine seized {i}", content="Customs seized 50 kg cocaine.", url=f"https://general.example/{i}") for i in range(10)]
+    selected = prioritize_enforcement_candidates([*general, *china], max_items=6)
+    assert sum("from China" in item.title for item in selected) >= 4
+
+
 def test_enforcement_portfolio_reaches_30_without_one_region_dominating():
     db = SimpleNamespace()
     db.query = lambda *_args: SimpleNamespace(
@@ -235,11 +242,24 @@ def test_enforcement_portfolio_reaches_30_without_one_region_dominating():
         jurisdiction = item.raw_metadata["search_jurisdiction"]
         counts[jurisdiction] = counts.get(jurisdiction, 0) + 1
 
-    assert len(selected) == 30
-    assert skipped == len(items) - 30
+    # With no China nexus in the candidate set, the hard portfolio quota
+    # intentionally leaves slots empty instead of filling them with ordinary cases.
+    assert len(selected) <= 30
+    assert skipped == len(items) - len(selected)
     assert counts["Hong Kong"] == 10
     assert len(counts) == 5
-    assert max(counts.values()) / len(selected) <= 1 / 3
+    assert max(counts.values()) / len(selected) <= 0.5
+
+
+def test_enforcement_portfolio_caps_non_china_cases():
+    db = SimpleNamespace()
+    db.query = lambda *_args: SimpleNamespace(filter=lambda *_conditions: SimpleNamespace(all=lambda: []))
+    engine = CollectionEngine(db)
+    china = [FetchItem(title=f"CBP shipment from China {i}", content="CBP seized goods shipped from China.", url=f"https://cbp.gov/china/{i}", raw_metadata={"search_jurisdiction": "United States"}) for i in range(12)]
+    general = [FetchItem(title=f"Drug seizure {i}", content="Customs seized 20 kg cocaine.", url=f"https://example.gov/general/{i}", raw_metadata={"search_jurisdiction": "Canada"}) for i in range(20)]
+    selected, _ = engine._select_enforcement_portfolio([*general, *china], None, target_total=20)
+    non_china = [item for item in selected if "from China" not in f"{item.title} {item.content}"]
+    assert len(non_china) <= 8
 
 
 def test_existing_monthly_items_do_not_block_new_enforcement_candidates():

@@ -47,6 +47,7 @@ async def call_llm(
     *,
     max_tokens_override: int | None = None,
     timeout_seconds: int = 120,
+    minimum_content_length: int = 100,
 ) -> dict[str, Any]:
     """Call the LLM and return content, summary, tokens_used."""
     base_url = model.base_url or default_model_base_url(model.provider)
@@ -105,7 +106,7 @@ async def call_llm(
     content = parts[0].strip() if parts else full
     summary = parts[1].strip() if len(parts) > 1 else auto_summary(content)
 
-    if len(content.strip()) < 100:
+    if len(content.strip()) < minimum_content_length:
         raise ValueError(f"LLM returned too little content: {content[:80]!r}")
 
     return {

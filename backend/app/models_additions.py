@@ -14,8 +14,21 @@ def migrate_schema(engine):
         with engine.connect() as conn:
             if "api_key" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN api_key VARCHAR(500)"))
+                cols.add("api_key")
             if "homepage_url" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN homepage_url VARCHAR(800)"))
+                cols.add("homepage_url")
+            source_group_added = "source_group" not in cols
+            if source_group_added:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN "
+                    "source_group VARCHAR(80) NOT NULL DEFAULT 'other'"
+                ))
+                cols.add("source_group")
+            from app.source_taxonomy import backfill_source_groups
+            backfill_source_groups(
+                conn, available_columns=cols, replace_other=source_group_added
+            )
             if "is_configured" not in cols:
                 conn.execute(text("ALTER TABLE source_configs ADD COLUMN is_configured BOOLEAN DEFAULT 0"))
                 # Auto-set: web_scrape/official/rss/manual sources are always configured
@@ -78,6 +91,15 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN window_end TIMESTAMP"))
             if "progress_events" not in cols:
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN progress_events JSON"))
+            conn.commit()
+
+    if "research_jobs" in existing_tables:
+        cols = {c["name"] for c in inspector.get_columns("research_jobs")}
+        with engine.connect() as conn:
+            if "acceptance_policy" not in cols:
+                conn.execute(text("ALTER TABLE research_jobs ADD COLUMN acceptance_policy JSON"))
+            if "acceptance_result" not in cols:
+                conn.execute(text("ALTER TABLE research_jobs ADD COLUMN acceptance_result JSON"))
             conn.commit()
 
     # Add scope columns to `reports` table if it exists

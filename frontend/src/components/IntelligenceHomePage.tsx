@@ -36,19 +36,9 @@ export function IntelligenceHomePage() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      fetchFeaturedItems(),
-      fetchReports(undefined, 7),
-      fetchSources(),
-      fetchTopics(),
-      fetchDashboard(),
-    ])
-      .then(([featuredList, reportList, sourceList, topicList, dash]) => {
+    fetchDashboard()
+      .then((dash) => {
         if (!active) return;
-        setFeaturedPool(featuredList);
-        setReports(reportList.reports);
-        setSources(sourceList);
-        setTopics(topicList);
         setDashboard(dash);
         setError(null);
       })
@@ -58,6 +48,13 @@ export function IntelligenceHomePage() {
       .finally(() => {
         if (active) setLoading(false);
       });
+
+    // Large source/report inventories load independently so one slow endpoint
+    // cannot hold the entire home page behind a spinner.
+    void fetchFeaturedItems().then((data) => { if (active) setFeaturedPool(data); }).catch(() => {});
+    void fetchReports(undefined, 7).then((data) => { if (active) setReports(data.reports); }).catch(() => {});
+    void fetchSources().then((data) => { if (active) setSources(data); }).catch(() => {});
+    void fetchTopics().then((data) => { if (active) setTopics(data); }).catch(() => {});
     return () => { active = false; };
   }, []);
 

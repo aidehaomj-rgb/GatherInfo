@@ -1,9 +1,12 @@
 // GatherInfo — types for the collection platform
+import type { SourceGroupId } from "./sourceGroups";
+
 export interface Source {
   id: string;
   name: string;
   description: string | null;
   channel: string;
+  source_group?: SourceGroupId | null;
   is_active: boolean;
   is_configured: boolean;
   base_url: string | null;
@@ -58,6 +61,39 @@ export interface Topic {
   next_run_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface ResearchRound {
+  round_number: number;
+  status: string;
+  items_new: number;
+  run_ids: string[];
+  error_log: string | null;
+}
+
+export interface ResearchJob {
+  id: string;
+  topic_id: string;
+  objective: string;
+  model_id: string | null;
+  status: "pending" | "running" | "completed" | "failed";
+  max_rounds: number;
+  current_round: number;
+  target_items: number;
+  result_count: number;
+  result_item_ids: string[];
+  progress: Array<Record<string, unknown>>;
+  error_log: string | null;
+  created_at: string;
+  completed_at: string | null;
+  rounds: ResearchRound[];
+  acceptance_policy: Record<string, number>;
+  acceptance_result: {
+    passed?: boolean;
+    metrics?: Record<string, number>;
+    checks?: Record<string, boolean>;
+    gaps?: string[];
+  };
 }
 
 export interface KeywordTag {
@@ -481,6 +517,25 @@ export interface SearchToolConfig {
   is_default: boolean;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface MCPToolCatalogItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  kind: "mcp" | "provider";
+  tool_type?: string;
+  is_active: boolean;
+  requires_api_key: boolean;
+  parameter_count?: number;
+  config?: Record<string, unknown>;
+}
+
+export interface MCPToolCatalog {
+  mcp_tools: MCPToolCatalogItem[];
+  providers: MCPToolCatalogItem[];
+  summary: { mcp_count: number; provider_count: number; active_provider_count: number };
 }
 
 // ── List Models Result ───────────────────────────────────────────────

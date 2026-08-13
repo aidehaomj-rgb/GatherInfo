@@ -9,6 +9,7 @@ from app.collection_schemas import (
 )
 from app.database import get_db
 from app.models import SourceConfig
+from app.source_taxonomy import SOURCE_GROUP_INPUT_CODES
 
 from ._helpers import CHANNEL_DEFAULTS, _gen_id
 
@@ -62,11 +63,19 @@ def _clear_stale_config_error(source: SourceConfig) -> bool:
     return False
 
 
+def _validate_source_group(source_group: str | None) -> None:
+    if source_group is not None and source_group not in SOURCE_GROUP_INPUT_CODES:
+        # Use 400 because the yz app's legacy numeric 422 handler expects a
+        # Pydantic exception object and cannot safely render HTTPException.
+        raise HTTPException(400, f"未知的信息源业务分类: {source_group}")
+
+
 # ── Sources CRUD ────────────────────────────────────────────────────────
 
 @router.get("/sources", response_model=list[SourceOut])
 def list_sources(channel: str | None = None, is_active: bool | None = None,
-                 configured: bool | None = None, db: Session = Depends(get_db)):
+                 configured: bool | None = None, source_group: str | None = None,
+                 db: Session = Depends(get_db)):
     q = db.query(SourceConfig)
     if channel:
         q = q.filter(SourceConfig.channel == channel)
@@ -74,12 +83,16 @@ def list_sources(channel: str | None = None, is_active: bool | None = None,
         q = q.filter(SourceConfig.is_active == is_active)
     if configured is not None:
         q = q.filter(SourceConfig.is_configured == configured)
+    if source_group:
+        _validate_source_group(source_group)
+        q = q.filter(SourceConfig.source_group == source_group)
     return q.all()
 
 
 @router.post("/sources", response_model=SourceOut, status_code=201)
 def create_source(data: SourceCreate, db: Session = Depends(get_db)):
     payload = data.model_dump()
+    _validate_source_group(payload.get("source_group"))
     src_id = payload.get("id")
     if not src_id:
         src_id = _gen_id(
@@ -142,6 +155,9 @@ def update_source(source_id: str, data: SourceUpdate, db: Session = Depends(get_
     if not src:
         raise HTTPException(404)
     update_data = data.model_dump(exclude_unset=True)
+    if "source_group" in update_data and update_data["source_group"] is None:
+        raise HTTPException(400, "信息源业务分类不能为 null")
+    _validate_source_group(update_data.get("source_group"))
     for k, v in update_data.items():
         # The form sends null when no advanced JSON is supplied. Preserve an
         # existing connector configuration so a routine API-key edit cannot

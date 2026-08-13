@@ -18,6 +18,10 @@ from app.connectors.base import (
 )
 from app.connectors._helpers import result
 from app.connectors.gdelt_search import GDELTSearchCollector
+from app.connectors.broad_web_search import (
+    BroadWebSearchCollector, ImageSearchCollector, NewsRSSSearchCollector,
+    PDFSearchCollector,
+)
 from app.connectors.official_enforcement_search import (
     OfficialEnforcementSearchCollector,
 )
@@ -42,9 +46,10 @@ class AIResearchCollector(BaseCollector):
         self.auth_config = config.auth_config or {}
 
     async def validate(self) -> bool:
-        if not self.config.api_key:
+        tavily_key = self._resolve_tavily_api_key()
+        if not tavily_key:
             return False
-        tavily = TavilyCollector(self._provider_config("tavily", self.config.api_key))
+        tavily = TavilyCollector(self._provider_config("tavily", tavily_key))
         return await tavily.validate()
 
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
@@ -59,6 +64,7 @@ class AIResearchCollector(BaseCollector):
         errors: list[str] = []
         providers = self.auth_config.get("search_providers") or [
         "tavily", "baidu_qianfan", "official_enforcement", "gdelt",
+        "broad_web", "news_rss", "image_search", "pdf_search",
         ]
         is_enforcement_plan = any(
             str(query).lstrip().startswith("jurisdiction=") for query in queries
@@ -66,13 +72,17 @@ class AIResearchCollector(BaseCollector):
         per_provider = max(1, max_items // max(1, len(providers)))
         provider_tasks = []
         if "tavily" in providers:
-            provider_tasks.append(
-                self._fetch_provider(
-                    "tavily", self.config.api_key, queries,
-                    max_items if is_enforcement_plan else per_provider,
-                    is_enforcement_plan=is_enforcement_plan,
+            tavily_key = self._resolve_tavily_api_key()
+            if tavily_key:
+                provider_tasks.append(
+                    self._fetch_provider(
+                        "tavily", tavily_key, queries,
+                        max_items if is_enforcement_plan else per_provider,
+                        is_enforcement_plan=is_enforcement_plan,
+                    )
                 )
-            )
+            else:
+                logger.info("Tavily search is pending API Key configuration; skipping provider")
         if "baidu_qianfan" in providers:
             baidu_key = self._resolve_baidu_api_key()
             if baidu_key:
@@ -101,6 +111,12 @@ class AIResearchCollector(BaseCollector):
                     is_enforcement_plan=is_enforcement_plan,
                 )
             )
+        for provider in ("broad_web", "news_rss", "image_search", "pdf_search"):
+            if provider in providers:
+                provider_tasks.append(self._fetch_provider(
+                    provider, "", queries, per_provider,
+                    is_enforcement_plan=is_enforcement_plan,
+                ))
 
         provider_results = await asyncio.gather(*provider_tasks, return_exceptions=True)
         provider_item_groups: list[list[FetchItem]] = []
@@ -152,7 +168,7 @@ class AIResearchCollector(BaseCollector):
         is_enforcement_plan: bool = False,
     ) -> tuple[list[FetchItem], list[str]]:
         shard_count = (
-            1 if provider in {"gdelt", "official_enforcement"}
+            1 if provider in {"gdelt", "official_enforcement", "broad_web", "news_rss", "image_search", "pdf_search"}
             else 3 if len(queries) >= 18
             else 2 if len(queries) >= 12
             else 1
@@ -174,6 +190,10 @@ class AIResearchCollector(BaseCollector):
             collector_class = {
                 "gdelt": GDELTSearchCollector,
                 "official_enforcement": OfficialEnforcementSearchCollector,
+                "broad_web": BroadWebSearchCollector,
+                "news_rss": NewsRSSSearchCollector,
+                "image_search": ImageSearchCollector,
+                "pdf_search": PDFSearchCollector,
             }.get(provider, TavilyCollector)
             collector = collector_class(provider_config)
             collector.set_collection_window(self.window_start, self.window_end)
@@ -256,6 +276,24 @@ class AIResearchCollector(BaseCollector):
         try:
             baidu_source = session.get(SourceConfig, "baidu-search")
             return str(baidu_source.api_key or "").strip() if baidu_source else ""
+        finally:
+            session.close()
+
+    def _resolve_tavily_api_key(self) -> str:
+        direct_key = str(self.auth_config.get("tavily_api_key") or self.config.api_key or "").strip()
+        if direct_key:
+            return direct_key
+
+        # Accept both historical source IDs so an existing Tavily setup is reusable.
+        from app.database import SessionLocal
+
+        session = SessionLocal()
+        try:
+            for source_id in ("tavily", "tavily-search"):
+                source = session.get(SourceConfig, source_id)
+                if source and source.is_active and source.is_configured and source.api_key:
+                    return str(source.api_key).strip()
+            return ""
         finally:
             session.close()
 

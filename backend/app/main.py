@@ -40,6 +40,7 @@ from app.routes.haisee import router as haisee_router
 from app.routes.material_sets import router as material_sets_router
 from app.routes.supply_chain import router as supply_chain_router
 from app.routes.prompt_templates import router as prompt_templates_router
+from app.routes.research import router as research_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,7 @@ def create_app() -> FastAPI:
     app.include_router(material_sets_router)
     app.include_router(supply_chain_router)
     app.include_router(prompt_templates_router)
+    app.include_router(research_router)
 
     return app
 

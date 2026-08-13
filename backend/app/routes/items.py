@@ -35,6 +35,13 @@ def _format_batch_label_time(value: datetime | None) -> str:
     return utc_value.astimezone(BEIJING_TIME_ZONE).strftime("%Y-%m-%d %H:%M")
 
 
+def _utc_sort_time(value: datetime | None) -> datetime:
+    """Normalize SQLite's mixed naive/aware timestamps before Python sorting."""
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 # ── Runs ────────────────────────────────────────────────────────────────
 
 @router.get("/runs", response_model=list[RunOut])
@@ -76,7 +83,7 @@ def list_batches(
     batches: list[BatchOut] = []
     for batch_id, runs in sorted(
         batch_map.items(),
-        key=lambda x: max((r.created_at for r in x[1] if r.created_at), default=None) or datetime.min,
+        key=lambda x: max((_utc_sort_time(r.created_at) for r in x[1]), default=_utc_sort_time(None)),
         reverse=True,
     )[:limit]:
         runs.sort(key=lambda r: r.source_id or "")
@@ -392,7 +399,16 @@ def item_inventory(db: Session = Depends(get_db)):
             "topic_id": topic_id,
         })
     min_utc = datetime.min.replace(tzinfo=timezone.utc)
-    batches.sort(key=lambda row: row["latest_at"] or min_utc, reverse=True)
+
+    def batch_sort_time(row):
+        latest_at = row["latest_at"]
+        if latest_at is None:
+            return min_utc
+        if latest_at.tzinfo is None:
+            return latest_at.replace(tzinfo=timezone.utc)
+        return latest_at.astimezone(timezone.utc)
+
+    batches.sort(key=batch_sort_time, reverse=True)
 
     return ItemInventoryOut(
         total_items=db.query(CollectedItem).count(),

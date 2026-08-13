@@ -5,10 +5,12 @@ source configurations covering international trade, customs,
 regulations, sanctions, and general search sources.
 """
 
+from app.source_taxonomy import determine_source_group
+
 
 def _default_sources() -> list[dict]:
     """Return seed data for the 16 default sources."""
-    return [
+    sources = [
         {"id": "wto-eping", "name": "WTO ePing 技术性贸易壁垒通报",
          "description": "WTO 官方 TBT/SPS 通报预警平台，覆盖所有成员国标准更新。",
          "channel": "official", "is_active": True,
@@ -622,4 +624,7 @@ def _default_sources() -> list[dict]:
                          "title_include_pattern": "國防部|軍備局|陸軍|海軍|空軍"},
          "legal_basis": "中国台湾地区政府电子采购网公开决标资料"},
     ]
+    for source in sources:
+        source.setdefault("source_group", determine_source_group(source))
+    return sources
 

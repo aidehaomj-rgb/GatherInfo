@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "gatherinfo": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\gatherinfo-yz\\scripts\\start-gatherinfo-mcp.ps1"
+      ],
+      "env": {
+        "GATHERINFO_API_URL": "http://127.0.0.1:8110/api/v1"
+      }
+    }
+  }
+}
