@@ -30,6 +30,21 @@ def test_health() -> None:
     assert resp.json()["status"] == "ok"
 
 
+def test_mcp_catalog_contains_builtin_tools_and_providers() -> None:
+    resp = client.get("/api/v1/research/tools/catalog")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["mcp_count"] == 17
+    assert data["summary"]["provider_count"] >= 8
+    assert {tool["id"] for tool in data["mcp_tools"]} >= {
+        "start_research",
+        "broad_web_search",
+        "multilingual_news_search",
+        "case_image_search",
+        "official_pdf_search",
+    }
+
+
 # ── Sources ─────────────────────────────────────────────────────────
 
 def test_list_sources() -> None:

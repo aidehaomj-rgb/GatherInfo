@@ -151,9 +151,15 @@ async def lifespan(app: FastAPI):
 
     init_db()
     from app.database import SessionLocal
+    from app.models import SearchToolConfig
     from app.prompt_seed import ensure_builtin_prompt_templates
+    from app.routes._seed_data import _default_search_tools
     with SessionLocal() as seed_db:
         ensure_builtin_prompt_templates(seed_db)
+        for config in _default_search_tools():
+            if not seed_db.get(SearchToolConfig, config["id"]):
+                seed_db.add(SearchToolConfig(**config))
+        seed_db.commit()
     
     try:
         from app.scheduler import CollectionScheduler

@@ -18,6 +18,9 @@
 ### Security
 - Configuration snapshots retain environment-variable references but replace credential values with `${REDACTED}`.
 
+### Fixed
+- Seeded built-in MCP/search providers during fresh backend startup so newly cloned deployments show the complete MCP catalog.
+
 ## [0.7.1] - 2026-07-28
 
 ### 变更
