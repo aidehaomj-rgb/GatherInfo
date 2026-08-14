@@ -12,7 +12,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.database import SessionLocal  # noqa: E402
+from sqlalchemy import MetaData, Table, select  # noqa: E402
+
+from app.database import engine, SessionLocal  # noqa: E402
 from app.models import (  # noqa: E402
     Category,
     PromptTemplate,
@@ -98,6 +100,18 @@ SUPPLY_CHAIN_MODELS = {
         "status", "content", "summary", "error_log", "generated_at",
     )),
 }
+CONTENT_TABLES = (
+    "collected_items",
+    "reports",
+    "tags",
+    "item_tags",
+    "research_jobs",
+    "research_rounds",
+    "research_cases",
+    "research_case_entities",
+    "research_entities",
+    "research_evidence",
+)
 
 
 def _is_secret_key(key: str) -> bool:
@@ -145,6 +159,20 @@ def write_supply_chain_snapshot(db: Any) -> None:
     print(f"supply_chain.json: {counts}")
 
 
+def write_content_archive(db: Any) -> None:
+    metadata = MetaData()
+    payload: dict[str, list[dict[str, Any]]] = {}
+    for table_name in CONTENT_TABLES:
+        table = Table(table_name, metadata, autoload_with=engine)
+        order_columns = list(table.primary_key.columns) or list(table.columns)[:1]
+        rows = db.execute(select(table).order_by(*order_columns)).mappings().all()
+        payload[table_name] = [sanitize(dict(row)) for row in rows]
+    path = OUTPUT_DIR / "content_archive.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    counts = ", ".join(f"{name}={len(rows)}" for name, rows in payload.items())
+    print(f"content_archive.json: {counts}")
+
+
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with SessionLocal() as db:
@@ -154,6 +182,7 @@ def main() -> None:
         write_snapshot("topics.json", db.query(Topic).all(), TOPIC_FIELDS)
         write_snapshot("mcp_tools.json", db.query(SearchToolConfig).all(), TOOL_FIELDS)
         write_supply_chain_snapshot(db)
+        write_content_archive(db)
 
 
 if __name__ == "__main__":

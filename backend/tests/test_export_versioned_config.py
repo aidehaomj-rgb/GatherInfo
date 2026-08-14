@@ -1,4 +1,4 @@
-from backend.scripts.export_versioned_config import SUPPLY_CHAIN_MODELS, sanitize
+from backend.scripts.export_versioned_config import CONTENT_TABLES, SUPPLY_CHAIN_MODELS, sanitize
 
 
 def test_sanitize_redacts_credentials_without_redacting_keyword_settings() -> None:
@@ -25,3 +25,8 @@ def test_supply_chain_snapshot_covers_every_page_dataset() -> None:
         "open_source_evidence",
         "reports",
     }
+
+
+def test_content_archive_covers_collected_items_reports_and_research() -> None:
+    assert {"collected_items", "reports", "tags", "item_tags"}.issubset(CONTENT_TABLES)
+    assert {"research_jobs", "research_cases", "research_entities", "research_evidence"}.issubset(CONTENT_TABLES)
