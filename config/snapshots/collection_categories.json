@@ -1,0 +1,32 @@
+[
+  {
+    "id": "enforcement",
+    "name": "执法与缉私",
+    "description": null
+  },
+  {
+    "id": "logistics",
+    "name": "供应链与物流",
+    "description": null
+  },
+  {
+    "id": "market",
+    "name": "市场与商品",
+    "description": null
+  },
+  {
+    "id": "regulation",
+    "name": "法规与合规",
+    "description": null
+  },
+  {
+    "id": "security",
+    "name": "出口管制",
+    "description": null
+  },
+  {
+    "id": "trade",
+    "name": "贸易政策",
+    "description": null
+  }
+]

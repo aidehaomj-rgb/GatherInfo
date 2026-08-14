@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0] - 2026-08-14
+
+### Added
+- Added version-controlled snapshots for collection categories, information sources, prompt templates, topic management, and MCP/search tools.
+- Added a deterministic configuration exporter that removes credentials and runtime-only state before publication.
+- Added the MCP tool management module and multilingual, multimodal, official-document, and broad-web research capabilities.
+
+### Changed
+- Unified root, frontend, backend API, health endpoint, and MCP server version metadata at `0.9.0`.
+- Expanded intelligent collection with multi-round research, China-related quotas, entity extraction, document parsing, and cross-source verification.
+- Improved information-source taxonomy and category-aligned filtering layouts.
+
+### Security
+- Configuration snapshots retain environment-variable references but replace credential values with `${REDACTED}`.
+
 ## [0.7.1] - 2026-07-28
 
 ### 变更

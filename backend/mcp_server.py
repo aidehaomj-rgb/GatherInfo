@@ -92,7 +92,7 @@ def main() -> None:
             continue
         req_id, method = msg["id"], msg.get("method")
         try:
-            if method == "initialize": result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "gatherinfo", "version": "1.0.0"}}
+            if method == "initialize": result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "gatherinfo", "version": "0.9.0"}}
             elif method == "tools/list": result = {"tools": TOOLS}
             elif method == "tools/call":
                 value = call_tool(msg["params"]["name"], msg["params"].get("arguments", {}))
