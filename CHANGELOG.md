@@ -4,6 +4,7 @@
 
 ### Added
 - Added version-controlled snapshots for collection categories, information sources, prompt templates, topic management, and MCP/search tools.
+- Added the complete local supply-chain penetration dataset, including investigations, entities, procurement cases, shipments, evidence, and reports.
 - Added a deterministic configuration exporter that removes credentials and runtime-only state before publication.
 - Added the MCP tool management module and multilingual, multimodal, official-document, and broad-web research capabilities.
 

@@ -1,4 +1,4 @@
-from backend.scripts.export_versioned_config import sanitize
+from backend.scripts.export_versioned_config import SUPPLY_CHAIN_MODELS, sanitize
 
 
 def test_sanitize_redacts_credentials_without_redacting_keyword_settings() -> None:
@@ -12,4 +12,16 @@ def test_sanitize_redacts_credentials_without_redacting_keyword_settings() -> No
         "api_key": "${REDACTED}",
         "nested": {"access_token": "${REDACTED}", "keyword_param": "query"},
         "prefer_default_keywords": True,
+    }
+
+
+def test_supply_chain_snapshot_covers_every_page_dataset() -> None:
+    assert set(SUPPLY_CHAIN_MODELS) == {
+        "investigations",
+        "entities",
+        "cases",
+        "shipments",
+        "evidence",
+        "open_source_evidence",
+        "reports",
     }

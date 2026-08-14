@@ -18,6 +18,13 @@ from app.models import (  # noqa: E402
     PromptTemplate,
     SearchToolConfig,
     SourceConfig,
+    SupplyChainCase,
+    SupplyChainEntity,
+    SupplyChainEvidence,
+    SupplyChainInvestigation,
+    SupplyChainOpenSourceEvidence,
+    SupplyChainReport,
+    SupplyChainShipment,
     Topic,
 )
 
@@ -55,6 +62,42 @@ TOOL_FIELDS = (
     "id", "name", "tool_type", "is_active", "config_json", "api_key_ref",
     "is_default",
 )
+SUPPLY_CHAIN_MODELS = {
+    "investigations": (SupplyChainInvestigation, (
+        "id", "country", "name", "description", "status", "entity_ids",
+        "case_ids", "shipment_ids", "evidence_ids", "open_source_evidence_ids",
+        "report_ids",
+    )),
+    "entities": (SupplyChainEntity, (
+        "id", "name", "name_zh", "country", "entity_type", "aliases",
+        "parent_id", "defense_roles", "source_url", "notes",
+    )),
+    "cases": (SupplyChainCase, (
+        "id", "country", "title", "procurement_agency", "procurement_reference",
+        "procurement_date", "supplier_entity_id", "product", "target_program",
+        "contract_value", "currency", "source_url", "source_excerpt", "status",
+    )),
+    "shipments": (SupplyChainShipment, (
+        "id", "exporter_name", "exporter_country", "importer_entity_id",
+        "importer_name", "product", "hs_code", "shipment_date", "weight_kg",
+        "quantity", "quantity_unit", "origin_country", "destination_country",
+        "bill_no", "source_name", "source_url", "raw_record",
+    )),
+    "evidence": (SupplyChainEvidence, (
+        "id", "case_id", "shipment_id", "relation_type", "evidence_grade",
+        "score", "status", "reasoning", "verified_facts", "model_review",
+        "is_reportable",
+    )),
+    "open_source_evidence": (SupplyChainOpenSourceEvidence, (
+        "id", "case_id", "title", "source_type", "source_publisher",
+        "source_url", "source_excerpt", "verified_facts", "evidence_grade",
+        "status", "limitations",
+    )),
+    "reports": (SupplyChainReport, (
+        "id", "country", "title", "case_ids", "evidence_ids", "model_id",
+        "status", "content", "summary", "error_log", "generated_at",
+    )),
+}
 
 
 def _is_secret_key(key: str) -> bool:
@@ -91,6 +134,17 @@ def write_snapshot(filename: str, rows: list[Any], fields: tuple[str, ...]) -> N
     print(f"{filename}: {len(payload)}")
 
 
+def write_supply_chain_snapshot(db: Any) -> None:
+    payload = {
+        name: serialize_rows(db.query(model).all(), fields)
+        for name, (model, fields) in SUPPLY_CHAIN_MODELS.items()
+    }
+    path = OUTPUT_DIR / "supply_chain.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    counts = ", ".join(f"{name}={len(rows)}" for name, rows in payload.items())
+    print(f"supply_chain.json: {counts}")
+
+
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with SessionLocal() as db:
@@ -99,6 +153,7 @@ def main() -> None:
         write_snapshot("prompt_templates.json", db.query(PromptTemplate).all(), PROMPT_FIELDS)
         write_snapshot("topics.json", db.query(Topic).all(), TOPIC_FIELDS)
         write_snapshot("mcp_tools.json", db.query(SearchToolConfig).all(), TOOL_FIELDS)
+        write_supply_chain_snapshot(db)
 
 
 if __name__ == "__main__":
