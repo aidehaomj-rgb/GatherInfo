@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, Zap, Cpu, List, Radar } from "lucide-react";
+import { Plus, Trash2, Edit3, Zap, Cpu, List, Radar, CheckCircle2, AlertTriangle } from "lucide-react";
 import { fetchModels, createModel, updateModel, deleteModel, testModel, listAvailableModels, autoDiscoverModels } from "../api";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { ModelForm } from "./ModelForm";
@@ -18,6 +18,10 @@ export function ModelConfigPage() {
   const [discovering, setDiscovering] = useState(false);
   const [discoverMsg, setDiscoverMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
+  const [tab, setTab] = useState<"usable" | "pending">("usable");
+
+  const isUsable = (m: ModelConfig) =>
+    m.is_active && (typeof m.is_configured === "boolean" ? m.is_configured : Boolean(m.model_name));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,6 +94,7 @@ export function ModelConfigPage() {
 
   const providerIcons: Record<string, string> = {
     ollama: "🦙",
+    ollama_cloud: "☁️",
     openai: "🤖",
     lmstudio: "💻",
     cc_switch: "🔀",
@@ -97,11 +102,16 @@ export function ModelConfigPage() {
   };
   const providerNames: Record<string, string> = {
     ollama: "Ollama",
+    ollama_cloud: "Ollama Cloud",
     openai: "OpenAI 兼容",
     lmstudio: "LM Studio",
     cc_switch: "CC Switch",
     custom: "自定义",
   };
+
+  const usableModels = models.filter(isUsable);
+  const pendingModels = models.filter((m) => !isUsable(m));
+  const shown = tab === "usable" ? usableModels : pendingModels;
 
   return (
     <div className="page">
@@ -125,6 +135,20 @@ export function ModelConfigPage() {
         {discoverMsg && <div className="toast" onClick={() => setDiscoverMsg(null)}>{discoverMsg}</div>}
       </div>
 
+      {models.length > 0 && (
+        <div className="toolbar-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div className="segmented-control">
+            <button type="button" className={`seg-btn ${tab === "usable" ? "seg-btn--active" : ""}`} onClick={() => setTab("usable")}>
+              可用模型 · {usableModels.length}
+            </button>
+            <button type="button" className={`seg-btn ${tab === "pending" ? "seg-btn--active" : ""}`} onClick={() => setTab("pending")}>
+              未配置 · {pendingModels.length}
+            </button>
+          </div>
+          <span className="text-muted small">共 {models.length} 个 · 可用 {usableModels.length} / 未配置 {pendingModels.length}</span>
+        </div>
+      )}
+
       {models.length === 0 && (
         <div className="card-item" style={{ padding: 32, textAlign: "center" }}>
           <Cpu size={32} className="text-muted" style={{ marginBottom: 8 }} />
@@ -135,10 +159,18 @@ export function ModelConfigPage() {
       )}
 
       <div className="card-list">
-        {models.map((m) => {
+        {shown.length === 0 ? (
+          <div className="card-item" style={{ padding: 24, textAlign: "center" }}>
+            <p>{tab === "usable" ? "暂无可用模型。" : "暂无未配置模型。"}</p>
+            <p className="text-muted small">
+              {tab === "usable" ? "可切换到“未配置”完成配置，或点击“添加模型”。" : "所有模型均已配置完成。"}
+            </p>
+          </div>
+        ) : shown.map((m) => {
           const test = testResults[m.id];
+          const usable = tab === "usable";
           return (
-            <article key={m.id} className={`card-item ${!m.is_active ? "card-item--muted" : ""}`}>
+            <article key={m.id} className={`card-item ${!usable ? "card-item--muted" : ""}`}>
               <div className="card-item-header">
                 <div>
                   <div className="card-item-title">
@@ -153,9 +185,15 @@ export function ModelConfigPage() {
                   </div>
                 </div>
                 <div className="card-item-actions">
-                  <span className={`badge ${m.is_active ? "badge--green" : "badge--gray"}`}>
-                    {m.is_active ? "活跃" : "停用"}
-                  </span>
+                  {usable ? (
+                    <span className="badge badge--green">
+                      <CheckCircle2 size={11} style={{ verticalAlign: -1, marginRight: 3 }} />可用
+                    </span>
+                  ) : (
+                    <span className="badge" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
+                      <AlertTriangle size={11} style={{ verticalAlign: -1, marginRight: 3 }} />待配置
+                    </span>
+                  )}
                   <span className="chip">{m.provider}</span>
                 </div>
               </div>
@@ -170,6 +208,12 @@ export function ModelConfigPage() {
                   <strong>地址:</strong> {m.base_url || "(默认)"}
                   {m.api_key ? <span> · <strong>API Key:</strong> 已配置</span> : null}
                 </div>
+                {!usable && (
+                  <div className="text-muted small" style={{ color: "var(--amber)" }}>
+                    <AlertTriangle size={11} style={{ verticalAlign: -1, marginRight: 3 }} />
+                    {!m.is_active ? "模型未启用" : "缺少 API Key 或未完成配置"}，编辑后可移入“可用模型”。
+                  </div>
+                )}
                 {m.description && <div className="text-muted small">{m.description}</div>}
 
                 {test && (

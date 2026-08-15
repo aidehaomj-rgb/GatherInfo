@@ -32,7 +32,7 @@ def _seed(title: str, content: str = "", **kwargs) -> str:
             source_id=kwargs.pop("source_id", "tavily"),
             title=title,
             content=content,
-            collected_at=datetime.now(timezone.utc),
+            collected_at=kwargs.pop("collected_at", datetime.now(timezone.utc)),
             **kwargs,
         )
         db.add(it)
@@ -148,6 +148,30 @@ class TestItemAPI:
         data = resp.json()
         assert "items" in data
         assert "total" in data
+
+    def test_latest_items_are_ordered_by_collection_time(self) -> None:
+        from datetime import timedelta
+
+        marker = f"collection-order-{uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc)
+        newest_id = _seed(
+            f"{marker} newly collected",
+            "A newly collected customs intelligence article.",
+            collected_at=now,
+            published_at=now - timedelta(days=20),
+        )
+        older_id = _seed(
+            f"{marker} older collection",
+            "An older collection with a newer publication date.",
+            collected_at=now - timedelta(days=1),
+            published_at=now,
+        )
+
+        response = client.get("/api/v1/items", params={"q": marker, "page_size": 10})
+
+        assert response.status_code == 200
+        ids = [item["id"] for item in response.json()["items"]]
+        assert ids.index(newest_id) < ids.index(older_id)
 
     def test_search_items_api(self) -> None:
         item_id = _seed("FTS Test API Item", "For testing API search")

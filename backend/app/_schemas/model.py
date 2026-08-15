@@ -1,5 +1,5 @@
 """Model config schemas."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_serializer
 from .common import IsoDT
 
 
@@ -48,6 +48,29 @@ class ModelConfigOut(BaseModel):
     created_at: IsoDT = None
     updated_at: IsoDT = None
     model_config = {"from_attributes": True}
+
+    @field_serializer("api_key")
+    def hide_api_key(self, _value: str | None) -> None:
+        """Credentials stay server-side; callers only receive is_configured."""
+        return None
+
+    @computed_field
+    @property
+    def is_configured(self) -> bool:
+        if self.provider == "ollama":
+            return bool(self.model_name)
+        if self.provider == "ollama_cloud":
+            return bool(self.base_url and self.api_key and self.model_name)
+        if self.provider in {"lmstudio", "cc_switch"}:
+            return bool(self.base_url and self.model_name)
+        return bool(self.base_url and self.api_key and self.model_name)
+
+
+class ModelListRequest(BaseModel):
+    provider: str = "ollama"
+    base_url: str | None = None
+    api_key: str | None = None
+    model_name: str = ""
 
 
 class ModelTestResult(BaseModel):

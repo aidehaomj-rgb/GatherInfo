@@ -3,13 +3,15 @@ GatherInfo backend tests — collection engine, API, tag system.
 """
 from pathlib import Path
 import sys
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.main import create_app  # noqa: E402
-from app.database import init_db  # noqa: E402
+from app.database import SessionLocal, init_db  # noqa: E402
+from app.models import CollectionRun, JobStatus  # noqa: E402
 
 app = create_app()
 client = TestClient(app)
@@ -26,6 +28,22 @@ def test_health() -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+def test_mcp_catalog_contains_builtin_tools_and_providers() -> None:
+    resp = client.get("/api/v1/research/tools/catalog")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["mcp_count"] >= 17
+    assert data["summary"]["provider_count"] >= 8
+    assert {tool["id"] for tool in data["mcp_tools"]} >= {
+        "start_research",
+        "broad_web_search",
+        "multilingual_news_search",
+        "case_image_search",
+        "official_pdf_search",
+        "deep_search_china_trade_records",
+    }
 
 
 # ── Sources ─────────────────────────────────────────────────────────
@@ -89,6 +107,34 @@ def test_list_items() -> None:
     assert "total" in data
 
 
+def test_quality_review_deletes_known_low_value_page() -> None:
+    from app.database import SessionLocal
+    from app.models import CollectedItem
+
+    source = client.post("/api/v1/sources", json={
+        "id": "quality-review-source", "name": "Quality Review Source", "channel": "api_search",
+    })
+    assert source.status_code in (200, 201)
+    db = SessionLocal()
+    try:
+        db.add(CollectedItem(
+            id="quality-review-noise", source_id="quality-review-source",
+            title="查获_【环球博讯】",
+            content="BOSS体育 U存U取 编辑推荐 SIDE1 招租 Copyright 环球博彩资讯门户网",
+            url="https://m.wgi888.com/tag/%E6%9F%A5%E8%8E%B7",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/v1/items/quality-review", json={
+        "item_ids": ["quality-review-noise"], "limit": 1,
+    })
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    client.delete("/api/v1/sources/quality-review-source")
+
+
 # ── Tags ────────────────────────────────────────────────────────────
 
 def test_list_tags() -> None:
@@ -118,6 +164,24 @@ def test_dashboard() -> None:
     data = resp.json()
     assert "summary" in data
     assert "daily_trend" in data
+    assert "topic_stats" in data
+    assert isinstance(data["topic_stats"], list)
+
+
+def test_topic_ai_collection_strategy_round_trips() -> None:
+    payload = {
+        "id": "test-ai-collection-topic",
+        "name": "AI Collection Topic",
+        "keywords": ["test"],
+        "description_prompt": "检索近一周的高价值贸易风险信息。",
+        "ai_research_model_id": "configured-model",
+    }
+    created = client.post("/api/v1/topics", json=payload)
+    assert created.status_code in (200, 201)
+    body = created.json()
+    assert body["description_prompt"] == payload["description_prompt"]
+    assert body["ai_research_model_id"] == payload["ai_research_model_id"]
+    assert client.delete("/api/v1/topics/test-ai-collection-topic").status_code == 200
 
 
 # ── Connectors ──────────────────────────────────────────────────────
@@ -135,6 +199,7 @@ def test_connectors() -> None:
 def test_seed_defaults() -> None:
     resp = client.post("/api/v1/seed-defaults")
     assert resp.status_code == 200
+    assert resp.json()["models_created"] == 0
 
 
 # ── Auto-ID (信息员 / 主题) ──────────────────────────────────────────
@@ -196,6 +261,59 @@ def test_list_runs() -> None:
     assert isinstance(resp.json(), list)
 
 
+def test_active_runs_include_rich_progress_events() -> None:
+    client.delete("/api/v1/sources/progress-test-source")
+    source = client.post("/api/v1/sources", json={
+        "id": "progress-test-source",
+        "name": "实时进度测试源",
+        "channel": "web_scrape",
+        "base_url": "https://example.com",
+    })
+    assert source.status_code == 201
+
+    db = SessionLocal()
+    try:
+        db.add(CollectionRun(
+            id="progress-test-run",
+            source_id="progress-test-source",
+            status=JobStatus.RUNNING,
+            batch_id="progress-test-batch",
+            started_at=datetime.now(timezone.utc),
+            progress_events=[{
+                "stage": "discovered",
+                "status": "running",
+                "message": "发现候选信息：《测试文章》",
+                "item_title": "测试文章",
+                "detail": {"url": "https://example.com/article"},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }],
+        ))
+        db.add(CollectionRun(
+            id="progress-test-completed-run",
+            source_id="progress-test-source",
+            status=JobStatus.COMPLETED,
+            batch_id="progress-test-batch",
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+
+        response = client.get("/api/v1/runs/active")
+        assert response.status_code == 200
+        active = next(run for run in response.json() if run["id"] == "progress-test-run")
+        assert active["source_name"] == "实时进度测试源"
+        assert active["progress_events"][0]["stage"] == "discovered"
+        assert active["progress_events"][0]["item_title"] == "测试文章"
+        assert active["batch_total_sources"] == 2
+        assert active["batch_completed_sources"] == 1
+        assert active["batch_active_sources"] == 1
+    finally:
+        db.query(CollectionRun).filter(CollectionRun.batch_id == "progress-test-batch").delete()
+        db.commit()
+        db.close()
+        client.delete("/api/v1/sources/progress-test-source")
+
+
 # ── Report scope + batch ────────────────────────────────────────────
 
 def test_generate_report_invalid_topic() -> None:
@@ -241,6 +359,49 @@ def test_auto_discover_models() -> None:
     data = resp.json()
     assert "providers" in data
     assert isinstance(data["providers"], list)
+
+
+def test_list_ollama_cloud_models_uses_cloud_api(monkeypatch) -> None:
+    """Ollama Cloud model discovery should use the native cloud API with auth."""
+    requests: list[dict[str, object]] = []
+
+    class _Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"models": [{"name": "gpt-oss:20b"}, {"name": "llama3.3"}]}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None):
+            requests.append({"url": url, "headers": headers or {}})
+            return _Response()
+
+    monkeypatch.setattr("app.routes.models.httpx.AsyncClient", _Client)
+
+    resp = client.post("/api/v1/models/list-available", json={
+        "provider": "ollama_cloud",
+        "base_url": "https://ollama.com",
+        "api_key": "test-cloud-key",
+    })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["models"] == ["gpt-oss:20b", "llama3.3"]
+    assert requests == [{
+        "url": "https://ollama.com/api/tags",
+        "headers": {"Authorization": "Bearer test-cloud-key"},
+    }]
 
 
 # ── Tag merge ───────────────────────────────────────────────────────
@@ -339,6 +500,18 @@ def test_topic_chinese_punctuation_normalized() -> None:
     client.delete("/api/v1/topics/punct-topic")
 
 
+def test_topic_keyword_list_accepts_semicolons_and_enumeration_marks() -> None:
+    """Topic keywords may use common Chinese and English list separators."""
+    resp = client.post("/api/v1/topics", json={
+        "id": "keyword-separator-topic",
+        "name": "关键词间隔测试",
+        "keywords": ["关税；走私、出口管制;贸易救济"],
+    })
+    assert resp.status_code in (200, 201)
+    assert resp.json()["keywords"] == ["关税", "走私", "出口管制", "贸易救济"]
+    client.delete("/api/v1/topics/keyword-separator-topic")
+
+
 # ── Source homepage_url roundtrip ───────────────────────────────────
 
 def test_source_homepage_url_roundtrip() -> None:
@@ -371,6 +544,20 @@ def test_topic_collect_window_days() -> None:
     upd = client.put(f"/api/v1/topics/{tid}", json={"collect_window_days": 30})
     assert upd.status_code == 200
     assert upd.json()["collect_window_days"] == 30
+
+
+def test_topic_focus_languages_can_be_updated() -> None:
+    tid = "multilingual-topic"
+    created = client.post("/api/v1/topics", json={"id": tid, "name": "Multilingual"})
+    assert created.status_code == 201
+
+    updated = client.put(
+        f"/api/v1/topics/{tid}",
+        json={"focus_languages": ["zh", "en", "es"], "focus_countries": ["CN", "US"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["focus_languages"] == ["zh", "en", "es"]
+    assert updated.json()["focus_countries"] == ["CN", "US"]
     client.delete(f"/api/v1/topics/{tid}")
 
 

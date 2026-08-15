@@ -13,14 +13,51 @@ from app.models import ModelConfig
 
 logger = logging.getLogger(__name__)
 
+OLLAMA_CLOUD_BASE_URL = "https://ollama.com"
+OLLAMA_PROVIDERS = {"ollama", "ollama_cloud"}
 
-async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
+
+def openai_compatible_url(base_url: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    path = path if path.startswith("/") else f"/{path}"
+    if base.endswith("/v1"):
+        return f"{base}{path}"
+    return f"{base}/v1{path}"
+
+
+def is_ollama_provider(provider: str) -> bool:
+    return provider in OLLAMA_PROVIDERS
+
+
+def default_model_base_url(provider: str) -> str:
+    if provider == "ollama_cloud":
+        return OLLAMA_CLOUD_BASE_URL
+    return "http://localhost:11434"
+
+
+def ollama_api_url(base_url: str, path: str) -> str:
+    base = base_url.rstrip("/")
+    path = path if path.startswith("/") else f"/{path}"
+    return f"{base}{path}"
+
+
+async def call_llm(
+    model: ModelConfig,
+    prompt: str,
+    *,
+    max_tokens_override: int | None = None,
+    timeout_seconds: int = 120,
+    minimum_content_length: int = 100,
+) -> dict[str, Any]:
     """Call the LLM and return content, summary, tokens_used."""
-    base_url = model.base_url or "http://localhost:11434"
+    base_url = model.base_url or default_model_base_url(model.provider)
     model_name = model.model_name
 
-    if model.provider == "ollama":
-        url = f"{base_url.rstrip('/')}/api/chat"
+    if is_ollama_provider(model.provider):
+        url = ollama_api_url(base_url, "/api/chat")
+        headers = {"Content-Type": "application/json"}
+        if model.api_key:
+            headers["Authorization"] = f"Bearer {model.api_key}"
         payload = {
             "model": model_name,
             "messages": [
@@ -28,20 +65,21 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": model.temperature or 0.7,
-                "num_predict": model.max_tokens or 4096,
+                "num_predict": max_tokens_override or model.max_tokens or 4096,
             },
         }
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-            full = data.get("message", {}).get("content", "")
+            msg = data.get("message", {})
+            full = msg.get("content") or msg.get("thinking") or ""
 
     elif model.provider in ("openai", "lmstudio", "custom", "cc_switch"):
-        base = base_url.rstrip("/")
-        url = f"{base}/v1/chat/completions"
+        url = openai_compatible_url(base_url, "/chat/completions")
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = f"Bearer {model.api_key}"
@@ -52,10 +90,10 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             "temperature": model.temperature or 0.7,
-            "max_tokens": model.max_tokens or 4096,
+            "max_tokens": max_tokens_override or model.max_tokens or 4096,
             "top_p": model.top_p or 0.9,
         }
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -67,6 +105,9 @@ async def call_llm(model: ModelConfig, prompt: str) -> dict[str, Any]:
     parts = full.split("===SEPARATOR===")
     content = parts[0].strip() if parts else full
     summary = parts[1].strip() if len(parts) > 1 else auto_summary(content)
+
+    if len(content.strip()) < minimum_content_length:
+        raise ValueError(f"LLM returned too little content: {content[:80]!r}")
 
     return {
         "content": content,
@@ -106,11 +147,14 @@ async def translate_item_context(
         + "\n".join(lines)
     )
 
-    base_url = model.base_url or "http://localhost:11434"
+    base_url = model.base_url or default_model_base_url(model.provider)
     model_name = model.model_name or ""
 
-    if model.provider == "ollama":
-        url = base_url.rstrip("/") + "/api/chat"
+    if is_ollama_provider(model.provider):
+        url = ollama_api_url(base_url, "/api/chat")
+        headers = {"Content-Type": "application/json"}
+        if model.api_key:
+            headers["Authorization"] = "Bearer " + model.api_key
         payload = {
             "model": model_name,
             "messages": [{"role": "user", "content": prompt}],
@@ -118,13 +162,13 @@ async def translate_item_context(
             "options": {"temperature": 0.2, "num_predict": 4096},
         }
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-            output = data.get("message", {}).get("content", "")
+            msg = data.get("message", {})
+            output = msg.get("content") or msg.get("thinking") or ""
     else:
-        base = base_url.rstrip("/")
-        url = base + "/v1/chat/completions"
+        url = openai_compatible_url(base_url, "/chat/completions")
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = "Bearer " + model.api_key

@@ -1,8 +1,11 @@
 """
-GatherInfo — 全球信息采集监控平台
+TradeRadar — 全球贸易风险情报中枢 v0.9.0
 
-The collection engine is the core of this application.
-Everything else (tags, topics, stats, search) derives from collected data.
+后端优化版本：
+- 完善的 OpenAPI 文档
+- 增强的健康检查（/health, /ready, /metrics）
+- 性能监控中间件
+- 结构化日志
 """
 import os
 import logging
@@ -14,9 +17,13 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app.database import init_db
+from app.database import init_db, engine
+from app.monitoring import (
+    performance_middleware, get_system_metrics, get_prometheus_metrics,
+    record_collection_start, record_collection_success, record_collection_failure
+)
 from app.routes.sources import router as sources_router
 from app.routes.topics import router as topics_router
 from app.routes.items import router as items_router
@@ -28,20 +35,23 @@ from app.routes.search_tools import router as search_tools_router
 from app.routes.settings import router as settings_router
 from app.routes.seed import router as seed_router
 from app.routes.notifications import router as notifications_router
+from app.routes.ymg_deep import router as ymg_router
+from app.routes.haisee import router as haisee_router
+from app.routes.material_sets import router as material_sets_router
+from app.routes.supply_chain import router as supply_chain_router
+from app.routes.prompt_templates import router as prompt_templates_router
+from app.routes.research import router as research_router
 from app.stats_routes import router as stats_router
 
 logger = logging.getLogger(__name__)
 
-
 # ── Rate limiting middleware ───────────────────────────────────────────
 
-_RATE_LIMIT_MAX = 120          # requests per window
-_RATE_LIMIT_WINDOW = 60        # seconds (sliding window)
+_RATE_LIMIT_MAX = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "600"))
+_RATE_LIMIT_WINDOW = 60
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
-
 async def rate_limit_middleware(request: Request, call_next):
-    """Sliding-window rate limiter: max _RATE_LIMIT_MAX requests per window."""
     client_ip = (
         request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or request.client.host
@@ -49,7 +59,6 @@ async def rate_limit_middleware(request: Request, call_next):
     now = time.monotonic()
     window_start = now - _RATE_LIMIT_WINDOW
 
-     # Prune old entries outside the current window
     _rate_limit_store[client_ip] = [
         ts for ts in _rate_limit_store[client_ip] if ts > window_start
     ]
@@ -81,11 +90,9 @@ async def rate_limit_middleware(request: Request, call_next):
     response.headers["X-RateLimit-Reset"] = str(int(reset_at))
     return response
 
-
-# ── Logging middleware ────────────────────────────────────────────────
+# ── Structured logging middleware ──────────────────────────────────────
 
 async def log_requests(request: Request, call_next):
-    """Log all API requests with timing and status."""
     request_id = str(uuid.uuid4())[:8]
     request.state.request_id = request_id
     start_time = datetime.now(timezone.utc)
@@ -95,144 +102,67 @@ async def log_requests(request: Request, call_next):
     duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
     
     logger.info(
-        "%s %s %d %.0fms",
-        request_id,
-        request.method,
-        response.status_code,
-        duration_ms,
+        "request",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": round(duration_ms, 2),
+            "client_ip": request.client.host if request.client else None,
+        }
     )
     
     return response
 
-
-# ── Exception handlers ─────────────────────────────────────────────────
+# ── Exception handlers ───────────────────────────────────────────────
 
 async def validation_exception_handler(request: Request, exc):
-    """Return consistent error responses for validation failures."""
+    errors = exc.errors() if callable(getattr(exc, "errors", None)) else None
+    detail = getattr(exc, "detail", "Validation error")
     return JSONResponse(
         status_code=422,
         content={
-            "detail": "Validation error",
-            "errors": exc.errors(),
+            "detail": detail,
+            "errors": errors,
         },
     )
 
-
 async def value_error_handler(request: Request, exc: ValueError):
-    """ValueError → 400 Bad Request."""
     logger.warning("ValueError in %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
-
 async def lookup_error_handler(request: Request, exc: LookupError):
-    """LookupError (KeyError, IndexError) → 404 Not Found."""
     logger.warning("LookupError in %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse(status_code=404, content={"detail": "Resource not found"})
 
-
 async def generic_exception_handler(request: Request, exc: Exception):
-    """Catch-all → 500 Internal Server Error with full traceback."""
-    logger.error(
-        "Unhandled exception in %s %s: %s",
-        request.method, request.url.path, exc,
-        exc_info=True,
+    logger.exception("Unhandled exception in %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
     )
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-
-# ── Health check ──────────────────────────────────────────────────────
-
-async def health_check():
-    """Health check endpoint for monitoring."""
-    return {
-        "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "version": "0.3.0",
-        "environment": os.getenv("ENV", "production"),
-    }
+# ── Lifespan ───────────────────────────────────────────────────────────
 
 scheduler_instance = None
-
-
-def _startup_diagnostics():
-    """Validate critical config exists, auto-seed if missing, and log DB diagnostics."""
-    from sqlalchemy import inspect, text
-    from app.database import SessionLocal, engine, _db_file_path
-    from app.models import SourceConfig, ModelConfig
-
-    db = SessionLocal()
-    try:
-        active_sources = db.query(SourceConfig).filter(SourceConfig.is_active == True).count()
-        active_models = db.query(ModelConfig).filter(ModelConfig.is_active == True).count()
-
-        # Auto-seed defaults if critical config is missing.
-        if active_sources == 0 or active_models == 0:
-            logger.warning(
-                "Missing critical config (active_sources=%d, active_models=%d). Seeding defaults.",
-                active_sources, active_models,
-            )
-            try:
-                from app.routes.seed import (
-                    _default_sources, _default_topics, _default_models,
-                    _default_search_tools, _default_keyword_tags, _default_description_prompt,
-                    _DEFAULT_CATEGORIES,
-                )
-                cat_data = _DEFAULT_CATEGORIES
-                from app.models import Category
-                from app.models import Topic, SearchToolConfig
-                for cfg in _default_sources():
-                    if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
-                        db.add(SourceConfig(**cfg))
-                for cfg in _default_models():
-                    if not db.query(ModelConfig).filter(ModelConfig.id == cfg["id"]).first():
-                        db.add(ModelConfig(**cfg))
-                for cfg in _default_topics():
-                    if not db.query(Topic).filter(Topic.id == cfg["id"]).first():
-                        t = Topic(**cfg)
-                        t.keyword_tags = _default_keyword_tags(cfg["id"])
-                        t.description_prompt = _default_description_prompt(cfg["id"])
-                        db.add(t)
-                for cat in _DEFAULT_CATEGORIES:
-                    if not db.query(Category).filter(Category.id == cat["id"]).first():
-                        db.add(Category(**cat))
-                for cfg in _default_search_tools():
-                    if not db.query(SearchToolConfig).filter(SearchToolConfig.id == cfg["id"]).first():
-                        db.add(SearchToolConfig(**cfg))
-                # Always seed categories (independent of other critical config)
-                from app.models import Category
-                for cat in cat_data:
-                    if not db.query(Category).filter(Category.id == cat["id"]).first():
-                        db.add(Category(**cat))
-                db.commit()
-                logger.info("Default configuration seeded.")
-            except Exception as exc:
-                db.rollback()
-                logger.error("Auto-seed failed: %s", exc)
-
-        # Diagnostics: db path, table count, per-table row counts.
-        inspector = inspect(engine)
-        tables = inspector.get_table_names()
-        logger.info("DB path: %s", _db_file_path() or "(non-sqlite)")
-        logger.info("Tables (%d): %s", len(tables), ", ".join(tables))
-        for tbl in tables:
-            try:
-                count = db.execute(text(f"SELECT COUNT(*) FROM {tbl}")).scalar()
-                logger.info("   %-22s %d rows", tbl, count)
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.error("Startup diagnostics failed: %s", exc)
-    finally:
-        db.close()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global scheduler_instance
 
     init_db()
-    _startup_diagnostics()
-
+    from app.database import SessionLocal
+    from app.models import SearchToolConfig
+    from app.prompt_seed import ensure_builtin_prompt_templates
+    from app.routes._seed_data import _default_search_tools
+    with SessionLocal() as seed_db:
+        ensure_builtin_prompt_templates(seed_db)
+        for config in _default_search_tools():
+            if not seed_db.get(SearchToolConfig, config["id"]):
+                seed_db.add(SearchToolConfig(**config))
+        seed_db.commit()
+    
     try:
         from app.scheduler import CollectionScheduler
         scheduler_instance = CollectionScheduler()
@@ -248,31 +178,40 @@ async def lifespan(app: FastAPI):
     if scheduler_instance:
         await scheduler_instance.shutdown()
 
+# ── App Factory ────────────────────────────────────────────────────────
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="GatherInfo",
-        version="0.3.0",
-        description="全球信息采集监控平台 — 主题驱动的多源采集、标签结构化入库、统计与分析。",
+        title="TradeRadar",
+        version="0.9.0",
+        description="全球贸易风险情报中枢 — 主题驱动的多源采集、标签结构化入库、统计与分析。",
+        contact={
+            "name": "TradeRadar Team",
+            "url": "https://github.com/traderadar",
+        },
+        license_info={
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT",
+        },
+        terms_of_service="https://traderadar.io/terms",
         lifespan=lifespan,
-        docs_url="/docs",             # Swagger UI
-        redoc_url="/redoc",           # ReDoc
-        openapi_url="/openapi.json", # OpenAPI schema
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
     )
 
-    # Register custom validation exception handler
+    # Exception handlers
     app.add_exception_handler(422, validation_exception_handler)
     app.add_exception_handler(ValueError, value_error_handler)
     app.add_exception_handler(LookupError, lookup_error_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
 
-    # Add logging middleware
-    app.middleware("http")(log_requests)
-
-    # ── Middleware (order matters: outermost first) ─────────────────────
+    # Middleware (order matters: outermost first)
+    app.middleware("http")(performance_middleware)
     app.middleware("http")(rate_limit_middleware)
     app.middleware("http")(log_requests)
 
+    # CORS
     allowed_origins = [
         origin.strip()
         for origin in os.getenv("CORS_ORIGINS", "http://127.0.0.1:5178,http://localhost:5178").split(",")
@@ -286,18 +225,63 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
-    # Health check (must be before routers to avoid prefix conflicts)
-    @app.get("/health")
+    # ── Health & Monitoring ────────────────────────────────────────────
+
+    @app.get("/health", tags=["monitoring"])
     async def health_check():
         """Health check endpoint for monitoring."""
-        return {
+        health = {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "0.3.0",
+            "version": "0.9.0",
             "environment": os.getenv("ENV", "production"),
+            "components": {},
         }
+        
+        # Database check
+        try:
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            health["components"]["database"] = "ok"
+        except Exception as exc:
+            health["components"]["database"] = f"error: {exc}"
+            health["status"] = "degraded"
+        
+        # Scheduler check
+        if scheduler_instance:
+            health["components"]["scheduler"] = "ok"
+        else:
+            health["components"]["scheduler"] = "not_running"
+        
+        # System metrics
+        health["system"] = get_system_metrics()
+        
+        return health
 
-    # ── Collection is the core ─────────────────────────────────────────
+    @app.get("/ready", tags=["monitoring"])
+    async def readiness_check():
+        """Readiness probe for Kubernetes."""
+        try:
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return {"status": "ready"}
+        except Exception as exc:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "reason": str(exc)}
+            )
+
+    @app.get("/metrics", tags=["monitoring"])
+    async def prometheus_metrics():
+        """Prometheus-style metrics exposition."""
+        return PlainTextResponse(
+            content=get_prometheus_metrics(),
+            media_type="text/plain; version=0.0.4"
+        )
+
+    # ── Routers ──────────────────────────────────────────────────────
     app.include_router(sources_router)
     app.include_router(topics_router)
     app.include_router(items_router)
@@ -310,6 +294,12 @@ def create_app() -> FastAPI:
     app.include_router(seed_router)
     app.include_router(stats_router)
     app.include_router(notifications_router)
+    app.include_router(ymg_router)
+    app.include_router(haisee_router)
+    app.include_router(material_sets_router)
+    app.include_router(supply_chain_router)
+    app.include_router(prompt_templates_router)
+    app.include_router(research_router)
 
     return app
 

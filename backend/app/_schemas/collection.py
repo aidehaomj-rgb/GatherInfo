@@ -6,6 +6,10 @@ from .common import IsoDT
 class CollectRequest(BaseModel):
     topic_id: str | None = None
     source_id: str | None = None
+    source_ids: list[str] | None = None
+    keywords: list[str] | None = None
+    research_prompt: str | None = None
+    research_model_id: str | None = None
 
 
 class RunOut(BaseModel):
@@ -36,10 +40,16 @@ class ItemOut(BaseModel):
     run_id: str | None = None
     topic_id: str | None = None
     title: str
+    title_zh: str | None = None
     content: str | None = None
+    content_zh: str | None = None
     summary: str | None = None
+    summary_zh: str | None = None
     url: str | None = None
     language: str | None = None
+    translation_status: str | None = None
+    enforcement_review: dict | None = None
+    quality_review: dict | None = None
     category: str | None = None
     tags: list[dict] = []
     entities: dict | None = None
@@ -59,8 +69,36 @@ class ItemListOut(BaseModel):
     page_size: int = 50
 
 
+class InventoryRowOut(BaseModel):
+    id: str
+    label: str
+    count: int = 0
+    latest_at: IsoDT = None
+    topic_id: str | None = None
+
+
+class ItemInventoryOut(BaseModel):
+    """Current persisted-item counts; never uses lifetime collection counters."""
+    total_items: int = 0
+    topics: list[InventoryRowOut] = []
+    categories: list[InventoryRowOut] = []
+    batches: list[InventoryRowOut] = []
+    sources: list[InventoryRowOut] = []
+    statuses: list[InventoryRowOut] = []
+    generated_at: IsoDT = None
+
+
 class ItemDeleteRequest(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class ItemTranslateRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ItemQualityReviewRequest(BaseModel):
+    item_ids: list[str] = Field(default_factory=list, max_length=500)
+    limit: int = Field(default=100, ge=1, le=500)
 
 
 class BatchRunOut(BaseModel):
@@ -105,3 +143,22 @@ class ActiveRunOut(BaseModel):
     started_at: IsoDT = None
     duration_seconds: int | None = None
     batch_id: str | None = None
+    progress_events: list[dict] = Field(default_factory=list)
+    batch_total_sources: int = 1
+    batch_completed_sources: int = 0
+    batch_failed_sources: int = 0
+    batch_active_sources: int = 1
+
+
+class RunFailureOut(BaseModel):
+    run_id: str
+    batch_id: str | None = None
+    source_id: str
+    source_name: str
+    source_channel: str
+    errors: list[str] = Field(default_factory=list)
+    category: str
+    repairable: bool
+    recurring_failures: int = 1
+    recommendation: str
+    suggested_action: str

@@ -8,14 +8,14 @@ interface ItemFilterBarProps {
   onFilterTopicChange: (v: string) => void;
   filterSource: string;
   onFilterSourceChange: (v: string) => void;
-  filterRun: string;
-  onFilterRunChange: (v: string) => void;
+  filterBatch: string;
+  onFilterBatchChange: (v: string) => void;
   filterTag: string;
   onFilterTagChange: (v: string) => void;
   topics: Topic[];
   sources: Source[];
   sourceCounts: Record<string, number>;
-  batchOptions: { run_id: string; label: string }[];
+  batchOptions: { batch_id: string; label: string }[];
   tags: Tag[];
 }
 
@@ -26,8 +26,8 @@ export function ItemFilterBar({
   onFilterTopicChange,
   filterSource,
   onFilterSourceChange,
-  filterRun,
-  onFilterRunChange,
+  filterBatch,
+  onFilterBatchChange,
   filterTag,
   onFilterTagChange,
   topics,
@@ -37,14 +37,14 @@ export function ItemFilterBar({
   tags,
 }: ItemFilterBarProps) {
   const hasFilters =
-    query || filterTag || filterSource || filterTopic || filterRun;
+    query || filterTag || filterSource || filterTopic || filterBatch;
 
   const clearFilters = () => {
     onQueryChange("");
     onFilterTagChange("");
     onFilterSourceChange("");
     onFilterTopicChange("");
-    onFilterRunChange("");
+    onFilterBatchChange("");
   };
 
   return (
@@ -84,10 +84,10 @@ export function ItemFilterBar({
         ))}
       </select>
 
-      <select value={filterRun} onChange={(e) => onFilterRunChange(e.target.value)}>
+      <select value={filterBatch} onChange={(e) => onFilterBatchChange(e.target.value)}>
         <option value="">全部批次</option>
         {batchOptions.map((b) => (
-          <option key={b.run_id} value={b.run_id}>{b.label}</option>
+          <option key={b.batch_id} value={b.batch_id}>{b.label}</option>
         ))}
       </select>
 

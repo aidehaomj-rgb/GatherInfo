@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Download, Upload, AlertTriangle, CheckCircle, X, Save } from "lucide-react";
+import { Download, Upload, AlertTriangle, CheckCircle, X, Save, FolderOpen, Folder, Check } from "lucide-react";
 import { exportConfig, importConfig, fetchSettings, updateSettings } from "../api";
 import type { SystemConfig } from "../types";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { Modal } from "./shared/Modal";
 
 const ALL_FORMATS = ["docx", "pdf"];
+
+const DIR_PRESETS = [
+  { label: "默认 (data/reports)", value: "data/reports", hint: "项目内置报告目录" },
+  { label: "桌面", value: "~/Desktop", hint: "用户桌面文件夹" },
+  { label: "文档", value: "~/Documents", hint: "用户文档文件夹" },
+  { label: "下载", value: "~/Downloads", hint: "用户下载文件夹" },
+];
+
+const DEFAULT_DIR = "data/reports";
 
 export function SettingsPage() {
   const [exporting, setExporting] = useState(false);
@@ -15,6 +26,10 @@ export function SettingsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
 
+
+  const [dirPickerOpen, setDirPickerOpen] = useState(false);
+  const [dirCustom, setDirCustom] = useState("");
+  const [dirSelected, setDirSelected] = useState<string | null>(null);
 
   // Report settings
   const [settings, setSettings] = useState<SystemConfig | null>(null);
@@ -32,6 +47,18 @@ export function SettingsPage() {
   useEffect(() => { void loadSettings(); }, [loadSettings]);
 
 
+
+  const openDirPicker = () => {
+    setDirCustom(settings?.report_output_dir ?? "");
+    setDirSelected(settings?.report_output_dir ?? DEFAULT_DIR);
+    setDirPickerOpen(true);
+  };
+
+  const confirmDirPicker = () => {
+    const value = (dirSelected ?? dirCustom.trim()) || null;
+    setSettings((p) => (p ? { ...p, report_output_dir: value } : p));
+    setDirPickerOpen(false);
+  };
 
   const toggleFormat = (fmt: string) => {
     setSettings((prev) => {
@@ -98,9 +125,11 @@ export function SettingsPage() {
       <div className="page-header">
         <div>
           <h2>系统配置</h2>
-          <p className="text-muted">导出当前配置备份，或从备份文件导入配置。</p>
+          <p className="text-muted">管理界面显示、报告输出及配置备份。</p>
         </div>
       </div>
+
+      <AppearanceSettings />
 
       {resultMsg && (
         <div className="toast" onClick={() => setResultMsg(null)} style={{ marginBottom: 16 }}>
@@ -152,10 +181,14 @@ export function SettingsPage() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)" }}>输出目录</label>
-              <input type="text" value={settings.report_output_dir ?? ""} placeholder="data/reports"
-                onChange={(e) => setSettings((p) => (p ? { ...p, report_output_dir: e.target.value || null } : p))}
-                style={{ padding: "9px 11px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)", fontSize: "0.85rem", outline: "none" }} />
-              <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>留空使用默认 data/reports</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input type="text" value={settings.report_output_dir ?? ""} placeholder="data/reports" readOnly
+                  style={{ flex: 1, padding: "9px 11px", borderRadius: "var(--radius)", border: "1px solid var(--line)", background: "var(--surface-elevated)", color: "var(--ink)", fontSize: "0.85rem", outline: "none" }} />
+                <button type="button" className="btn btn-secondary" onClick={openDirPicker} style={{ whiteSpace: "nowrap" }}>
+                  <FolderOpen size={14} /> 选择目录
+                </button>
+              </div>
+              <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>点击「选择目录」浏览预设路径，留空使用默认 data/reports</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)" }}>目录日期模式</label>
@@ -245,6 +278,63 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      <Modal open={dirPickerOpen} title="选择输出目录" onClose={() => setDirPickerOpen(false)} width={480}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 8 }}>常用目录预设</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {DIR_PRESETS.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className="dir-preset-row"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%",
+                    padding: "10px 12px", borderRadius: "var(--radius)",
+                    border: "1px solid " + (dirSelected === preset.value ? "var(--accent)" : "var(--line)"),
+                    background: dirSelected === preset.value ? "var(--accent-soft)" : "var(--surface-elevated)",
+                    cursor: "pointer", textAlign: "left", transition: "all 0.15s ease-out",
+                  }}
+                  onClick={() => { setDirSelected(preset.value); setDirCustom(preset.value); }}
+                >
+                  <Folder size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--ink)" }}>{preset.label}</span>
+                    <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>{preset.hint}</span>
+                  </span>
+                  {dirSelected === preset.value && <Check size={16} style={{ color: "var(--accent)" }} />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}>自定义路径</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="粘贴或输入绝对/相对路径"
+              value={dirCustom}
+              onChange={(e) => { setDirCustom(e.target.value); setDirSelected(e.target.value || null); }}
+              style={{ width: "100%" }}
+            />
+            <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>支持 ~ 开头的家目录路径，如 ~/Desktop/reports</span>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+            <button type="button" className="btn btn-ghost" onClick={() => { setDirSelected(null); setDirCustom(""); }}>
+              使用当前默认
+            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setDirPickerOpen(false)}>取消</button>
+              <button type="button" className="btn btn-primary" onClick={confirmDirPicker}>
+                <Check size={14} /> 确定
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

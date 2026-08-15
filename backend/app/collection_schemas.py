@@ -17,11 +17,13 @@ from app._schemas.topic import (
     TopicCreate, TopicUpdate, TopicOut,
     ScheduleCreate, ScheduleOut,
     CategoryCreate, CategoryUpdate, CategoryOut,
+    PromptTemplateCreate, PromptTemplateUpdate, PromptTemplateOut,
 )
 from app._schemas.collection import (
     CollectRequest, RunOut, CollectResultOut,
-    ItemOut, ItemListOut, ItemDeleteRequest,
-    BatchRunOut, BatchOut, ActiveRunOut,
+    ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest, ItemQualityReviewRequest,
+    InventoryRowOut, ItemInventoryOut,
+    BatchRunOut, BatchOut, ActiveRunOut, RunFailureOut,
 )
 from app._schemas.tag import (
     TagUpdateIn, TagUpdateSchema, TagOut,
@@ -29,7 +31,7 @@ from app._schemas.tag import (
 )
 from app._schemas.model import (
     ModelConfigCreate, ModelConfigUpdate, ModelConfigOut,
-    ModelTestResult, ListModelsResult,
+    ModelTestResult, ListModelsResult, ModelListRequest,
     DiscoveredProvider, AutoDiscoverResult,
 )
 from app._schemas.report import (
@@ -50,16 +52,18 @@ __all__ = [
     "TopicCreate", "TopicUpdate", "TopicOut",
     "ScheduleCreate", "ScheduleOut",
     "CategoryCreate", "CategoryUpdate", "CategoryOut",
+    "PromptTemplateCreate", "PromptTemplateUpdate", "PromptTemplateOut",
     # collection
     "CollectRequest", "RunOut", "CollectResultOut",
-    "ItemOut", "ItemListOut", "ItemDeleteRequest",
-    "BatchRunOut", "BatchOut", "ActiveRunOut",
+    "ItemOut", "ItemListOut", "ItemDeleteRequest", "ItemTranslateRequest", "ItemQualityReviewRequest",
+    "InventoryRowOut", "ItemInventoryOut",
+    "BatchRunOut", "BatchOut", "ActiveRunOut", "RunFailureOut",
     # tag
     "TagUpdateIn", "TagUpdateSchema", "TagOut",
     "TagMergeRequest", "TagMergeResult",
     # model
     "ModelConfigCreate", "ModelConfigUpdate", "ModelConfigOut",
-    "ModelTestResult", "ListModelsResult",
+    "ModelTestResult", "ListModelsResult", "ModelListRequest",
     "DiscoveredProvider", "AutoDiscoverResult",
     # report
     "ReportOut", "ReportListOut",

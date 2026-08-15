@@ -25,11 +25,29 @@ from app._models_items import (
 )
 from app._models_config import (
     Topic,
+    ResearchJob,
+    ResearchRound,
+    ResearchCase,
+    ResearchEntity,
+    ResearchCaseEntity,
+    ResearchEvidence,
+    PromptTemplate,
     ScheduleConfig,
     ModelConfig,
     Report,
     SearchToolConfig,
     SystemConfig,
+)
+from app._models_handoff import MaterialSet, HandoffRun
+from app._models_supply_chain import (
+    SupplyChainInvestigation,
+    SupplyChainEntity,
+    SupplyChainCase,
+    SupplyChainShipment,
+    SupplyChainEvidence,
+    SupplyChainOpenSourceEvidence,
+    SupplyChainReport,
+    SupplyChainDiscoveryCandidate,
 )
 
 __all__ = [
@@ -43,9 +61,26 @@ __all__ = [
     "CollectionRun",
     "CollectedItem",
     "Topic",
+    "ResearchJob",
+    "ResearchRound",
+    "ResearchCase",
+    "ResearchEntity",
+    "ResearchCaseEntity",
+    "ResearchEvidence",
+    "PromptTemplate",
     "ScheduleConfig",
     "ModelConfig",
     "Report",
     "SearchToolConfig",
     "SystemConfig",
+    "MaterialSet",
+    "HandoffRun",
+    "SupplyChainInvestigation",
+    "SupplyChainEntity",
+    "SupplyChainCase",
+    "SupplyChainShipment",
+    "SupplyChainEvidence",
+    "SupplyChainOpenSourceEvidence",
+    "SupplyChainReport",
+    "SupplyChainDiscoveryCandidate",
 ]

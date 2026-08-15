@@ -4,6 +4,7 @@ import unicodedata
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Category, CollectedItem, SourceConfig, Topic
@@ -14,21 +15,30 @@ def _now() -> datetime:
 
 
 def _normalize_punct(text: str | None) -> str:
-    """容错：将中文逗号/冒号归一化为英文，便于后续拆分。"""
+    """容错：将中文逗号、分号和冒号归一化为英文。"""
     if not text:
         return ""
-    return text.replace("，", ",").replace("：", ":")
+    return text.replace("，", ",").replace("；", ";").replace("：", ":").replace("、", ",")
+
+
+def _split_keywords(value: str) -> list[str]:
+    """Split API keyword entries on Chinese or English list punctuation.
+
+    Whitespace is deliberately preserved here: API callers send a list, so a
+    phrase such as ``export control`` remains one keyword. The UI handles its
+    optional space-separated shorthand before submitting that list.
+    """
+    return [part.strip() for part in re.split(r"[,;]", _normalize_punct(value)) if part.strip()]
 
 
 def _normalize_topic_payload(payload: dict) -> dict:
-    """容错：归一化 topic 关键词/标签里残留的中文标点，并按逗号拆分关键词。"""
+    """Normalize topic keyword punctuation and expand list separators."""
     kws = payload.get("keywords")
     if isinstance(kws, list):
         normalized: list[str] = []
         for k in kws:
             if isinstance(k, str):
-                for part in _normalize_punct(k).split(","):
-                    part = part.strip()
+                for part in _split_keywords(k):
                     if part and part not in normalized:
                         normalized.append(part)
             else:
@@ -47,7 +57,7 @@ def _normalize_topic_payload(payload: dict) -> dict:
         expanded: list = []
         for kt in kts:
             if isinstance(kt, dict) and isinstance(kt.get("keyword"), str):
-                parts = [p.strip() for p in _normalize_punct(kt["keyword"]).split(",") if p.strip()]
+                parts = _split_keywords(kt["keyword"])
                 if len(parts) <= 1:
                     kt["keyword"] = parts[0] if parts else ""
                     expanded.append(kt)
@@ -108,6 +118,9 @@ def _topic_out(db: Session, t: Topic) -> "TopicOut":
     out = TopicOut.model_validate(t)
     out.source_names = _source_names(db, t.source_ids)
     out.category_name = _category_name(db, t.category_id)
+    out.current_item_count = db.query(func.count(CollectedItem.id)).filter(
+        CollectedItem.topic_id == t.id,
+    ).scalar() or 0
     return out
 
 
@@ -119,6 +132,14 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
         "default_api_endpoint": "/search",
         "required_fields": ["api_key"],
         "optional_fields": ["base_url", "api_endpoint"],
+        "homepage_hint": "https://tavily.com",
+    },
+    "ai_research": {
+        "description": "AI 智能检索（聚合 Tavily 与百度搜索；云端模型配置后可扩展检索词）",
+        "default_base_url": "https://api.tavily.com",
+        "default_api_endpoint": "/search",
+        "required_fields": ["api_key"],
+        "optional_fields": ["base_url", "api_endpoint", "auth_config"],
         "homepage_hint": "https://tavily.com",
     },
     "json_api": {
@@ -186,4 +207,3 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
         "homepage_hint": None,
     },
 }
-

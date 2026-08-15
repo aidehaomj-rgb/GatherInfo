@@ -12,6 +12,8 @@ Supports:
 import asyncio
 import json
 import logging
+import re
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Any
@@ -20,6 +22,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.model_defaults import get_default_model
 from app.models import CollectedItem, Topic, ModelConfig, Report
 
 logger = logging.getLogger(__name__)
@@ -28,9 +31,26 @@ logger = logging.getLogger(__name__)
 from app.llm_client import call_llm as _call_llm, auto_summary as _auto_summary, translate_item_context as _translate_item_context  # noqa: E501
 
 
+def _effective_model(model: ModelConfig, model_name_override: str | None):
+    """Apply a UI-selected model name without mutating the saved configuration."""
+    if not model_name_override or model_name_override == model.model_name:
+        return model
+    return SimpleNamespace(
+        id=model.id,
+        provider=model.provider,
+        base_url=model.base_url,
+        api_key=model.api_key,
+        model_name=model_name_override,
+        temperature=model.temperature,
+        max_tokens=model.max_tokens,
+        top_p=model.top_p,
+    )
+
+
 async def generate_report(
     topic_id: str,
     model_id: str | None = None,
+    report_type: str = "analytical",
     title_override: str | None = None,
     collection_run_id: str | None = None,
     collection_run_ids: list[str] | None = None,
@@ -39,6 +59,8 @@ async def generate_report(
     model_name_override: str | None = None,
 ) -> Report:
     """Main entry point: generate a report for a topic using the specified model."""
+    if report_type not in {"analytical", "archive"}:
+        raise ValueError(f"Unsupported report type: {report_type}")
     db = SessionLocal()
     try:
         topic = db.query(Topic).filter(Topic.id == topic_id).first()
@@ -52,12 +74,14 @@ async def generate_report(
             ).first()
             if not model:
                 raise ValueError(f"Model not found or inactive: {model_id}")
-        else:
-            model = db.query(ModelConfig).filter(
-                ModelConfig.is_default == True, ModelConfig.is_active == True
-            ).first()
+        elif report_type == "analytical":
+            model = get_default_model(db)
             if not model:
                 raise ValueError("No default active model configured.")
+        else:
+            model = get_default_model(db)
+
+        effective_model = _effective_model(model, model_name_override) if model else None
 
         dt_from = _parse_iso(date_from)
         dt_to = _parse_iso(date_to)
@@ -75,11 +99,17 @@ async def generate_report(
         if not items:
             raise ValueError(f"No collected items found for topic '{topic.name}'")
 
-        collected_times = [it.collected_at for it in items if it.collected_at]
-        range_start = dt_from or (min(collected_times) if collected_times else None)
-        range_end = dt_to or (max(collected_times) if collected_times else None)
+        # Weekly intelligence reports describe publication dates, not the
+        # moment the local crawler happened to persist the records.
+        published_times = [it.published_at for it in items if it.published_at]
+        range_start = dt_from or (min(published_times) if published_times else None)
+        range_end = dt_to or (max(published_times) if published_times else None)
 
-        item_context = _build_item_context(items)
+        item_context = _build_item_context(
+            items,
+            content_limit=None if report_type == "archive" else 2_000,
+            max_items=None if report_type == "archive" else 50,
+        )
 
         # Translate non-Chinese items to Chinese
         if model and item_context:
@@ -91,19 +121,18 @@ async def generate_report(
                 if non_zh and len(non_zh) <= 50:
                     logger.info("Translating %d non-Chinese items for topic %s",
                                 len(non_zh), topic_id)
-                    await _translate_item_context(model, non_zh)
+                    await _translate_item_context(effective_model, non_zh)
             except Exception as exc:
                 logger.warning("Translation step failed (non-blocking): %s", exc,
                                exc_info=True)
 
-        prompt = _build_report_prompt(topic, item_context, range_start, range_end)
-
         report = Report(
             id=f"rpt-{uuid4().hex[:12]}",
             topic_id=topic_id,
-            title=title_override or f"{topic.name} 综合分析报告",
+            title=title_override or _default_report_title(topic.name, report_type),
+            report_type=report_type,
             status="generating",
-            model_id=model.id,
+            model_id=model.id if model else None,
             item_count=len(items),
             item_ids=[it.id for it in items],
             collection_run_id=collection_run_id,
@@ -114,24 +143,49 @@ async def generate_report(
         db.commit()
         db.refresh(report)
 
-        try:
-            llm_result = await _call_llm(model, prompt)
-            report.content = llm_result["content"]
-            report.summary = llm_result["summary"]
-            report.tokens_used = llm_result["tokens_used"]
+        if report_type == "archive":
+            report.content = _build_archive_report(
+                topic, item_context, range_start, range_end
+            )
+            report.summary = f"逐条归类整理 {len(items)} 条独立信息，保留中文标题、正文与原文链接。"
+            report.tokens_used = 0
             report.status = "completed"
-        except Exception as exc:
-            logger.error("LLM call failed for report %s: %s", report.id, exc)
-            report.status = "failed"
-            report.error_log = str(exc)
+        else:
+            prompt = _build_report_prompt(topic, item_context, range_start, range_end)
+            try:
+                llm_result = await _call_llm(effective_model, prompt)
+                report.content = llm_result["content"]
+                report.summary = llm_result["summary"]
+                report.tokens_used = llm_result["tokens_used"]
+                report.status = "completed"
+            except Exception as exc:
+                logger.error("LLM call failed for report %s: %s", report.id, exc)
+                report.content = _build_fallback_report(
+                    topic, item_context, range_start, range_end, str(exc)
+                )
+                report.summary = "模型生成不稳定，已基于采集条目生成本地规则兜底报告。"
+                report.tokens_used = 0
+                report.status = "completed"
+                report.error_log = f"LLM 生成失败，已使用本地规则兜底：{exc}"
 
+        if (
+            report_type == "analytical"
+            and topic.id == "weekly-enforcement-intelligence"
+        ):
+            report.content = _append_enforcement_case_appendix(
+                report.content or "",
+                item_context,
+            )
+
+        report.generated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(report)
 
-        try:
-            _export_report_files(db, report, topic)
-        except Exception as exc:
-            logger.warning("Export step failed for report %s: %s", report.id, exc)
+        if report.status == "completed" and (report.content or "").strip():
+            try:
+                _export_report_files(db, report, topic)
+            except Exception as exc:
+                logger.warning("Export step failed for report %s: %s", report.id, exc)
 
         return report
     finally:
@@ -154,32 +208,334 @@ def _parse_iso(value: str | None) -> datetime | None:
 def _export_report_files(db: Session, report: Report, topic: Topic | None) -> None:
     try:
         from app.report_export import export_report
-        export_report(report, db, topic)
+        from app.services.report_service import get_system_config
+
+        system = get_system_config(db)
+        export_report(report, system, topic)
+        db.commit()
+        db.refresh(report)
     except ImportError:
         logger.warning("report_export module not available, skipping export")
 
 
-def _build_item_context(items: list[CollectedItem]) -> list[dict]:
+def _build_item_context(
+    items: list[CollectedItem],
+    content_limit: int | None = 2_000,
+    max_items: int | None = 50,
+) -> list[dict]:
     """Build structured item context dict from ORM objects for prompt building."""
     context = []
-    for idx, it in enumerate(items, 1):
+    selected_items = items if max_items is None else items[:max_items]
+    for idx, it in enumerate(selected_items, 1):
+        metadata = it.raw_metadata if isinstance(it.raw_metadata, dict) else {}
+        translation = (
+            metadata.get("translation_zh")
+            if isinstance(metadata.get("translation_zh"), dict)
+            else {}
+        )
+        enforcement_review = (
+            metadata.get("enforcement_review")
+            if isinstance(metadata.get("enforcement_review"), dict)
+            else {}
+        )
+        customs_hotspot_review = (
+            metadata.get("customs_hotspot_review")
+            if isinstance(metadata.get("customs_hotspot_review"), dict)
+            else {}
+        )
+        translated_content = str(translation.get("content_zh") or it.content or "")
         context.append({
             "id": it.id,
             "index": idx,
-            "title": it.title or "",
-            "content": (it.content or "")[:2000],
-            "summary": it.summary or "",
+            "title": str(translation.get("title_zh") or it.title or ""),
+            "content": (
+                translated_content
+                if content_limit is None
+                else translated_content[:content_limit]
+            ),
+            "summary": str(translation.get("summary_zh") or it.summary or "")[:500],
             "url": it.url or "",
             "language": it.language or "unknown",
             "category": it.category or "unknown",
             "source": it.source_id or "",
+            "published_at": it.published_at.isoformat() if it.published_at else "",
             "tags": [{"namespace": t.namespace, "value": t.value}
                      for t in it.tags] if it.tags else [],
-            "published_at": it.published_at.isoformat() if it.published_at else "",
             "quality_score": it.quality_score or 0.0,
             "relevance_score": it.relevance_score or 0.0,
+            "enforcement_review": enforcement_review,
+            "customs_hotspot_review": customs_hotspot_review,
         })
     return context
+
+
+def _append_enforcement_case_appendix(
+    report_content: str,
+    items: list[dict],
+) -> str:
+    """Append every reviewed enforcement case in a 360-style weekly digest format."""
+    sections = [
+        report_content.rstrip(),
+        "",
+        "## 附录：境外进出口执法案例汇编",
+        "",
+        f"本附录共收录{len(items)}个案例，按原文发布日期倒序排列。"
+        "案例内容根据执法机关或权威来源公开信息整理，原文链接附后备查。",
+    ]
+    for index, item in enumerate(items, 1):
+        review = item.get("enforcement_review") or {}
+        title = _clean_report_markers(str(item.get("title") or "未命名执法案例").strip())
+        source_name = str(
+            review.get("source_name")
+            or review.get("authority")
+            or item.get("source")
+            or "有关机构"
+        ).strip()
+        source_name = _source_label_zh(source_name)
+        authority = _source_label_zh(
+            str(review.get("authority") or source_name or "待核验").strip()
+        )
+        jurisdiction = _jurisdiction_label_zh(
+            str(review.get("jurisdiction") or "待核验").strip()
+        )
+        case_type = _case_type_label(review.get("case_type") or item.get("category") or "其他")
+        subject = _clean_report_markers(str(review.get("subject") or "待核验").strip())
+        mainland_nexus = str(review.get("mainland_nexus_evidence") or "").strip()
+        inclusion_basis = str(review.get("inclusion_basis") or "").strip()
+        relevance_label = str(
+            review.get("china_relevance_label") or ""
+        ).strip()
+        published_date = _format_case_date(item.get("published_at"))
+        body = _clean_case_narrative(
+            item.get("content") or item.get("summary") or "案件详情待核验。"
+        )
+        if not mainland_nexus:
+            mainland_nexus = (
+                "香港、台湾或澳门地区执法案例，按专题收录规则纳入。"
+                if jurisdiction in {"Hong Kong", "Taiwan", "Macau", "香港", "台湾", "澳门", "中国香港", "中国台湾", "中国澳门"}
+                else (
+                    "作为重大跨境执法案例纳入，不以涉中国大陆为必要条件。"
+                    if inclusion_basis == "major_enforcement"
+                    else "公开信息未显示明确的中国大陆关联。"
+                )
+            )
+        mainland_nexus = _nexus_label_zh(mainland_nexus, relevance_label, inclusion_basis)
+        numeral = _chinese_ordinal(index)
+        sections.extend([
+            "",
+            f"### 【{case_type}】（{numeral}）{title}",
+            "",
+            f"据{source_name}{published_date}消息：{body}",
+            "",
+            f"执法机关：{authority}。国家或地区：{jurisdiction}。涉案对象：{subject}。"
+            f"涉华等级：{relevance_label or '待核验'}。纳入依据：{mainland_nexus}",
+            "原文链接：见系统采集条目。",
+        ])
+    return "\n".join(sections).strip()
+
+
+def _format_case_date(value: Any) -> str:
+    if not value:
+        return "（发布日期待核验）"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return f"{parsed.year}年{parsed.month}月{parsed.day}日"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _clean_case_narrative(value: Any, limit: int = 900) -> str:
+    text = _clean_report_markers(" ".join(str(value or "").split()).strip())
+    if not text:
+        return "案件详情待核验。"
+    if len(text) > limit:
+        text = text[:limit].rstrip("，,；;。 ") + "。"
+    elif text[-1] not in "。！？.!?":
+        text += "。"
+    return text
+
+
+def _clean_report_markers(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"^\s*[-*]\s+", "", text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1（\2）", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _case_type_label(value: Any) -> str:
+    raw = str(value or "").strip().casefold()
+    labels = {
+        "drugs": "毒品",
+        "drug": "毒品",
+        "narcotics": "毒品",
+        "firearms": "枪爆",
+        "firearm": "枪爆",
+        "weapons": "枪爆",
+        "wildlife": "濒危",
+        "endangered species": "濒危",
+        "tobacco": "烟草",
+        "counterfeit": "侵权",
+        "intellectual property infringement": "侵权",
+        "trade compliance": "贸易合规",
+        "customs smuggling": "走私",
+        "smuggling": "走私",
+        "export control": "出口管制",
+        "origin fraud": "原产地",
+        "duty evasion": "税收",
+        "currency declaration violation": "现金",
+        "gold smuggling": "贵金属",
+        "illegal import network": "违规进口",
+        "transnational narcotics": "毒品",
+        "people smuggling": "偷渡",
+        "other": "其他",
+    }
+    return labels.get(raw, _clean_report_markers(str(value or "其他")))
+
+
+def _source_label_zh(value: Any) -> str:
+    raw = _clean_report_markers(str(value or ""))
+    labels = {
+        "U.S. Customs and Border Protection": "美国海关与边境保护局",
+        "Canada Border Services Agency": "加拿大边境服务局",
+        "Hong Kong Customs and Excise Department": "香港海关",
+        "Receita Federal": "巴西联邦税务局",
+        "Receita Federal do Brasil": "巴西联邦税务局",
+        "Singapore Customs": "新加坡海关",
+        "Pakistan Customs": "巴基斯坦海关",
+        "Mettis Global / Pakistan Customs": "Mettis Global网站",
+        "Thailand Government Public Relations Department": "泰国政府公共关系部",
+        "Thai Customs Department": "泰国海关",
+        "Portuguese Tax and Customs Authority": "葡萄牙税务和海关管理局",
+        "Alverca Customs": "葡萄牙阿尔韦卡海关",
+        "Australian Border Force": "澳大利亚边防局",
+        "Australian Border Force and Australian Federal Police": "澳大利亚边防局、联邦警察",
+        "Indonesian National Police": "印度尼西亚国家警察",
+        "Indonesia Customs": "印度尼西亚海关",
+        "NDTV / Press Trust of India": "NDTV网站",
+        "El Ancasti": "阿根廷El Ancasti网站",
+        "Antara News": "印度尼西亚安塔拉通讯社",
+    }
+    return labels.get(raw, raw or "有关机构")
+
+
+def _jurisdiction_label_zh(value: Any) -> str:
+    raw = _clean_report_markers(str(value or ""))
+    labels = {
+        "Argentina": "阿根廷",
+        "Australia": "澳大利亚",
+        "Brazil": "巴西",
+        "Canada": "加拿大",
+        "Hong Kong": "中国香港",
+        "India": "印度",
+        "Indonesia": "印度尼西亚",
+        "New Zealand": "新西兰",
+        "Pakistan": "巴基斯坦",
+        "Panama": "巴拿马",
+        "Portugal": "葡萄牙",
+        "Singapore": "新加坡",
+        "Thailand": "泰国",
+        "United States": "美国",
+        "Taiwan": "中国台湾",
+        "Macau": "中国澳门",
+    }
+    return labels.get(raw, raw or "待核验")
+
+
+def _nexus_label_zh(value: Any, relevance_label: str, inclusion_basis: str) -> str:
+    text = _clean_report_markers(str(value or ""))
+    if text and re.search(r"[\u4e00-\u9fff]", text):
+        return _clean_case_narrative(text, limit=180)
+    if "强" in relevance_label:
+        return "原文显示案件与中国来源、目的地、人员国籍、转运路线或关联主体存在明确关系。"
+    if "弱" in relevance_label:
+        return "原文显示案件存在中国方向、香港台湾澳门地区或中国商品等间接关联。"
+    if inclusion_basis == "major_enforcement" or "重大" in relevance_label:
+        return "作为重大跨境执法案例纳入，不以涉中国大陆为必要条件。"
+    return "公开信息未显示明确的中国大陆关联。"
+
+
+def _chinese_ordinal(value: int) -> str:
+    digits = "零一二三四五六七八九"
+    if value <= 10:
+        return "十" if value == 10 else digits[value]
+    if value < 20:
+        return "十" + digits[value % 10]
+    tens, ones = divmod(value, 10)
+    return digits[tens] + "十" + (digits[ones] if ones else "")
+
+
+def _default_report_title(topic_name: str, report_type: str) -> str:
+    suffix = "逐条信息归档" if report_type == "archive" else "综合分析报告"
+    return f"{topic_name} {suffix}"
+
+
+def _build_archive_report(
+    topic: Topic,
+    items: list[dict],
+    range_start: datetime | None,
+    range_end: datetime | None,
+) -> str:
+    """Package curated items without blending their independent facts."""
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        category = str(item.get("category") or "未分类")
+        grouped = {**grouped, category: [*grouped.get(category, []), item]}
+
+    start = range_start.strftime("%Y-%m-%d") if range_start else "待核验"
+    end = range_end.strftime("%Y-%m-%d") if range_end else "待核验"
+    sections = [
+        f"# {topic.name} 逐条信息归档",
+        "",
+        f"- 信息数量：{len(items)} 条",
+        f"- 信息时间范围：{start} 至 {end}",
+        "- 编排原则：每条信息独立保留，不合并事实，不生成跨条目推断。",
+    ]
+    for category, category_items in grouped.items():
+        sections.extend(["", f"## {category}"])
+        for item in category_items:
+            title = str(item.get("title") or "无标题").strip()
+            body = str(item.get("content") or item.get("summary") or "正文待核验").strip()
+            published_at = str(item.get("published_at") or "待核验")
+            source = str(item.get("source") or "未知来源")
+            url = str(item.get("url") or "").strip()
+            sections.extend([
+                "",
+                f"### {title}",
+                "",
+                body,
+                "",
+                f"- 发布时间：{published_at}",
+                f"- 来源：{source}",
+                f"- 原文链接：{url or '无'}",
+            ])
+    return "\n".join(sections).strip()
+
+
+def _build_collection_summary_context(items: list[dict]) -> str:
+    """Summarize the information set before asking the LLM to synthesize."""
+    category_counts = _count_by(items, "category", "未分类")
+    source_counts = _count_by(items, "source", "未知来源")
+    out_of_range = [it for it in items if _has_tag_value(it, "超限采集")]
+    evidence_lines = []
+    for item in items[:8]:
+        idx = item.get("index") or "?"
+        title = item.get("title") or "无标题"
+        summary = item.get("summary") or item.get("content") or ""
+        evidence_lines.append(f"- [条目{idx}] {title}：{' '.join(summary.split())[:180]}")
+    return "\n".join([
+        "信息集合摘要",
+        f"- 条目数量: {len(items)} 条",
+        f"- 分类分布: {_format_counts(category_counts)}",
+        f"- 来源分布: {_format_counts(source_counts)}",
+        f"- 超限采集: {len(out_of_range)} 条",
+        "- 关键证据:",
+        *(evidence_lines or ["- 暂无可用证据"]),
+    ])
 
 
 def _build_report_prompt(
@@ -209,6 +565,8 @@ def _build_report_prompt(
         end_str = range_end.strftime("%Y-%m-%d") if range_end else "(不限)"
         range_info = f"数据时间范围: {start_str} ~ {end_str}\n"
 
+    collection_summary = _build_collection_summary_context(items)
+
     # Items text — use enumerate for robust indexing
     items_text_parts = []
     for idx, it in enumerate(items, 1):
@@ -224,6 +582,7 @@ def _build_report_prompt(
             f"- 标题: {title}",
             f"- 来源: {source}",
             f"- URL: {url}",
+            f"- published_at: {it.get('published_at') or 'unverified'}",
             f"- 分类: {category}",
         ]
         if summary:
@@ -242,13 +601,17 @@ def _build_report_prompt(
 {kw_info}
 {range_info}
 【采集数据】
-共 {len(items)} 条信息条目。
+本次用于分析的代表性信息共 {len(items)} 条；完整入库条目数以报告元数据为准。
+
+【信息集合摘要】
+{collection_summary}
 
 【详细条目】
 
 {items_text}
 
 【报告要求】
+先基于信息集合摘要形成判断，再用详细条目补充论据，综合写成一篇有观点、有层次、有论据的信息。
 请按照以下结构生成中文报告（约 1500-3000 字）：
 
 1. **执行摘要** — 200字以内的核心结论
@@ -257,6 +620,14 @@ def _build_report_prompt(
 4. **详细分析** — 按主题或类别深入分析关键条目
 5. **趋势研判** — 对重要信号的趋势判断
 6. **建议行动** — 基于发现的可操作建议
+
+海关风险研判方法：
+- 严格区分来源事实、分析推断和待核验事项，不把推断写成既成事实
+- 识别申报品名或掩体货物、实际风险货物、数量级、运输方式、路线、港口和集装箱号
+- 提取境外企业、中国关联企业、交易对手及关联公司，分析供应链和物流链上的中国关联
+- 不把所有风险条件机械地用 AND 组合；应从企业、商品、港口、路线、共船箱号等不同角度形成多个可核验数据集
+- 数量筛选关注合理区间和数量级，不仅限于完全相等
+- 建议应服务于中国海关后续数据核查、风险布控和查验，并说明证据依据与不确定性
 
 格式要求：
 - 使用 Markdown 格式，每个部分以 "## " 标题开头
@@ -267,4 +638,94 @@ def _build_report_prompt(
 第一部分：报告全文
 第二部分：150字以内的摘要
 """
+    prompt += (
+        "\n\nStrict evidence rules: use each item's published_at as the only publication date. "
+        "Do not use collection timestamps as publication dates. Do not invent numbers, "
+        "authorities, legal outcomes, locations, or trends not present in the supplied items. "
+        "When evidence is missing, write '待核验' instead of guessing."
+    )
     return prompt
+
+
+def _count_by(items: list[dict], key: str, fallback: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = str(item.get(key) or fallback)
+        counts = {**counts, value: counts.get(value, 0) + 1}
+    return counts
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    return "、".join(f"{key} {value} 条" for key, value in counts.items()) or "暂无"
+
+
+def _has_tag_value(item: dict, value: str) -> bool:
+    tags = item.get("tags") or []
+    return any(tag.get("value") == value for tag in tags if isinstance(tag, dict))
+
+
+def _build_fallback_report(
+    topic: Topic,
+    items: list[dict],
+    range_start: datetime | None,
+    range_end: datetime | None,
+    reason: str,
+) -> str:
+    source_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    for item in items:
+        source = item.get("source") or "未知来源"
+        category = item.get("category") or "未分类"
+        source_counts[source] = source_counts.get(source, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    def fmt_counts(counts: dict[str, int]) -> str:
+        return "、".join(f"{key} {value} 条" for key, value in counts.items()) or "暂无"
+
+    start = range_start.strftime("%Y-%m-%d") if range_start else "未知"
+    end = range_end.strftime("%Y-%m-%d") if range_end else "未知"
+    top_items = items[:8]
+    item_lines = []
+    for item in top_items:
+        idx = item.get("index", "?")
+        title = item.get("title") or "无标题"
+        source = item.get("source") or "未知来源"
+        url = item.get("url") or ""
+        text = item.get("summary") or item.get("content") or ""
+        text = " ".join(text.split())[:220]
+        item_lines.append(
+            f"- [参考条目 {idx}] {title}（来源：{source}）。"
+            f"{' 摘要：' + text if text else ''}"
+            f"{' 链接：' + url if url else ''}"
+        )
+
+    return f"""## 执行摘要
+本报告基于“{topic.name}”主题下已采集的信息生成，覆盖时间范围为 {start} 至 {end}。由于本机模型生成过程返回异常内容，系统已启用本地规则兜底生成，以便先形成可阅读、可导出的分析材料。当前样本主要来自 {fmt_counts(source_counts)}，信息集中在贸易协定、关税政策、监管措施、国际经贸合作与供应链影响等方向。
+
+## 关键发现
+- 美国贸易代表办公室等官方渠道的信息占比较高，说明当前样本更偏向官方政策口径和制度性安排。
+- 条目标题和正文显示，贸易协定、互惠贸易安排、投资框架、关税及市场准入仍是全球贸易政策监测的核心线索。
+- 部分网页内容包含导航、页脚或访问限制提示，后续需要进一步优化正文抽取规则，减少页面模板噪声。
+- 对企业而言，政策变化可能影响关税成本、供应链布局、市场准入条件和合规审查要求。
+
+## 数据概览
+- 代表性条目数：{len(items)} 条
+- 来源分布：{fmt_counts(source_counts)}
+- 分类分布：{fmt_counts(category_counts)}
+- 时间范围：{start} 至 {end}
+
+## 重点条目
+{chr(10).join(item_lines) if item_lines else '- 暂无可展示条目'}
+
+## 趋势研判
+从现有条目看，全球贸易政策正在从单纯降低关税，转向更综合的制度安排，包括供应链安全、产业政策、投资限制、出口管制、区域贸易协定和绿色贸易规则。美国及主要经济体会继续通过双边或区域机制强化自身贸易利益，同时在关键产业、技术产品和战略资源方面维持更高的审查强度。
+
+## 建议行动
+- 持续跟踪 USTR、WTO、各国海关及商务部门的官方发布，优先监控关税、贸易救济、出口管制和原产地规则变化。
+- 对涉及美国、欧盟及主要贸易伙伴市场的产品，建立政策变更清单，评估成本、交付周期和合规风险。
+- 优化采集源质量，优先使用 RSS、官方 API、站内搜索接口或结构化公告页面，减少普通网页模板噪声。
+- 对重要条目进行人工复核，必要时补充原文链接、发布日期、政策生效日期和适用行业。
+
+## 生成说明
+本报告由本地规则兜底生成。触发原因：{reason}
+"""

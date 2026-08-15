@@ -5,16 +5,30 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
+from app.models import Category, ModelConfig, SearchToolConfig, SourceConfig, Tag, Topic
+from app.source_taxonomy import determine_source_group
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["seed"])
 
+_DEFENSE_PROCUREMENT_SOURCE_IDS = {
+    "usaspending-dod-awards", "sam-dod-opportunities", "dod-contract-announcements",
+    "japan-mod-procurement", "japan-atla-contracts",
+    "india-cppp-defense", "india-ddp-procurement",
+    "taiwan-pcc-defense-tenders", "taiwan-pcc-defense-awards",
+}
+
+_PUBLIC_METADATA_FIELDS = (
+    "name", "description", "base_url", "api_endpoint", "homepage_url",
+    "default_keywords", "default_categories", "languages", "country_focus",
+    "rate_limit_rps", "max_items_per_run", "timeout_seconds", "auth_config",
+    "legal_basis", "compliance_note",
+)
+
 from ._seed_data import (
     _DEFAULT_CATEGORIES,
     _default_topics,
-    _default_models,
     _default_search_tools,
     _default_tags,
     _default_keyword_tags,
@@ -27,11 +41,28 @@ from ._seed_sources import (
 
 @router.post("/seed-defaults")
 def seed_defaults(db: Session = Depends(get_db)):
+    created_categories = 0
+    for cfg in _DEFAULT_CATEGORIES:
+        if not db.query(Category).filter(Category.id == cfg["id"]).first():
+            db.add(Category(**cfg))
+            created_categories += 1
+
     created_sources = 0
+    updated_sources = 0
     for cfg in _default_sources():
-        if not db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first():
+        cfg = {**cfg, "source_group": cfg.get("source_group") or determine_source_group(cfg)}
+        existing = db.query(SourceConfig).filter(SourceConfig.id == cfg["id"]).first()
+        if not existing:
             db.add(SourceConfig(**cfg))
             created_sources += 1
+        elif cfg["id"] in _DEFENSE_PROCUREMENT_SOURCE_IDS:
+            for field in _PUBLIC_METADATA_FIELDS:
+                if field in cfg:
+                    setattr(existing, field, cfg[field])
+            existing.is_configured = bool(existing.base_url or existing.api_endpoint or existing.homepage_url)
+            if not existing.source_group or existing.source_group == "other":
+                existing.source_group = cfg["source_group"]
+            updated_sources += 1
 
     created_topics = 0
     for cfg in _default_topics():
@@ -42,11 +73,9 @@ def seed_defaults(db: Session = Depends(get_db)):
             db.add(t)
             created_topics += 1
 
+    # Model configurations are private user settings. Seeding content must not
+    # silently add, replace, or select an AI model.
     created_models = 0
-    for cfg in _default_models():
-        if not db.query(ModelConfig).filter(ModelConfig.id == cfg["id"]).first():
-            db.add(ModelConfig(**cfg))
-            created_models += 1
 
     created_tools = 0
     for cfg in _default_search_tools():
@@ -63,7 +92,9 @@ def seed_defaults(db: Session = Depends(get_db)):
     db.commit()
     return {
         "sources_created": created_sources,
+        "sources_updated": updated_sources,
         "topics_created": created_topics,
+        "categories_created": created_categories,
         "models_created": created_models,
         "search_tools_created": created_tools,
         "tags_created": created_tags,

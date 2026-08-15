@@ -1,10 +1,11 @@
 import { useState } from "react";
-import type { Topic, ModelConfig, Source } from "../types";
+import type { Topic, ModelConfig, Source, PromptTemplate } from "../types";
 import {
   DESCRIPTION_PROMPT_TEMPLATES,
   KEYWORD_WEIGHT_TEMPLATES,
 } from "../templates";
-import { MultiSelect } from "./shared/MultiSelect";
+import { formatKeywordInput, parseKeywordInput } from "../utils/keywords";
+import { SourceSelector } from "./SourceSelector";
 
 /** Score templates against current keywords; return top-3 recommendations (for ★ marking). */
 function recommendTemplates(keywords: string[]): { label: string; value: string; score: number }[] {
@@ -38,6 +39,7 @@ type TopicFormProps = {
   sources: Source[];
   models: ModelConfig[];
   categories: { id: string; name: string }[];
+  promptTemplates: PromptTemplate[];
   onSave: (data: Partial<Topic>) => Promise<void>;
   onClose: () => void;
 };
@@ -47,6 +49,7 @@ export function TopicForm({
   sources,
   models,
   categories,
+  promptTemplates,
   onSave,
   onClose,
 }: TopicFormProps) {
@@ -54,7 +57,7 @@ export function TopicForm({
   const [name, setName] = useState(topic?.name ?? "");
   const [desc, setDesc] = useState(topic?.description ?? "");
   const [categoryId, setCategoryId] = useState(topic?.category_id ?? "");
-  const [keywords, setKeywords] = useState((topic?.keywords ?? []).join(", "));
+  const [keywords, setKeywords] = useState(formatKeywordInput(topic?.keywords ?? []));
   const [keywordTags, setKeywordTags] = useState(
     ((topic as any)?.keyword_tags ?? [])
       .map((kt: any) => `${kt.keyword}:${kt.weight}`)
@@ -63,11 +66,20 @@ export function TopicForm({
   const [descriptionPrompt, setDescriptionPrompt] = useState(
     (topic as any)?.description_prompt ?? "",
   );
+  const [aiResearchModelId, setAiResearchModelId] = useState(
+    topic?.ai_research_model_id ?? topic?.collection_model_ids?.[0] ?? models.find((model) => model.is_default)?.id ?? "",
+  );
   const [collectWindowDays, setCollectWindowDays] = useState<number>(
     (topic as any)?.collect_window_days ?? 7,
   );
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(
     topic?.source_ids ?? [],
+  );
+  const [selectedCollectionModelIds, setSelectedCollectionModelIds] = useState<string[]>(
+    topic?.collection_model_ids ?? [],
+  );
+  const [selectedPromptTemplateIds, setSelectedPromptTemplateIds] = useState<string[]>(
+    topic?.prompt_template_ids ?? [],
   );
   const [targetUrls, setTargetUrls] = useState(
     (topic?.target_urls ?? []).join("\n"),
@@ -76,6 +88,9 @@ export function TopicForm({
   const [autoReport, setAutoReport] = useState(topic?.auto_report ?? false);
   const [autoReportModelId, setAutoReportModelId] = useState(
     topic?.auto_report_model_id ?? models.find((m) => m.is_default)?.id ?? "",
+  );
+  const [autoReportType, setAutoReportType] = useState<"analytical" | "archive">(
+    topic?.auto_report_type ?? "analytical",
   );
   const [autoTags, setAutoTags] = useState(
     (topic?.auto_tag_rules ?? [])
@@ -90,10 +105,7 @@ export function TopicForm({
         name,
         category_id: categoryId || null,
         description: desc || null,
-        keywords: keywords
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
+        keywords: parseKeywordInput(keywords),
         keyword_tags: keywordTags
           ? keywordTags
               .split(/\r?\n/)
@@ -107,7 +119,10 @@ export function TopicForm({
               .filter((r: { keyword: string; weight: number }) => r.keyword)
           : null,
         description_prompt: descriptionPrompt || null,
+        ai_research_model_id: aiResearchModelId || null,
         source_ids: selectedSourceIds.length ? selectedSourceIds : null,
+        collection_model_ids: selectedCollectionModelIds.length ? selectedCollectionModelIds : null,
+        prompt_template_ids: selectedPromptTemplateIds.length ? selectedPromptTemplateIds : [],
         collect_window_days: Number.isFinite(collectWindowDays)
           ? collectWindowDays
           : 7,
@@ -121,6 +136,7 @@ export function TopicForm({
         is_scheduled: !!cron,
         auto_report: autoReport,
         auto_report_model_id: autoReport ? autoReportModelId || null : null,
+        auto_report_type: autoReportType,
         auto_tag_rules: autoTags
           ? autoTags
               .split(/[,，]/)
@@ -137,17 +153,18 @@ export function TopicForm({
     setSaving(false);
   };
 
-  const activeSources = sources.filter((s) => s.is_active && s.is_configured);
-  const kwList = keywords.split(/[,\u3001\s]+/).filter(Boolean);
+  const activeSources = sources.filter(
+    (source) => source.is_active && (source.is_configured || selectedSourceIds.includes(source.id)),
+  );
+  const kwList = parseKeywordInput(keywords);
   const recs = recommendTemplates(kwList);
   const recLabels = new Set(recs.map((r) => r.label));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal"
+        className="modal modal--config"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 640 }}
       >
         <div className="modal-header-with-actions">
           <h3>{topic ? "编辑主题" : "新建主题"}</h3>
@@ -158,8 +175,9 @@ export function TopicForm({
 
         <div className="form-grid">
           <label>
-            主题名称 <span className="text-red">*</span>{" "}
+            <span className="field-label-row">主题名称 <span className="required-mark" aria-hidden="true">*</span></span>
             <input
+              required
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：中美贸易政策监控"
@@ -181,12 +199,14 @@ export function TopicForm({
             </select>
           </label>
           <label className="span-2">
-            关键词 (逗号分隔) <span className="text-red">*</span>{" "}
+            <span className="field-label-row">关键词 <span className="required-mark" aria-hidden="true">*</span></span>
             <input
+              required
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
-              placeholder="例如：tariffs, trade war, semiconductor sanctions, export control"
+              placeholder={'例如：关税；走私、出口管制 或 "trade war", "export control"'}
             />
+            <span className="text-muted small">支持中英文逗号、分号、顿号和空格；英文多词短语请使用引号保留。</span>
             {recs.length > 0 && (
               <div style={{ fontSize: "0.75rem", marginTop: 4 }}>
                 <span className="text-muted">推荐模板：</span>
@@ -197,12 +217,8 @@ export function TopicForm({
                       className="chip-link"
                       onClick={(e) => {
                         e.preventDefault();
-                        const existing = keywords
-                          .split(/[,，\s]+/)
-                          .filter(Boolean);
-                        const recKws = r.value
-                          .split(/[,\s]+/)
-                          .filter(Boolean);
+                        const existing = parseKeywordInput(keywords);
+                        const recKws = parseKeywordInput(r.value);
                         const merged = [
                           ...new Set([
                             ...existing,
@@ -211,7 +227,7 @@ export function TopicForm({
                             ),
                           ]),
                         ];
-                        setKeywords(merged.join(", "));
+                        setKeywords(formatKeywordInput(merged));
                       }}
                       title={`匹配度: ${r.score} — 点击添加关键词`}
                     >
@@ -223,18 +239,17 @@ export function TopicForm({
               </div>
             )}
           </label>
-          <label className="span-2">
-            关联信息源{" "}
-            <MultiSelect
-              options={activeSources.map((s) => ({
-                value: s.id,
-                label: `${s.name} (${s.channel})`,
-              }))}
-              selected={selectedSourceIds}
-              onChange={setSelectedSourceIds}
-              placeholder={`已选 ${selectedSourceIds.length} 个信息源`}
-            />
-          </label>
+          <div className="span-2 topic-source-field">
+            <span className="topic-source-label">关联信息源</span>
+          <SourceSelector
+            sources={activeSources}
+            selected={selectedSourceIds}
+            onChange={setSelectedSourceIds}
+            models={models}
+            selectedModelIds={selectedCollectionModelIds}
+            onModelChange={setSelectedCollectionModelIds}
+          />
+          </div>
           <label>
             Cron 表达式
             <input
@@ -313,8 +328,20 @@ export function TopicForm({
               </select>
             </label>
           )}
+          {autoReport && (
+            <label>
+              自动报告类型
+              <select
+                value={autoReportType}
+                onChange={(e) => setAutoReportType(e.target.value as "analytical" | "archive")}
+              >
+                <option value="analytical">总结推理分析型</option>
+                <option value="archive">逐条信息归档型</option>
+              </select>
+            </label>
+          )}
           <label className="span-2">
-            AI 描述提示词{" "}
+            AI 采集提示词{" "}
             <select
               style={{ marginBottom: 4 }}
               value=""
@@ -339,9 +366,36 @@ export function TopicForm({
               placeholder="例如：监控全球主要经济体的贸易政策变化、关税调整、贸易协定进展，重点关注影响中国出口的措施"
             />
             <span className="text-muted small">
-              用自然语言描述这个主题的关注重点和需求，AI
-              报告生成时会参考此描述
+              主题关联“AI 提示采集”信息源时，手动与定时采集都会使用这份提示词生成检索式。
             </span>
+          </label>
+          <fieldset className="span-2 prompt-template-picker">
+            <legend>挂载提示词</legend>
+            <span className="text-muted small">采集时会与本主题的 AI 采集提示词合并使用。</span>
+            <div className="prompt-template-picker__list">
+              {promptTemplates.filter((prompt) => prompt.is_active || selectedPromptTemplateIds.includes(prompt.id)).map((prompt) => (
+                <label key={prompt.id} className="prompt-template-picker__item">
+                  <input
+                    type="checkbox"
+                    checked={selectedPromptTemplateIds.includes(prompt.id)}
+                    onChange={(event) => setSelectedPromptTemplateIds((current) => event.target.checked
+                      ? [...current, prompt.id]
+                      : current.filter((id) => id !== prompt.id))}
+                  />
+                  <span><strong>{prompt.name}</strong>{prompt.description && <small>{prompt.description}</small>}</span>
+                </label>
+              ))}
+              {promptTemplates.length === 0 && <span className="text-muted small">暂无提示词，请先到“提示词库”创建。</span>}
+            </div>
+          </fieldset>
+          <label>
+            AI 采集模型
+            <select value={aiResearchModelId} onChange={(event) => setAiResearchModelId(event.target.value)}>
+              <option value="">使用主题采集模型或默认模型</option>
+              {models.filter((model) => model.is_active && model.is_configured).map((model) => (
+                <option key={model.id} value={model.id}>{model.name} · {model.model_name}</option>
+              ))}
+            </select>
           </label>
           <label className="span-2">
             目标URL (每行一个){" "}

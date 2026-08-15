@@ -1,25 +1,45 @@
 """Items, Runs, Batches — queries, history, delete."""
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
-    ActiveRunOut, BatchOut, BatchRunOut,
-    ItemDeleteRequest, ItemListOut, ItemOut,
+    ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut, ItemInventoryOut,
+    ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
     RunOut,
 )
+from app.connectors.base import FetchItem
 from app.database import get_db
 from app.models import (
-    Category, CollectedItem, CollectionRun, JobStatus,
+    Category, CollectedItem, CollectionRun, JobStatus, ModelConfig,
     SourceConfig, Tag, Topic,
 )
 
 from ._helpers import _item_tags
+from app.translation_service import item_translation_fields, translate_existing_items
+from app.engine import _web_translation_model
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
+BEIJING_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _format_batch_label_time(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    utc_value = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return utc_value.astimezone(BEIJING_TIME_ZONE).strftime("%Y-%m-%d %H:%M")
+
+
+def _utc_sort_time(value: datetime | None) -> datetime:
+    """Normalize SQLite's mixed naive/aware timestamps before Python sorting."""
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 # ── Runs ────────────────────────────────────────────────────────────────
@@ -63,7 +83,7 @@ def list_batches(
     batches: list[BatchOut] = []
     for batch_id, runs in sorted(
         batch_map.items(),
-        key=lambda x: max((r.created_at for r in x[1] if r.created_at), default=None) or datetime.min,
+        key=lambda x: max((_utc_sort_time(r.created_at) for r in x[1]), default=_utc_sort_time(None)),
         reverse=True,
     )[:limit]:
         runs.sort(key=lambda r: r.source_id or "")
@@ -102,19 +122,22 @@ def list_batches(
 
         batch_label = None
         if topic:
-            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            ts = _format_batch_label_time(started_at)
             batch_label = f"{topic.name}_{ts}"
         elif runs[0].source_id:
-            ts = started_at.strftime("%Y-%m-%d %H:%M") if started_at else ""
+            ts = _format_batch_label_time(started_at)
             batch_label = f"{runs[0].source_id}_{ts}"
 
+        current_item_count = db.query(CollectedItem).filter(
+            CollectedItem.run_id.in_([run.id for run in runs]),
+        ).count()
         batches.append(BatchOut(
             batch_id=batch_id,
             topic_id=runs[0].topic_id,
             topic_name=topic.name if topic else None,
             batch_label=batch_label,
             status=status,
-            total_items=sum(r.items_found or 0 for r in runs),
+            total_items=current_item_count,
             total_new=sum(r.items_new or 0 for r in runs),
             started_at=started_at.isoformat() if started_at else None,
             completed_at=completed_at.isoformat() if completed_at else None,
@@ -131,6 +154,20 @@ def list_active_runs(db: Session = Depends(get_db)):
         CollectionRun.status.in_([JobStatus.RUNNING, JobStatus.PENDING]),
     ).order_by(CollectionRun.created_at.desc()).limit(20).all()
 
+    batch_ids = {run.batch_id for run in runs if run.batch_id}
+    batch_metrics: dict[str, dict[str, int]] = {}
+    if batch_ids:
+        batch_runs = db.query(CollectionRun).filter(CollectionRun.batch_id.in_(batch_ids)).all()
+        for batch_id in batch_ids:
+            grouped = [run for run in batch_runs if run.batch_id == batch_id]
+            statuses = [str(run.status or "").lower() for run in grouped]
+            batch_metrics[batch_id] = {
+                "total": len(grouped),
+                "completed": sum(status in ("completed", "partial") for status in statuses),
+                "failed": sum(status == "failed" for status in statuses),
+                "active": sum(status in ("running", "pending") for status in statuses),
+            }
+
     result: list[ActiveRunOut] = []
     for r in runs:
         src = db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
@@ -142,6 +179,9 @@ def list_active_runs(db: Session = Depends(get_db)):
                 started = started.replace(tzinfo=timezone.utc)
             duration = int((datetime.now(timezone.utc) - started).total_seconds())
 
+        metrics = batch_metrics.get(r.batch_id or "", {
+            "total": 1, "completed": 0, "failed": 0, "active": 1,
+        })
         result.append(ActiveRunOut(
             id=r.id, source_id=r.source_id,
             source_name=src.name if src else r.source_id,
@@ -154,9 +194,100 @@ def list_active_runs(db: Session = Depends(get_db)):
             started_at=r.started_at.isoformat() if r.started_at else None,
             duration_seconds=duration,
             batch_id=getattr(r, 'batch_id', None),
+            progress_events=getattr(r, 'progress_events', None) or [],
+            batch_total_sources=metrics["total"],
+            batch_completed_sources=metrics["completed"],
+            batch_failed_sources=metrics["failed"],
+            batch_active_sources=metrics["active"],
         ))
 
     return result
+
+
+@router.get("/runs/failures", response_model=list[RunFailureOut])
+def list_run_failures(
+    batch_ids: str = Query(min_length=1, max_length=2000),
+    db: Session = Depends(get_db),
+):
+    requested_ids = [value.strip() for value in batch_ids.split(",") if value.strip()]
+    if not requested_ids:
+        return []
+    runs = db.query(CollectionRun).filter(
+        CollectionRun.batch_id.in_(requested_ids),
+        CollectionRun.status == JobStatus.FAILED,
+    ).order_by(CollectionRun.created_at.desc()).all()
+    if not runs:
+        return []
+
+    source_ids = [run.source_id for run in runs]
+    recurring = dict(db.query(CollectionRun.source_id, func.count(CollectionRun.id)).filter(
+        CollectionRun.source_id.in_(source_ids),
+        CollectionRun.status == JobStatus.FAILED,
+    ).group_by(CollectionRun.source_id).all())
+    sources = {
+        source.id: source for source in db.query(SourceConfig).filter(SourceConfig.id.in_(source_ids)).all()
+    }
+    return [_failure_out(run, sources.get(run.source_id), int(recurring.get(run.source_id, 1))) for run in runs]
+
+
+def _failure_out(run: CollectionRun, source: SourceConfig | None, recurring_failures: int) -> RunFailureOut:
+    errors = [str(value) for value in (run.error_log or []) if str(value).strip()]
+    category, repairable, recommendation, action = _failure_guidance(errors, recurring_failures)
+    channel = source.channel.value if source and hasattr(source.channel, "value") else str(source.channel if source else "unknown")
+    return RunFailureOut(
+        run_id=run.id,
+        batch_id=run.batch_id,
+        source_id=run.source_id,
+        source_name=source.name if source else run.source_id,
+        source_channel=channel,
+        errors=errors or ["未记录具体错误，请重新验证该信息源。"],
+        category=category,
+        repairable=repairable,
+        recurring_failures=recurring_failures,
+        recommendation=recommendation,
+        suggested_action=action,
+    )
+
+
+def _failure_guidance(errors: list[str], recurring_failures: int) -> tuple[str, bool, str, str]:
+    detail = " ".join(errors).lower()
+    if "api_key" in detail or "authentication" in detail or "unauthorized" in detail:
+        return "credentials", True, "该渠道缺少或拒绝 API Key。请在信息源配置中更新密钥后重新验证。", "edit_source"
+    if "403" in detail or "406" in detail or "forbidden" in detail or "not acceptable" in detail:
+        return "access_restricted", True, "目标站拒绝当前访问方式。请改用官方 RSS、允许的 API，或将其改为网页抓取后验证。", "edit_source"
+    if "404" in detail or "not found" in detail:
+        action = "delete_candidate" if recurring_failures >= 3 else "edit_source"
+        ending = "连续多次返回 404；如无法找到新的官方入口，建议删除该信息源。" if action == "delete_candidate" else "请更新为有效的 RSS 或网页地址后重新验证。"
+        return "endpoint_missing", True, ending, action
+    if "xml parse" in detail or "not well-formed" in detail or "undefined entity" in detail:
+        return "feed_format", True, "地址返回的不是兼容 RSS/Atom。请更换有效订阅地址，或改为网页抓取渠道。", "edit_source"
+    if "certificate" in detail or "ssl" in detail:
+        return "tls", True, "站点证书校验失败。请先核验站点证书和地址；不建议关闭证书校验。", "edit_source"
+    if "base_url not configured" in detail:
+        return "address_missing", True, "信息源缺少采集地址。请填写网页、RSS 或 API 地址后重新验证。", "edit_source"
+    return "network_or_provider", False, "请重新验证该信息源；若连续失败且没有替代入口，建议停用或删除。", "disable_candidate"
+
+
+@router.post("/runs/{run_id}/stop")
+def stop_run(run_id: str, db: Session = Depends(get_db)):
+    run = db.query(CollectionRun).filter(CollectionRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in (JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"):
+        return {"id": run.id, "status": run.status, "message": "Run is not active"}
+
+    now = datetime.now(timezone.utc)
+    started = run.started_at
+    if started and getattr(started, "tzinfo", None) is None:
+        started = started.replace(tzinfo=timezone.utc)
+    run.status = JobStatus.FAILED
+    run.completed_at = now
+    run.duration_ms = int((now - started).total_seconds() * 1000) if started else None
+    errors = list(run.error_log or [])
+    errors.append("Stopped manually from UI; previous collection did not complete.")
+    run.error_log = errors
+    db.commit()
+    return {"id": run.id, "status": run.status, "message": "Run stopped"}
 
 
 # ── Items ───────────────────────────────────────────────────────────────
@@ -170,6 +301,7 @@ def list_items(
     status: str | None = None,
     language: str | None = None,
     run_id: str | None = None,
+    batch_id: str | None = None,
     q: str | None = Query(default=None, description="Full-text search in title/content"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -189,34 +321,184 @@ def list_items(
         query = query.filter(CollectedItem.language == language)
     if run_id:
         query = query.filter(CollectedItem.run_id == run_id)
+    if batch_id:
+        query = query.filter(CollectedItem.run_id.in_(
+            db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
+        ))
     if tag:
         query = query.filter(CollectedItem.tags.any(Tag.id == tag))
     if q:
-        query = query.filter(
-            (CollectedItem.title.ilike(f"%{q}%")) |
-            (CollectedItem.content.ilike(f"%{q}%"))
+        needle = q.lower()
+        candidates = query.order_by(
+            CollectedItem.collected_at.desc(), CollectedItem.published_at.desc()
+        ).all()
+        filtered = [it for it in candidates if _matches_item_query(it, needle)]
+        total = len(filtered)
+        items = filtered[(page - 1) * page_size: page * page_size]
+    else:
+        total = query.count()
+        items = (
+            query.order_by(CollectedItem.collected_at.desc(), CollectedItem.published_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
 
-    total = query.count()
-    items = (
-        query.order_by(CollectedItem.collected_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
+    return ItemListOut(
+        items=[_item_out(it) for it in items],
+        total=total, page=page, page_size=page_size,
     )
 
-    return ItemListOut(
-        items=[ItemOut(
-            id=it.id, source_id=it.source_id,
-            title=it.title, content=it.content, summary=it.summary, url=it.url,
-            language=it.language, category=it.category, tags=_item_tags(it),
-            entities=it.entities,
-            quality_score=it.quality_score or 0,
-            relevance_score=it.relevance_score or 0,
-            status=it.status if it.status else "raw",
-            collected_at=it.collected_at, published_at=it.published_at,
-        ) for it in items],
-        total=total, page=page, page_size=page_size,
+
+@router.get("/items/inventory", response_model=ItemInventoryOut)
+def item_inventory(db: Session = Depends(get_db)):
+    """Return a live inventory built only from currently persisted items."""
+    now = datetime.now(timezone.utc)
+
+    def grouped_rows(column, labels: dict[str, str], fallback_id: str, fallback_label: str):
+        rows = db.query(
+            column, func.count(CollectedItem.id), func.max(CollectedItem.collected_at),
+        ).group_by(column).all()
+        result = []
+        for value, count, latest_at in rows:
+            key = str(value) if value else fallback_id
+            label = labels.get(key, str(value) if value else fallback_label)
+            result.append({"id": key, "label": label, "count": int(count), "latest_at": latest_at})
+        return sorted(result, key=lambda row: (-row["count"], row["label"]))
+
+    topic_names = dict(db.query(Topic.id, Topic.name).all())
+    source_names = dict(db.query(SourceConfig.id, SourceConfig.name).all())
+    topics = grouped_rows(CollectedItem.topic_id, topic_names, "__unassigned__", "未关联主题")
+    for row in topics:
+        row["topic_id"] = row["id"] if row["id"] != "__unassigned__" else None
+
+    categories = grouped_rows(
+        CollectedItem.category, {}, "__uncategorized__", "未分类",
+    )
+    sources = grouped_rows(CollectedItem.source_id, source_names, "__unknown_source__", "未知信息源")
+    statuses = grouped_rows(CollectedItem.status, {}, "__unknown_status__", "未知状态")
+
+    batch_rows = db.query(
+        CollectionRun.batch_id,
+        CollectionRun.topic_id,
+        func.count(CollectedItem.id),
+        func.max(CollectedItem.collected_at),
+    ).join(
+        CollectedItem, CollectedItem.run_id == CollectionRun.id,
+    ).filter(
+        CollectionRun.batch_id.isnot(None),
+    ).group_by(CollectionRun.batch_id, CollectionRun.topic_id).all()
+    batches = []
+    for batch_id, topic_id, count, latest_at in batch_rows:
+        label = topic_names.get(topic_id, topic_id or "未关联主题")
+        batches.append({
+            "id": batch_id,
+            "label": f"{label} · {batch_id}",
+            "count": int(count),
+            "latest_at": latest_at,
+            "topic_id": topic_id,
+        })
+    min_utc = datetime.min.replace(tzinfo=timezone.utc)
+
+    def batch_sort_time(row):
+        latest_at = row["latest_at"]
+        if latest_at is None:
+            return min_utc
+        if latest_at.tzinfo is None:
+            return latest_at.replace(tzinfo=timezone.utc)
+        return latest_at.astimezone(timezone.utc)
+
+    batches.sort(key=batch_sort_time, reverse=True)
+
+    return ItemInventoryOut(
+        total_items=db.query(CollectedItem).count(),
+        topics=topics,
+        categories=categories,
+        batches=batches,
+        sources=sources,
+        statuses=statuses,
+        generated_at=now,
+    )
+
+
+@router.get("/items/featured", response_model=list[ItemOut])
+def list_featured_items(db: Session = Depends(get_db)):
+    from app.services.featured_intelligence import get_featured_items
+
+    return [_item_out(item) for item in get_featured_items(db)]
+
+
+def _item_out(it: CollectedItem) -> ItemOut:
+    metadata = it.raw_metadata if isinstance(it.raw_metadata, dict) else {}
+    enforcement_review = metadata.get("enforcement_review")
+    if it.topic_id == "weekly-enforcement-intelligence":
+        from app.enforcement_review import enrich_enforcement_review_metadata
+
+        enforcement_review = enrich_enforcement_review_metadata(FetchItem(
+            title=it.title,
+            content=it.content,
+            summary=it.summary,
+            url=it.url,
+            raw_metadata=metadata,
+        ))
+    return ItemOut(
+        id=it.id, source_id=it.source_id, run_id=it.run_id,
+        topic_id=it.topic_id,
+        title=it.title, content=it.content, summary=it.summary, url=it.url,
+        **item_translation_fields(it),
+        enforcement_review=enforcement_review,
+        quality_review=metadata.get("quality_review"),
+        language=it.language, category=it.category, tags=_item_tags(it),
+        entities=it.entities,
+        quality_score=it.quality_score or 0,
+        relevance_score=it.relevance_score or 0,
+        status=it.status if it.status else "raw",
+        collected_at=it.collected_at, published_at=it.published_at,
+    )
+
+
+def _matches_item_query(item: CollectedItem, needle: str) -> bool:
+    trans = item_translation_fields(item)
+    haystack = " ".join([
+        item.title or "",
+        item.summary or "",
+        item.content or "",
+        trans.get("title_zh") or "",
+        trans.get("summary_zh") or "",
+        trans.get("content_zh") or "",
+    ]).lower()
+    return needle in haystack
+
+
+@router.post("/items/translate")
+async def translate_items(
+    data: ItemTranslateRequest | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    from app.model_defaults import get_default_model
+    model = get_default_model(db)
+    item_ids = data.item_ids if data and data.item_ids else None
+    return await translate_existing_items(
+        db,
+        model or _web_translation_model(),
+        limit=len(item_ids) if item_ids else limit,
+        item_ids=item_ids,
+    )
+
+
+@router.post("/items/quality-review")
+async def quality_review_items(
+    data: ItemQualityReviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Curate historical entries and remove low-value, non-article pages."""
+    from app.content_quality import review_persisted_items
+
+    from app.model_defaults import get_default_model
+    model = get_default_model(db)
+    return await review_persisted_items(
+        db, model, item_ids=data.item_ids or None, limit=data.limit,
     )
 
 
@@ -229,6 +511,7 @@ def list_item_ids(
     status: str | None = None,
     language: str | None = None,
     run_id: str | None = None,
+    batch_id: str | None = None,
     q: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -236,7 +519,7 @@ def list_item_ids(
     ids, total = get_item_ids(
         db,
         topic_id=topic_id, source_id=source_id, category=category,
-        tag=tag, status=status, language=language, run_id=run_id, q=q,
+        tag=tag, status=status, language=language, run_id=run_id, batch_id=batch_id, q=q,
     )
     return {"ids": ids, "total": total, "matching": len(ids)}
 
@@ -303,16 +586,7 @@ def search_items(
     ).order_by(CollectedItem.collected_at.desc()).all()
 
     return ItemListOut(
-        items=[ItemOut(
-            id=it.id, source_id=it.source_id, run_id=it.run_id,
-            title=it.title, content=it.content, summary=it.summary, url=it.url,
-            language=it.language, category=it.category, tags=_item_tags(it),
-            entities=it.entities,
-            quality_score=it.quality_score or 0,
-            relevance_score=it.relevance_score or 0,
-            status=it.status if it.status else "raw",
-            collected_at=it.collected_at, published_at=it.published_at,
-        ) for it in items],
+        items=[_item_out(it) for it in items],
         total=total, page=page, page_size=page_size,
     )
 
@@ -320,16 +594,7 @@ def search_items(
 def get_item(item_id: str, db: Session = Depends(get_db)):
     from app.services.item_service import get_item as _get_item
     it = _get_item(db, item_id)
-    return ItemOut(
-        id=it.id, source_id=it.source_id, run_id=it.run_id,
-        title=it.title, content=it.content, summary=it.summary, url=it.url,
-        language=it.language, category=it.category, tags=_item_tags(it),
-        entities=it.entities,
-        quality_score=it.quality_score or 0,
-        relevance_score=it.relevance_score or 0,
-        status=it.status if it.status else "raw",
-        collected_at=it.collected_at, published_at=it.published_at,
-    )
+    return _item_out(it)
 
 
 @router.post("/items/batch-delete")

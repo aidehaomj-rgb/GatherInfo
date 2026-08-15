@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException
 
-from app.models import CollectedItem, Tag
+from app.models import CollectedItem, CollectionRun, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ def build_item_query(
     status: str | None = None,
     language: str | None = None,
     run_id: str | None = None,
+    batch_id: str | None = None,
     q: str | None = None,
 ):
     """Build a filtered query for CollectedItem, reusable across list/export/ids."""
@@ -34,6 +35,10 @@ def build_item_query(
         query = query.filter(CollectedItem.language == language)
     if run_id:
         query = query.filter(CollectedItem.run_id == run_id)
+    if batch_id:
+        query = query.filter(CollectedItem.run_id.in_(
+            db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
+        ))
     if tag:
         query = query.filter(CollectedItem.tags.any(Tag.id == tag))
     if q:

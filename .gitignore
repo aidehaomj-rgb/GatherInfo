@@ -8,12 +8,32 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+*.backup
 backend/.venv/
 frontend/node_modules/
 frontend/dist/
-data/gather.db*
+backend/data/
+data/gather*.db*
+data/enforcement_review_queue.json
+data/previews/
+data/reports/**/qa-*/
 logs/
 .dev-pids
+pptx_build/node_modules/
+.workbuddy/
+
+# Local runtime and generated research artifacts
+frontend-vite*.log
+reports/
+work/
+data/migration_backup_*/
+data/reports/
 
 # Project docs
 data/backups/
+
+# IDE / agent working data (never version-controlled)
+.codebuddy/
+
+# Temporary diagnostic scripts
+frontend/_test_*.mjs

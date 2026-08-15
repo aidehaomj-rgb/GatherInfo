@@ -15,6 +15,8 @@ from app.models import (
     ScheduleConfig, SearchToolConfig, SourceConfig,
     SystemConfig, Tag, Topic,
 )
+from app.source_taxonomy import SOURCE_GROUP_INPUT_CODES, determine_source_group
+from app.time_utils import beijing_day_bounds_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["settings"])
@@ -31,13 +33,20 @@ def _get_system_config(db: Session) -> SystemConfig:
         db.add(cfg)
         db.commit()
         db.refresh(cfg)
+    from app.report_export import normalize_report_output_dir
+
+    normalized_dir = normalize_report_output_dir(cfg.report_output_dir)
+    if cfg.report_output_dir != normalized_dir:
+        cfg.report_output_dir = normalized_dir
+        db.commit()
+        db.refresh(cfg)
     return cfg
 
 # ── Stats ───────────────────────────────────────────────────────────────
 
 @router.get("/stats", response_model=StatsOut)
 def get_stats(db: Session = Depends(get_db)):
-    today = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today, tomorrow = beijing_day_bounds_utc(now=_now())
     last = db.query(CollectedItem).order_by(CollectedItem.collected_at.desc()).first()
     return StatsOut(
         total_sources=db.query(SourceConfig).count(),
@@ -45,7 +54,10 @@ def get_stats(db: Session = Depends(get_db)):
         total_topics=db.query(Topic).count(),
         active_topics=db.query(Topic).filter(Topic.is_active == True).count(),
         total_items=db.query(CollectedItem).count(),
-        items_today=db.query(CollectedItem).filter(CollectedItem.collected_at >= today).count(),
+        items_today=db.query(CollectedItem).filter(
+            CollectedItem.collected_at >= today,
+            CollectedItem.collected_at < tomorrow,
+        ).count(),
         total_tags=db.query(Tag).count(),
         total_schedules=db.query(ScheduleConfig).filter(ScheduleConfig.is_active == True).count(),
         last_collection_at=last.collected_at if last else None,
@@ -63,8 +75,15 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/settings", response_model=SystemConfigOut)
 def update_settings(data: SystemConfigUpdate, db: Session = Depends(get_db)):
     cfg = _get_system_config(db)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    if "report_output_dir" in payload:
+        from app.report_export import normalize_report_output_dir
+
+        payload = {**payload, "report_output_dir": normalize_report_output_dir(payload["report_output_dir"])}
+    for k, v in payload.items():
         setattr(cfg, k, v)
+    from app.model_defaults import reconcile_default_model
+    reconcile_default_model(db)
     db.commit()
     db.refresh(cfg)
     return cfg
@@ -85,6 +104,7 @@ class ImportConflict(BaseModel):
 def export_config(db: Session = Depends(get_db)):
     sources = [
         {"id": s.id, "name": s.name, "channel": s.channel, "is_active": s.is_active,
+         "source_group": s.source_group,
          "base_url": s.base_url, "api_endpoint": s.api_endpoint,
          "default_keywords": s.default_keywords, "languages": s.languages}
         for s in db.query(SourceConfig).all()
@@ -94,6 +114,8 @@ def export_config(db: Session = Depends(get_db)):
         td = {"id": t.id, "name": t.name, "description": t.description,
               "keywords": t.keywords, "keyword_tags": t.keyword_tags,
               "description_prompt": t.description_prompt, "source_ids": t.source_ids,
+              "collection_model_ids": t.collection_model_ids,
+              "ai_research_model_id": t.ai_research_model_id,
               "target_urls": t.target_urls, "auto_tag_rules": t.auto_tag_rules,
               "schedule_cron": t.schedule_cron, "is_scheduled": t.is_scheduled,
               "is_active": t.is_active}
@@ -137,6 +159,11 @@ def import_config(data: dict, db: Session = Depends(get_db)):
     mode = data.get("mode", "skip")
 
     for item in data.get("sources", []):
+        item = dict(item)
+        source_group = item.get("source_group") or determine_source_group(item)
+        if source_group not in SOURCE_GROUP_INPUT_CODES:
+            raise HTTPException(400, f"未知的信息源业务分类: {source_group}")
+        item["source_group"] = source_group
         existing = db.query(SourceConfig).filter(SourceConfig.id == item["id"]).first()
         if existing:
             if mode == "skip":
@@ -227,7 +254,7 @@ def import_config(data: dict, db: Session = Depends(get_db)):
             db.add(SearchToolConfig(**{k: v for k, v in item.items() if hasattr(SearchToolConfig, k)}))
         imported["search_tools"] += 1
 
+    from app.model_defaults import reconcile_default_model
+    reconcile_default_model(db)
     db.commit()
     return {"imported": imported, "conflicts": conflicts, "conflict_count": len(conflicts)}
-
-

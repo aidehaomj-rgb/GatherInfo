@@ -15,10 +15,117 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.report_engine import (
     _parse_iso,
     _build_item_context,
+    _build_archive_report,
+    _build_collection_summary_context,
     _build_report_prompt,
+    _append_enforcement_case_appendix,
+    _effective_model,
     _auto_summary,
 )
-from app.models import CollectedItem, Topic
+from app.models import CollectedItem, ModelConfig, Topic
+
+
+def test_enforcement_appendix_keeps_every_case_and_review_fields():
+    items = [
+        {
+            "title": "海关查获未申报药品",
+            "content": "执法人员在机场货运渠道查获一批未申报药品",
+            "summary": "",
+            "url": "https://example.test/case-1",
+            "source": "official-source",
+            "category": "drugs",
+            "published_at": "2026-07-28T08:00:00+00:00",
+            "enforcement_review": {
+                "source_name": "某国海关",
+                "authority": "某国海关机场分局",
+                "jurisdiction": "Exampleland",
+                "case_type": "drugs",
+                "subject": "未申报药品",
+                "mainland_nexus_evidence": "货物原产于中国",
+            },
+        },
+        {
+            "title": "海关查获濒危物种",
+            "content": "海关在旅客行李中查获濒危物种",
+            "summary": "",
+            "url": "https://example.test/case-2",
+            "source": "official-source",
+            "category": "wildlife",
+            "published_at": "2026-07-27T08:00:00+00:00",
+            "enforcement_review": {
+                "authority": "香港海关",
+                "jurisdiction": "Hong Kong",
+                "case_type": "wildlife",
+                "subject": "濒危物种",
+            },
+        },
+    ]
+
+    content = _append_enforcement_case_appendix("## 综合分析\n正文", items)
+
+    assert "## 附录：境外进出口执法案例汇编" in content
+    assert "本附录共收录2个案例" in content
+    assert "### 【毒品】（一）海关查获未申报药品" in content
+    assert "### 【濒危】（二）海关查获濒危物种" in content
+    assert "据某国海关2026年7月28日消息" in content
+    assert "货物原产于中国" in content
+    assert "香港、台湾或澳门地区执法案例" in content
+    assert "原文链接：见系统采集条目" in content
+
+
+def test_archive_report_keeps_each_item_as_independent_title_and_body():
+    topic = MagicMock(spec=Topic)
+    topic.name = "境外查发案件"
+    items = [
+        {
+            "id": "item-1",
+            "title": "海防港查获伪报货物",
+            "content": "越南海关检查集装箱后，查获申报为废铜的军用弹药。",
+            "summary": "",
+            "url": "https://example.test/item-1",
+            "source": "official-source",
+            "category": "走私案件",
+            "published_at": "2026-07-25T08:00:00+00:00",
+        },
+        {
+            "id": "item-2",
+            "title": "海关发布监管新规",
+            "content": "监管机关公布新规全文及生效日期。",
+            "summary": "",
+            "url": "https://example.test/item-2",
+            "source": "policy-source",
+            "category": "政策法规",
+            "published_at": "2026-07-24T08:00:00+00:00",
+        },
+    ]
+
+    content = _build_archive_report(topic, items, None, None)
+
+    assert "## 走私案件" in content
+    assert "### 海防港查获伪报货物" in content
+    assert "越南海关检查集装箱后" in content
+    assert "## 政策法规" in content
+    assert "### 海关发布监管新规" in content
+    assert "https://example.test/item-2" in content
+
+
+def test_effective_model_uses_override_without_mutating_saved_config():
+    """A report-selected variant must reach the LLM without altering the config."""
+    model = MagicMock(spec=ModelConfig)
+    model.id = "ollama-cloud"
+    model.provider = "ollama_cloud"
+    model.base_url = "https://ollama.com"
+    model.api_key = "key"
+    model.model_name = "gpt-oss:20b"
+    model.temperature = 0.2
+    model.max_tokens = 2048
+    model.top_p = 0.9
+
+    effective = _effective_model(model, "gpt-oss:120b")
+
+    assert effective is not model
+    assert effective.model_name == "gpt-oss:120b"
+    assert model.model_name == "gpt-oss:20b"
 
 
 # ── _parse_iso ──────────────────────────────────────────────────────────────
@@ -119,6 +226,30 @@ class TestBuildItemContext:
         assert result[0]["id"] == "item-0"
         assert result[2]["id"] == "item-2"
 
+    def test_archive_context_keeps_all_items_and_full_body(self):
+        items = []
+        for i in range(51):
+            item = MagicMock(spec=CollectedItem)
+            item.id = f"item-{i}"
+            item.title = f"Title {i}"
+            item.summary = ""
+            item.content = "A" * 9000
+            item.url = ""
+            item.source_id = "src-1"
+            item.language = "zh"
+            item.category = "case"
+            item.tags = []
+            item.published_at = None
+            item.quality_score = 0.9
+            item.relevance_score = 0.9
+            item.raw_metadata = {}
+            items.append(item)
+
+        result = _build_item_context(items, content_limit=None, max_items=None)
+
+        assert len(result) == 51
+        assert len(result[-1]["content"]) == 9000
+
     def test_tags_conversion(self):
         tag1 = MagicMock()
         tag1.namespace = "region"
@@ -217,6 +348,8 @@ class TestBuildReportPrompt:
         prompt = _build_report_prompt(topic, self._make_item_ctx(2))
         assert "关税分析" in prompt
         assert "## " in prompt  # markdown headings
+        assert "不把所有风险条件机械地用 AND 组合" in prompt
+        assert "来源事实、分析推断和待核验事项" in prompt
 
     def test_prompt_contains_item_count(self):
         topic = self._make_topic()
@@ -297,6 +430,55 @@ class TestBuildReportPrompt:
         topic = self._make_topic(description=None)
         prompt = _build_report_prompt(topic, self._make_item_ctx(1))
         assert "(无)" in prompt
+
+    def test_collection_summary_context_groups_evidence_before_report(self):
+        items = [
+            {
+                "id": "item-1",
+                "index": 1,
+                "title": "US tariff exclusion update",
+                "summary": "USTR extended tariff exclusions for selected products.",
+                "content": "Long body",
+                "url": "http://example.com/1",
+                "source": "ustr",
+                "language": "en",
+                "category": "tariff",
+                "tags": [{"namespace": "system", "value": "超限采集"}],
+                "published_at": "2024-01-01T00:00:00+00:00",
+                "relevance_score": 0.9,
+            },
+            {
+                "id": "item-2",
+                "index": 2,
+                "title": "EU customs guidance",
+                "summary": "EU issued new customs compliance guidance.",
+                "content": "Long body",
+                "url": "http://example.com/2",
+                "source": "eu",
+                "language": "en",
+                "category": "customs",
+                "tags": [],
+                "published_at": "2024-01-02T00:00:00+00:00",
+                "relevance_score": 0.8,
+            },
+        ]
+
+        result = _build_collection_summary_context(items)
+
+        assert "信息集合摘要" in result
+        assert "tariff 1 条" in result
+        assert "customs 1 条" in result
+        assert "超限采集" in result
+        assert "[条目1]" in result
+
+    def test_prompt_requires_summary_then_synthesis(self):
+        topic = self._make_topic()
+        prompt = _build_report_prompt(topic, self._make_item_ctx(2))
+
+        summary_pos = prompt.index("【信息集合摘要】")
+        detail_pos = prompt.index("【详细条目】")
+        assert summary_pos < detail_pos
+        assert "先基于信息集合摘要形成判断" in prompt
 
 
 # ── _auto_summary ───────────────────────────────────────────────────────────

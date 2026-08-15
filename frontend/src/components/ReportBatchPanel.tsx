@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BrainCircuit } from "lucide-react";
-import { fetchBatches, generateReport, batchGenerateReports } from "../api";
-import type { Report, Topic, ModelConfig } from "../types";
+import { fetchBatches, batchGenerateReports } from "../api";
+import type { Topic, ModelConfig } from "../types";
 
 interface Props {
   topics: Topic[];
@@ -12,21 +12,22 @@ interface Props {
   onGenerated: () => void;
   genMsg: string | null;
   onGenMsg: (msg: string | null) => void;
+  reportType: "analytical" | "archive";
 }
 
-type BatchSourceMode = "all" | "selected";
+/** Multi-topic batch mode. */
+type MultiMode = "allItems" | "perBatch";
+
+interface BatchMeta { label: string; run_id: string; }
 
 export function ReportBatchPanel({
   topics, models, ollamaModels, generating,
-  onGeneratingChange, onGenerated, genMsg, onGenMsg,
+  onGeneratingChange, onGenerated, genMsg, onGenMsg, reportType,
 }: Props) {
-  const [batchTopicIds, setBatchTopicIds] = useState<string[]>([]);
-  const [batchSourceMode, setBatchSourceMode] = useState<BatchSourceMode>("all");
-  const [topicBatchMeta, setTopicBatchMeta] = useState<
-    Record<string, Record<string, { label: string; run_id: string }>>
-  >({});
+  const [topicIds, setTopicIds] = useState<string[]>([]);
+  const [mode, setMode] = useState<MultiMode>("allItems");
+  const [topicBatchMeta, setTopicBatchMeta] = useState<Record<string, Record<string, BatchMeta>>>({});
   const [topicBatchSelections, setTopicBatchSelections] = useState<Record<string, string[]>>({});
-  const [batchSubMode, setBatchSubMode] = useState<"per_batch" | "combined">("per_batch");
   const [batchModel, setBatchModel] = useState("");
 
   const parseModel = (v: string) => {
@@ -38,153 +39,133 @@ export function ReportBatchPanel({
   };
 
   const toggleTopic = (id: string) =>
-    setBatchTopicIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+    setTopicIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
-  const loadMeta = async (tids: string[]) => {
-    const meta: Record<string, Record<string, { label: string; run_id: string }>> = {};
-    for (const tid of tids) {
-      try {
-        const bs = await fetchBatches(tid, 10);
-        const map: Record<string, { label: string; run_id: string }> = {};
-        for (const b of bs) {
-          const lid = b.runs?.[0]?.id || "";
-          if (lid) map[b.batch_id] = { label: b.batch_label || tid, run_id: lid };
-        }
-        if (Object.keys(map).length) meta[tid] = map;
-      } catch {}
-    }
-    setTopicBatchMeta(meta);
-  };
+  const ensureMeta = (tid: string) =>
+    fetchBatches(tid, 10).then((bs) => {
+      const map: Record<string, BatchMeta> = {};
+      for (const b of bs) {
+        const lid = b.runs?.[0]?.id || "";
+        if (lid) map[b.batch_id] = { label: b.batch_label || tid, run_id: lid };
+      }
+      setTopicBatchMeta((prev) => ({ ...prev, [tid]: map }));
+    }).catch(() => { /* ignore */ });
+
+  const toggleBatchSel = (tid: string, bid: string) =>
+    setTopicBatchSelections((prev) => {
+      const cur = prev[tid] || [];
+      return { ...prev, [tid]: cur.includes(bid) ? cur.filter((x) => x !== bid) : [...cur, bid] };
+    });
+
+  const runIdsFor = (tid: string) =>
+    (topicBatchSelections[tid] || [])
+      .map((bid) => topicBatchMeta[tid]?.[bid]?.run_id)
+      .filter(Boolean) as string[];
 
   const handleGenerate = async () => {
-    if (!batchTopicIds.length) return;
+    if (!topicIds.length) return;
     onGeneratingChange(true);
     onGenMsg(null);
     try {
-      if (batchSourceMode === "all") {
-        const results = await Promise.all(batchTopicIds.map((tid) => generateReport(tid, {})));
-        const ok = results.filter((r: Report) => r.status !== "failed").length;
-        const failed = results.length - ok;
-        onGenMsg(`批量生成完成：成功 ${ok} 份${failed > 0 ? `，失败 ${failed} 份` : ""}`);
-      } else if (batchSubMode === "per_batch") {
-        const { modelId, modelNameOverride } = parseModel(batchModel);
-        const tasks: Promise<Report>[] = [];
-        for (const tid of batchTopicIds) {
-          for (const bid of topicBatchSelections[tid] || []) {
-            const t = topicBatchMeta[tid]?.[bid];
-            if (t?.run_id) tasks.push(generateReport(tid, { modelId, modelNameOverride, collectionRunId: t.run_id }));
+      const { modelId, modelNameOverride } = parseModel(batchModel);
+      if (mode === "allItems") {
+        const result = await batchGenerateReports(
+          topicIds, modelId, undefined, modelNameOverride, undefined, reportType,
+        );
+        onGenMsg(`每个主题全量报告生成完成：成功 ${result.results.length - result.failed} 份，失败 ${result.failed} 份`);
+      } else {
+        const requestedTopics: string[] = [];
+        const requestedRuns: string[] = [];
+        for (const tid of topicIds) {
+          for (const rid of runIdsFor(tid)) {
+            requestedTopics.push(tid);
+            requestedRuns.push(rid);
           }
         }
-        if (!tasks.length) { onGenMsg("未选择任何批次"); onGeneratingChange(false); return; }
-        const results = await Promise.all(tasks);
-        const ok = results.filter((r) => r.status !== "failed").length;
-        onGenMsg(`按批生成完成：成功 ${ok} 份，失败 ${results.length - ok} 份`);
-      } else {
-        const { modelId, modelNameOverride } = parseModel(batchModel);
-        const runIdsPerTopic = batchTopicIds.map((tid) =>
-          (topicBatchSelections[tid] || []).map((bid) => topicBatchMeta[tid]?.[bid]?.run_id).filter(Boolean) as string[]
+        if (!requestedTopics.length) { onGenMsg("按批次生成需至少选择一个批次"); onGeneratingChange(false); return; }
+        const result = await batchGenerateReports(
+          requestedTopics, modelId, requestedRuns, modelNameOverride, undefined, reportType,
         );
-        const res = await batchGenerateReports(batchTopicIds, modelId, undefined, modelNameOverride, runIdsPerTopic);
-        onGenMsg(`批量生成完成：成功 ${res.results.length} 份，失败 ${res.failed} 份`);
+        onGenMsg(`按批次独立报告生成完成：成功 ${result.results.length - result.failed} 份，失败 ${result.failed} 份`);
       }
-      setBatchTopicIds([]);
+      setTopicIds([]);
       setTopicBatchSelections({});
       onGenerated();
-    } catch (e) { onGenMsg(`生成失败: ${e instanceof Error ? e.message : "未知错误"}`); }
+    } catch (e) {
+      onGenMsg(`生成失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    }
     onGeneratingChange(false);
   };
 
   const activeModels = models.filter((m) => m.is_active);
 
-  // Styles as plain objects for brevity
   const s = {
-    section: { marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line-light)" },
-    row: { marginBottom: 10, display: "flex", gap: 16, alignItems: "center", fontSize: "0.82rem" } as React.CSSProperties,
+    section: { marginTop: 0 },
     radio: { display: "flex", alignItems: "center", gap: 4, cursor: "pointer" } as React.CSSProperties,
     accent: { accentColor: "var(--accent)" },
-    h3: { fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 },
+    h3: { fontSize: "0.85rem", fontWeight: 600, marginBottom: 12 },
     list: { display: "flex", flexDirection: "column" as const, gap: 8 },
   };
 
+  const needsBatch = mode === "perBatch";
+  const canGenerate = topicIds.length > 0 && !generating;
+
   return (
     <div style={s.section}>
-      <h3 style={s.h3}>批量生成 (多主题)</h3>
+      <h3 style={s.h3}>多主题批量处理</h3>
 
-      <div style={s.row}>
-        <label style={s.radio}>
-          <input type="radio" name="bs" checked={batchSourceMode === "all"} onChange={() => setBatchSourceMode("all")} style={s.accent} />
-          所选主题的全部信息
-        </label>
-        <label style={s.radio}>
-          <input type="radio" name="bs" checked={batchSourceMode === "selected"} onChange={async () => {
-            setBatchSourceMode("selected");
-            await loadMeta(batchTopicIds.length ? batchTopicIds : topics.map((t) => t.id));
-          }} style={s.accent} />
-          仅使用指定批次
-        </label>
-      </div>
-
-      {batchSourceMode === "selected" && (
-        <div style={{ marginBottom: 10, display: "flex", gap: 12, alignItems: "center", fontSize: "0.8rem" }}>
-          <span className="text-muted">生成方式:</span>
-          {(["per_batch", "combined"] as const).map((m) => (
-            <label key={m} style={s.radio}>
-              <input type="radio" name="bsm" checked={batchSubMode === m} onChange={() => setBatchSubMode(m)} style={s.accent} />
-              {m === "per_batch" ? "按批次分别生成" : "合并为一份报告"}
-            </label>
-          ))}
-          <span className="text-muted small">
-            {batchSubMode === "per_batch" ? "每个选中批次各生成一份" : "同主题批次合并为一份"}
-          </span>
-        </div>
-      )}
-
-      <div style={s.list}>
-        {topics.map((t) => (
-          <div key={t.id}>
-            <label style={{ ...s.radio, fontSize: "0.85rem", padding: "4px 0" }}>
-              <input type="checkbox" checked={batchTopicIds.includes(t.id)} onChange={() => {
-                toggleTopic(t.id);
-                if (batchSourceMode === "selected") {
-                  fetchBatches(t.id, 10).then((bs) => {
-                    const map: Record<string, { label: string; run_id: string }> = {};
-                    for (const b of bs) {
-                      const lid = b.runs?.[0]?.id || "";
-                      if (lid) map[b.batch_id] = { label: b.batch_label || t.id, run_id: lid };
-                    }
-                    setTopicBatchMeta((prev) => ({ ...prev, [t.id]: map }));
-                  }).catch(() => {});
-                }
-              }} style={s.accent} />
-              <span>{t.name}<span className="text-muted small" style={{ marginLeft: 6 }}>({t.total_items_collected} 条)</span></span>
-            </label>
-            {batchSourceMode === "selected" && batchTopicIds.includes(t.id) && topicBatchMeta[t.id] && (
-              <div style={{ marginLeft: 24, marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {Object.entries(topicBatchMeta[t.id]).map(([bid, meta]) => {
-                  const sel = (topicBatchSelections[t.id] || []).includes(bid);
-                  return (
-                    <label key={bid} style={{
-                      display: "flex", alignItems: "center", gap: 3, fontSize: "0.75rem", cursor: "pointer",
-                      padding: "2px 6px", borderRadius: 4,
-                      background: sel ? "var(--accent-bg)" : "var(--surface)",
-                      border: "1px solid var(--line)",
-                    }}>
-                      <input type="checkbox" checked={sel} onChange={() => {
-                        setTopicBatchSelections((prev) => {
-                          const cur = prev[t.id] || [];
-                          return { ...prev, [t.id]: cur.includes(bid) ? cur.filter((x) => x !== bid) : [...cur, bid] };
-                        });
-                      }} style={{ accentColor: "var(--accent)", width: 12, height: 12 }} />
-                      {meta.label}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+      {/* mode radios */}
+      <div style={{ marginBottom: 12, display: "flex", gap: 16, alignItems: "center", fontSize: "0.82rem", flexWrap: "wrap" }}>
+        <span className="text-muted">生成模式：</span>
+        {(["allItems", "perBatch"] as const).map((m) => (
+          <label key={m} style={s.radio}>
+            <input type="radio" name="multiMode" checked={mode === m} onChange={() => setMode(m)} style={s.accent} />
+            {m === "allItems" ? "每个主题所有信息生成报告" : "每个主题按信息批次生成独立报告"}
+          </label>
         ))}
+        <span className="text-muted small">
+          {mode === "allItems" ? "每个主题用全量信息各生成一份" : "每个主题按其选中批次各生成一份"}
+        </span>
       </div>
 
+      {/* topic list */}
+      <div style={s.list}>
+        {topics.map((t) => {
+          const checked = topicIds.includes(t.id);
+          return (
+            <div key={t.id}>
+              <label style={{ ...s.radio, fontSize: "0.85rem", padding: "4px 0" }}>
+                <input type="checkbox" checked={checked} onChange={() => {
+                  toggleTopic(t.id);
+                  if (needsBatch && !checked) void ensureMeta(t.id);
+                }} style={s.accent} />
+                <span>{t.name}<span className="text-muted small" style={{ marginLeft: 6 }}>({t.current_item_count} 条)</span></span>
+              </label>
+              {needsBatch && checked && topicBatchMeta[t.id] && (
+                <div style={{ marginLeft: 24, marginBottom: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {Object.entries(topicBatchMeta[t.id]).map(([bid, meta]) => {
+                    const sel = (topicBatchSelections[t.id] || []).includes(bid);
+                    return (
+                      <label key={bid} style={{
+                        display: "flex", alignItems: "center", gap: 3, fontSize: "0.75rem", cursor: "pointer",
+                        padding: "2px 6px", borderRadius: 4,
+                        background: sel ? "var(--accent-bg)" : "var(--surface)",
+                        border: "1px solid var(--line)",
+                      }}>
+                        <input type="checkbox" checked={sel} onChange={() => toggleBatchSel(t.id, bid)}
+                          style={{ accentColor: "var(--accent)", width: 12, height: 12 }} />
+                        {meta.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* model + generate */}
       <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
         {activeModels.length > 0 && (
           <div className="gen-field" style={{ minWidth: 200 }}>
@@ -193,7 +174,7 @@ export function ReportBatchPanel({
               <option value="">默认模型</option>
               {activeModels.flatMap((m) => {
                 const avail = ollamaModels[m.id];
-                if (m.provider === "ollama" && avail?.length) {
+                if ((m.provider === "ollama" || m.provider === "ollama_cloud") && avail?.length) {
                   return avail.map((mn) => <option key={`${m.id}@@${mn}`} value={`${m.id}@@${mn}`}>{m.name} / {mn}</option>);
                 }
                 return <option key={m.id} value={m.id}>{m.name} ({m.provider}/{m.model_name})</option>;
@@ -201,10 +182,12 @@ export function ReportBatchPanel({
             </select>
           </div>
         )}
-        <button type="button" className="btn btn-primary" onClick={handleGenerate}
-          disabled={generating || !batchTopicIds.length}>
+        {reportType === "archive" && (
+          <span className="text-muted small">逐条归档型按规则直接编排，不进行跨条目综合推理。</span>
+        )}
+        <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={!canGenerate}>
           <BrainCircuit size={14} className={generating ? "spin" : ""} />
-          {generating ? "生成中..." : `批量生成 (${batchTopicIds.length})`}
+          {generating ? "生成中..." : `批量生成 (${topicIds.length})`}
         </button>
       </div>
 

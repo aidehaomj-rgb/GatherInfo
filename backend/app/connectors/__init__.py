@@ -3,6 +3,7 @@ from app.connectors.base import BaseCollector, ConnectorRegistry, CollectResult,
 
 # Register all built-in connectors
 from app.connectors import tavily_search    # noqa: F401
+from app.connectors import ai_research      # noqa: F401
 from app.connectors import rss_collector    # noqa: F401
 from app.connectors import web_scrape       # noqa: F401
 from app.connectors import official_api     # noqa: F401

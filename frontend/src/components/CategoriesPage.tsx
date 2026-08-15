@@ -1,6 +1,8 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Edit3, FolderTree } from "lucide-react";
+import { ArrowLeft, FolderKanban, Plus, Trash2, Edit3, Scale, ShieldAlert, Cpu, Globe2, ChartNoAxesCombined, PackageSearch } from "lucide-react";
+import { fetchTopics } from "../api";
+import type { Topic } from "../types";
 
 interface Category {
   id: string; name: string; description: string | null;
@@ -9,6 +11,21 @@ interface Category {
 
 const BASE = "/api/v1";
 
+const CATEGORY_VISUALS = [
+  { tone: "blue", icon: Scale, keywords: ["policy", "政策", "法规", "regulation"] },
+  { tone: "red", icon: ShieldAlert, keywords: ["custom", "海关", "执法", "风险", "sanction"] },
+  { tone: "teal", icon: Globe2, keywords: ["trade", "贸易", "global", "国际"] },
+  { tone: "amber", icon: ChartNoAxesCombined, keywords: ["market", "市场", "price", "价格", "finance"] },
+  { tone: "green", icon: PackageSearch, keywords: ["product", "商品", "commodity", "产业"] },
+  { tone: "violet", icon: Cpu, keywords: ["tech", "技术", "digital", "科技"] },
+] as const;
+
+function categoryVisual(category: Category, index: number) {
+  const value = `${category.id} ${category.name}`.toLowerCase();
+  return CATEGORY_VISUALS.find((visual) => visual.keywords.some((keyword) => value.includes(keyword)))
+    ?? CATEGORY_VISUALS[index % CATEGORY_VISUALS.length];
+}
+
 export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +33,9 @@ export function CategoriesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
   const [editing, setEditing] = useState<Category | null>(null);
+  const [activeCategory, setActiveCategory] = useState<Category | null>(null);
+  const [categoryTopics, setCategoryTopics] = useState<Topic[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,8 +67,66 @@ export function CategoriesPage() {
     setConfirmDelete(null);
   };
 
+  const openCategoryTopics = async (category: Category) => {
+    setActiveCategory(category);
+    setTopicsLoading(true);
+    try {
+      const topics = await fetchTopics();
+      setCategoryTopics(topics.filter((topic) => topic.category_id === category.id));
+    } catch (e) {
+      setCategoryTopics([]);
+      setError(e instanceof Error ? e.message : "加载主题失败");
+    }
+    setTopicsLoading(false);
+  };
+
   if (loading) return <div className="loading">加载类别...</div>;
   if (error) return <div className="error-banner">{error}</div>;
+
+  if (activeCategory) {
+    return (
+      <div className="page category-topic-view">
+        <div className="page-header">
+          <div>
+            <button type="button" className="btn btn-ghost btn-sm category-back-button" onClick={() => setActiveCategory(null)}>
+              <ArrowLeft size={16} /> 返回采集类别
+            </button>
+            <h2>{activeCategory.name}</h2>
+            <p className="text-muted">该类别下的采集主题，共 {categoryTopics.length} 个。</p>
+          </div>
+        </div>
+
+        {topicsLoading ? <div className="loading">加载主题...</div> : categoryTopics.length === 0 ? (
+          <div className="empty-state">
+            <FolderKanban size={26} />
+            <h3>该类别尚未关联主题</h3>
+            <p>请在主题管理中编辑主题，并将其归入“{activeCategory.name}”。</p>
+          </div>
+        ) : (
+          <div className="category-topic-list" aria-label={`${activeCategory.name} 的主题列表`}>
+            {categoryTopics.map((topic) => (
+              <article key={topic.id} className="category-topic-row">
+                <div className="category-topic-row-main">
+                  <strong>{topic.name}</strong>
+                  <span>{topic.description || "未填写主题说明"}</span>
+                  {topic.keywords.length > 0 && (
+                    <div className="category-topic-keywords">
+                      {topic.keywords.slice(0, 6).map((keyword) => <span key={keyword}>{keyword}</span>)}
+                    </div>
+                  )}
+                </div>
+                <div className="category-topic-row-stats">
+                  <span className={topic.is_active ? "chip chip--green" : "chip"}>{topic.is_active ? "启用" : "停用"}</span>
+                  <strong>{topic.current_item_count.toLocaleString()}</strong>
+                  <span>已采集</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -57,38 +135,51 @@ export function CategoriesPage() {
           <h2>采集类别</h2>
           <p className="text-muted">树状结构顶层：类别 → 主题 → 批次 → 条目</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={14} /> 新建类别
-        </button>
       </div>
 
-      <div className="card-list">
-        {categories.map((cat) => (
-          <article key={cat.id} className="card-item card-item--compact">
-            <div className="card-item-header">
-              <div className="card-item-title">
-                <h4><FolderTree size={14} style={{ opacity: 0.5, marginRight: 6 }} />{cat.name}</h4>
-                <span className="text-muted small">{cat.id}</span>
+      <div className="category-tile-grid">
+        {categories.map((category, index) => {
+          const visual = categoryVisual(category, index);
+          const Icon = visual.icon;
+          return (
+            <article
+              key={category.id}
+              className={`category-tile category-tile--${visual.tone} category-tile--browse`}
+              tabIndex={0}
+              onDoubleClick={() => void openCategoryTopics(category)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  void openCategoryTopics(category);
+                }
+              }}
+              aria-label={`双击查看 ${category.name} 下的主题`}
+            >
+              <div className="category-tile-pattern" aria-hidden="true">
+                {Array.from({ length: 9 }, (_, dotIndex) => <i key={dotIndex} />)}
               </div>
-              <div className="card-item-actions">
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(cat)}>
-                  <Edit3 size={12} /> 编辑
-                </button>
-                <button type="button" className="btn btn-sm btn-danger" onClick={() => handleDelete(cat.id)}>
-                  <Trash2 size={12} /> 删除
-                </button>
+              <div className="category-tile-topline">
+                <span className="category-tile-icon"><Icon size={25} /></span>
+                <div className="category-tile-actions">
+                  <button type="button" className="btn-icon" title={`编辑 ${category.name}`} onClick={(event) => { event.stopPropagation(); setEditing(category); }} onDoubleClick={(event) => event.stopPropagation()}><Edit3 size={14} /></button>
+                  <button type="button" className="btn-icon category-tile-delete" title={`删除 ${category.name}`} onClick={(event) => { event.stopPropagation(); handleDelete(category.id); }} onDoubleClick={(event) => event.stopPropagation()}><Trash2 size={14} /></button>
+                </div>
               </div>
-            </div>
-            {cat.description && (
-              <div className="card-item-meta card-item-meta--compact">
-                <span className="meta-inline text-muted">{cat.description}</span>
+              <div className="category-tile-copy">
+                <h3>{category.name}</h3>
+                <span>{category.id}</span>
+                <p>{category.description || "用于组织主题、批次和采集条目"}</p>
               </div>
-            )}
-          </article>
+            </article>
+          );
+        })}
+        {Array.from({ length: categories.length < 9 ? 9 - categories.length : 1 }, (_, index) => (
+          <button key={`add-category-${index}`} type="button" className="category-tile category-tile--add" onClick={() => setShowCreate(true)}>
+            <span className="category-tile-add-icon"><Plus size={30} /></span>
+            <strong>新建类别</strong>
+            <span>添加新的采集主题分组</span>
+          </button>
         ))}
-        {categories.length === 0 && (
-          <div className="empty"><FolderTree size={24} style={{ opacity: 0.3, margin: "0 auto 8px" }} /><p>暂无类别。点击"新建类别"创建第一个采集类别。</p></div>
-        )}
       </div>
 
       {(showCreate || editing) && (
@@ -119,7 +210,7 @@ function CategoryForm({ category, onSave, onClose }: {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>{category ? "编辑类别" : "新建类别"}</h3>
         <div className="form-grid">
           <label>ID <input value={id} onChange={(e) => setId(e.target.value)} disabled={!!category} placeholder="trade-policy" /></label>

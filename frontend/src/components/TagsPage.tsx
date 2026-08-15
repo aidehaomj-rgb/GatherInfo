@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
-import { fetchTags, fetchTagStats, updateTag, deleteTag, mergeTags, fetchItems } from "../api";
-import type { Tag, TagStats, CollectedItem } from "../types";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { fetchTags, updateTag, deleteTag, mergeTags, fetchItems } from "../api";
+import type { Tag, CollectedItem } from "../types";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import { EChart } from "./EChart";
-import { Trash2, Edit3, GitMerge, List } from "lucide-react";
+import { Trash2, Edit3, GitMerge, List, Search, Tags } from "lucide-react";
+import { formatBeijingDateTime, formatBeijingDate } from "../utils/date";
 
 /** Namespace → 中文显示名 (回退到原始 namespace)。 */
 const NS_LABELS: Record<string, string> = {
@@ -22,10 +22,11 @@ const tagLabel = (t: { label?: string | null; value: string }): string => t.labe
 
 export function TagsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
-  const [stats, setStats] = useState<TagStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ns, setNs] = useState("");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"count" | "name" | "recent">("count");
   const [editing, setEditing] = useState<Tag | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   // Merge controls
@@ -41,18 +42,14 @@ export function TagsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [t, s] = await Promise.all([
-        fetchTags(ns || undefined, 200),
-        fetchTagStats(),
-      ]);
+      const t = await fetchTags(undefined, 1000);
       setTags(t);
-      setStats(s);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     }
     setLoading(false);
-  }, [ns]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -92,7 +89,6 @@ export function TagsPage() {
     try {
       await deleteTag(tagId);
       setTags((prev) => prev.filter((t) => t.id !== tagId));
-      setStats((prev) => prev.filter((s) => s.tag_id !== tagId));
     } catch (e) {
       alert(e instanceof Error ? e.message : "删除失败");
     }
@@ -110,71 +106,69 @@ export function TagsPage() {
     }
   };
 
-  const namespaces = [...new Set(tags.map((t) => t.namespace))].sort();
-
-  const bubbleData = stats.slice(0, 30).map((s, i) => ({
-    name: s.value,
-    value: [i % 5, s.item_count, s.tag_id, s.item_count],
-    symbolSize: Math.max(8, Math.min(60, Math.sqrt(s.item_count) * 6)),
-    itemStyle: { color: COLORS[i % COLORS.length] },
-  }));
+  const namespaceCounts = useMemo(() => tags.reduce<Record<string, number>>((counts, tag) => ({
+    ...counts, [tag.namespace]: (counts[tag.namespace] || 0) + 1,
+  }), {}), [tags]);
+  const namespaces = useMemo(() => Object.keys(namespaceCounts).sort((a, b) => namespaceCounts[b] - namespaceCounts[a]), [namespaceCounts]);
+  const visibleTags = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    const rows = tags.filter((tag) => (!ns || tag.namespace === ns)
+      && (!needle || `${tagLabel(tag)} ${tag.value} ${nsLabel(tag.namespace)}`.toLocaleLowerCase().includes(needle)));
+    return [...rows].sort((a, b) => sort === "count"
+      ? b.item_count - a.item_count || tagLabel(a).localeCompare(tagLabel(b), "zh-CN")
+      : sort === "recent"
+        ? String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || ""))
+        : tagLabel(a).localeCompare(tagLabel(b), "zh-CN"));
+  }, [tags, ns, query, sort]);
 
   if (loading) return <div className="loading">加载标签...</div>;
   if (error) return <div className="error-banner">{error}</div>;
 
   return (
-    <div className="page">
-      <div className="page-header">
+    <div className="page tags-page">
+      <div className="page-header tags-page-header">
         <div>
           <h2>标签系统</h2>
-          <p className="text-muted">标签是信息的核心结构化维度。每条信息自动打标签后可按标签过滤和统计。</p>
+          <p className="text-muted">统一查看、整理和合并信息标签</p>
         </div>
+        <div className="tags-page-summary"><Tags size={16} /><strong>{tags.length}</strong><span>个标签</span></div>
       </div>
 
-      <div className="chip-row">
-        <button type="button" className={`chip ${!ns ? "chip--blue" : ""}`} onClick={() => setNs("")}>全部 ({tags.length})</button>
-        {namespaces.map((n) => (
-          <button type="button" key={n} className={`chip ${ns === n ? "chip--blue" : ""}`} onClick={() => setNs(n)}>
-            {nsLabel(n)}
-          </button>
-        ))}
-      </div>
+      <section className="tags-workspace">
+        <nav className="tags-namespaces" aria-label="标签分类">
+          <button type="button" className={!ns ? "active" : ""} onClick={() => setNs("")}><span>全部标签</span><strong>{tags.length}</strong></button>
+          {namespaces.map((name) => <button type="button" key={name} className={ns === name ? "active" : ""} onClick={() => setNs(name)}><span>{nsLabel(name)}</span><strong>{namespaceCounts[name]}</strong></button>)}
+        </nav>
 
-      <div className="panel">
-        <h3>标签云</h3>
-        <div className="tag-cloud">
-          {tags.map((t) => (
-            <div key={t.id} className="tag-chip-group">
-              {t.color && <span className="tag-dot" style={{ background: t.color }} />}
-              <span
-                className="tag-chip"
-                title={`${nsLabel(t.namespace)} · ${t.value} — ${t.item_count} 条 | 点击编辑`}
-                onClick={() => setEditing(t)}
-                style={{ cursor: "pointer" }}
-              >
-                {tagLabel(t)}
-                <em>{t.item_count}</em>
-              </span>
-              <button type="button" className="tag-chip-action" onClick={() => setEditing(t)} title="编辑标签">
-                <Edit3 size={10} />
-              </button>
-              <button type="button" className="tag-chip-action" onClick={() => handleDelete(t.id, t.value)} disabled={deleting === t.id} title="删除标签">
-                <Trash2 size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
+        <div className="tags-main">
+          <div className="tags-toolbar">
+            <label className="tags-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标签" /></label>
+            <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} aria-label="标签排序">
+              <option value="count">按使用量</option><option value="recent">按最近出现</option><option value="name">按名称</option>
+            </select>
+            <span>{visibleTags.length} 项</span>
+          </div>
 
-      <div className="panel">
-        <h3><GitMerge size={14} /> 合并标签</h3>
-        <p className="text-muted small">将源标签的所有条目关系转移到目标标签，随后删除源标签。常用于消除重复或近义标签。</p>
-        <div className="gen-controls-row">
+          <div className="tag-stats-table tags-table">
+            <table><thead><tr><th>标签</th><th>分类</th><th>使用量</th><th>最近出现</th><th aria-label="操作" /></tr></thead>
+            <tbody>{visibleTags.map((tag) => <tr key={tag.id}>
+              <td><div className="tag-name-cell"><i style={{ background: tag.color || "var(--accent)" }} /><button type="button" onClick={() => setDetailTag(tag)}>{tagLabel(tag)}</button>{tag.label && tag.label !== tag.value && <small>{tag.value}</small>}</div></td>
+              <td><span className="tag-namespace-badge">{nsLabel(tag.namespace)}</span></td>
+              <td><strong>{tag.item_count}</strong></td>
+              <td className="text-muted small">{tag.last_seen_at ? formatBeijingDateTime(tag.last_seen_at) : "-"}</td>
+              <td><div className="tag-table-actions"><button type="button" className="btn-icon" onClick={() => setDetailTag(tag)} title="查看条目"><List size={13} /></button><button type="button" className="btn-icon" onClick={() => setEditing(tag)} title="编辑"><Edit3 size={13} /></button><button type="button" className="btn-icon tag-delete-action" onClick={() => handleDelete(tag.id, tag.value)} disabled={deleting === tag.id} title="删除"><Trash2 size={13} /></button></div></td>
+            </tr>)}</tbody></table>
+            {!visibleTags.length && <div className="tags-empty">没有符合条件的标签</div>}
+          </div>
+
+          <details className="tags-merge-panel">
+            <summary><span><GitMerge size={14} />合并重复标签</span><small>将源标签关系转移到目标标签</small></summary>
+            <div className="tags-merge-controls">
           <div className="gen-field">
             <label className="gen-label" htmlFor="merge-src">源标签 (将被删除)</label>
             <select id="merge-src" value={mergeSource} onChange={(e) => setMergeSource(e.target.value)}>
               <option value="">-- 请选择 --</option>
-              {tags.map((t) => (
+              {visibleTags.map((t) => (
                 <option key={t.id} value={t.id}>{nsLabel(t.namespace)}:{tagLabel(t)} ({t.item_count})</option>
               ))}
             </select>
@@ -183,7 +177,7 @@ export function TagsPage() {
             <label className="gen-label" htmlFor="merge-tgt">目标标签 (保留)</label>
             <select id="merge-tgt" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
               <option value="">-- 请选择 --</option>
-              {tags.map((t) => (
+              {visibleTags.map((t) => (
                 <option key={t.id} value={t.id}>{nsLabel(t.namespace)}:{tagLabel(t)} ({t.item_count})</option>
               ))}
             </select>
@@ -192,57 +186,11 @@ export function TagsPage() {
             <GitMerge size={14} className={merging ? "spin" : ""} />
             {merging ? "合并中..." : "合并"}
           </button>
+            </div>
+            {mergeMsg && <div className="toast" onClick={() => setMergeMsg(null)}>{mergeMsg}</div>}
+          </details>
         </div>
-        {mergeMsg && <div className="toast" onClick={() => setMergeMsg(null)}>{mergeMsg}</div>}
-      </div>
-
-      <div className="panel">
-        <h3>标签管理 ({tags.length})</h3>
-        <div className="tag-stats-table">
-          <table>
-            <thead>
-              <tr>
-                <th>标签</th>
-                <th>命名空间</th>
-                <th>条目数</th>
-                <th>颜色</th>
-                <th>最后出现</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tags.map((t) => (
-                <tr key={t.id}>
-                  <td><strong>{tagLabel(t)}</strong>{t.label && t.label !== t.value && <span className="text-muted small"> ({t.value})</span>}</td>
-                  <td><span className="chip">{nsLabel(t.namespace)}</span></td>
-                  <td>{t.item_count}</td>
-                  <td>
-                    {t.color ? (
-                      <span className="tag-dot" style={{ background: t.color, display: "inline-block", width: 16, height: 16, borderRadius: 4, verticalAlign: "middle" }} />
-                    ) : <span className="text-muted">-</span>}
-                  </td>
-                  <td className="text-muted small">
-                    {t.last_seen_at ? new Date(t.last_seen_at).toLocaleString("zh") : "-"}
-                  </td>
-                  <td>
-                    <div className="tag-table-actions">
-                      <button type="button" className="btn-icon" onClick={() => setDetailTag(t)} title="查看最近条目">
-                        <List size={12} />
-                      </button>
-                      <button type="button" className="btn-icon" onClick={() => setEditing(t)} title="编辑">
-                        <Edit3 size={12} />
-                      </button>
-                      <button type="button" className="btn-icon" onClick={() => handleDelete(t.id, t.value)} disabled={deleting === t.id} title="删除" style={{ color: "var(--red)" }}>
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </section>
 
       {/* Tag Edit Modal */}
       {editing && (
@@ -263,7 +211,6 @@ export function TagsPage() {
     </div>
   );
 }
-
 // ── Tag Detail Modal ──────────────────────────────────────────────────
 
 function TagDetailModal({ tag, onClose }: { tag: Tag; onClose: () => void }) {
@@ -300,7 +247,7 @@ function TagDetailModal({ tag, onClose }: { tag: Tag; onClose: () => void }) {
                 )}
                 <span className="text-muted small">
                   {it.source_id}
-                  {it.collected_at && ` · ${new Date(it.collected_at).toLocaleDateString("zh")}`}
+                    {it.collected_at && ` · ${formatBeijingDate(it.collected_at)}`}
                 </span>
               </li>
             ))}
@@ -333,7 +280,7 @@ function TagEditModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>编辑标签</h3>
         <p className="text-muted small" style={{ marginBottom: 16 }}>ID: {tag.id}</p>
         <div className="form-grid">
@@ -372,7 +319,3 @@ function TagEditModal({
   );
 }
 
-const COLORS = [
-  "#3b82f6","#22c55e","#f59e0b","#8b5cf6","#ec4899",
-  "#06b6d4","#f97316","#14b8a6","#e11d48","#8b5cf6",
-];

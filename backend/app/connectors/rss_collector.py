@@ -6,6 +6,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 from datetime import timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urljoin
 
 import httpx
 
@@ -22,7 +23,8 @@ class RSSCollector(BaseCollector):
     channel = "rss"
 
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
-        if not self.config.base_url:
+        feed_url = _feed_url(self.config)
+        if not feed_url:
             return self._error("base_url not configured")
 
         errors: list[str] = []
@@ -33,7 +35,7 @@ class RSSCollector(BaseCollector):
             follow_redirects=True,
         ) as client:
             try:
-                resp = await client.get(self.config.base_url)
+                resp = await client.get(feed_url)
                 resp.raise_for_status()
                 raw = resp.text
             except Exception as exc:
@@ -70,6 +72,16 @@ def _headers() -> dict:
     }
 
 
+def _feed_url(config: SourceConfig) -> str:
+    base = (config.base_url or "").strip()
+    endpoint = (config.api_endpoint or "").strip()
+    if endpoint.startswith("http"):
+        return endpoint
+    if base and endpoint:
+        return urljoin(base if base.endswith("/") else base + "/", endpoint.lstrip("/"))
+    return base or endpoint
+
+
 def _parse_feed(root: ET.Element) -> list[FetchItem]:
     items: list[FetchItem] = []
 
@@ -99,13 +111,7 @@ def _parse_feed(root: ET.Element) -> list[FetchItem]:
         desc = _text(elem, "description")
         pub = _text(elem, "pubDate")
         cat = _text(elem, "category")
-        published = None
-        if pub:
-            try:
-                published = parsedate_to_datetime(pub).replace(
-                    tzinfo=timezone.utc).isoformat()
-            except Exception:
-                pass
+        published = _parse_published_at(pub)
         if title:
             items.append(FetchItem(
                 title=title, content=desc, url=link,
@@ -135,6 +141,20 @@ def _guess_lang(elem: ET.Element) -> str:
         if val:
             return val[:2]
     return "en"
+
+
+def _parse_published_at(value: str) -> str | None:
+    if not value:
+        return None
+    try:
+        published = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    else:
+        published = published.astimezone(timezone.utc)
+    return published.isoformat()
 
 
 def _filter_by_keywords(items: list[FetchItem], keywords: list[str]) -> list[FetchItem]:

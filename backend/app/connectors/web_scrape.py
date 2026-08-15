@@ -15,6 +15,7 @@ from app.connectors.base import (
     JobStatus, SourceConfig, register_collector,
 )
 from app.connectors._helpers import detect_lang, infer_category, build_tags
+from app.web_content_extractor import extract_article_text
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class WebScrapeCollector(BaseCollector):
 
         cfg = self.config
         ac = cfg.auth_config or {}
-        urls = _build_urls(cfg.base_url, ac.get("max_pages", 5))
+        urls = _build_urls(cfg.base_url, ac.get("max_pages", 1))
 
         items: list[FetchItem] = []
         errors: list[str] = []
@@ -40,6 +41,7 @@ class WebScrapeCollector(BaseCollector):
             timeout=cfg.timeout_seconds,
             headers=_scrape_headers(),
             follow_redirects=True,
+            verify=ac.get("verify_ssl", True),
         ) as client:
             for url in urls:
                 if len(items) >= max_items:
@@ -54,15 +56,32 @@ class WebScrapeCollector(BaseCollector):
                         if len(items) >= max_items:
                             break
 
-                        title_el = el.select_one("a[href], h2 a, h3 a, .title a, h1, h2, h3, .title")
+                        title_el = el if el.name == "a" and el.get("href") else el.select_one(
+                            "a[href], h2 a, h3 a, .title a, h1, h2, h3, .title")
                         title = title_el.get_text(strip=True) if title_el else ""
                         if not title or len(title) < 4:
                             continue
 
-                        link_el = el.select_one("a[href]")
+                        link_el = el if el.name == "a" and el.get("href") else el.select_one("a[href]")
                         href = link_el.get("href", "") if link_el else ""
                         if href and not href.startswith("http"):
                             href = urljoin(cfg.base_url, href)
+
+                        title_include = ac.get("title_include_pattern")
+                        if title_include and not re.search(title_include, title):
+                            continue
+
+                        title_exclude = ac.get("title_exclude_pattern")
+                        if title_exclude and re.search(title_exclude, title):
+                            continue
+
+                        href_include = ac.get("href_include_pattern")
+                        if href_include and not re.search(href_include, href or ""):
+                            continue
+
+                        href_exclude = ac.get("href_exclude_pattern")
+                        if href_exclude and re.search(href_exclude, href or ""):
+                            continue
 
                         if href in seen:
                             continue
@@ -73,32 +92,32 @@ class WebScrapeCollector(BaseCollector):
                         if date_el:
                             dt_text = date_el.get("datetime", "") or date_el.get_text(strip=True)
                             published = _parse_date(dt_text)
-
-                        if not _matches(title, "", keywords):
-                            continue
+                        if not published:
+                            published = _parse_date(el.get_text(" ", strip=True))
+                        if not published and el.name == "a" and el.parent:
+                            published = _parse_date(el.parent.get_text(" ", strip=True))
 
                         content = ""
+                        summary = ""
                         if href and ac.get("fetch_detail", True):
                             try:
                                 detail_resp = await client.get(href)
-                                detail_soup = BeautifulSoup(detail_resp.text, "lxml")
-                                content_sel = ac.get(
-                                    "content_selector",
-                                    "article, .content, .article-content, #content, main")
-                                content_el = detail_soup.select_one(content_sel)
-                                if content_el:
-                                    for t in content_el.select("script, style, nav, .nav"):
-                                        t.decompose()
-                                    content = content_el.get_text(
-                                        separator="\n", strip=True)[:5000]
+                                extracted = extract_article_text(detail_resp.text, href)
+                                content = extracted.get("content", "")
+                                summary = extracted.get("summary", "")
+                                if not published and extracted.get("published_at"):
+                                    published = _parse_date(extracted["published_at"])
                                 await asyncio.sleep(
                                     1.0 / cfg.rate_limit_rps if cfg.rate_limit_rps else 1.0)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.warning("Detail fetch failed for %s: %s", href[:80], exc)
+
+                        if not ac.get("allow_unfiltered_keywords") and not _matches(title, content, keywords):
+                            continue
 
                         items.append(FetchItem(
                             title=title, content=content, url=href,
-                            summary=(content or title)[:500],
+                            summary=summary or (content[:500] if content else title[:500]),
                             published_at=published,
                             language=detect_lang(f"{title} {content}"),
                             category=infer_category(title, content),
@@ -170,7 +189,11 @@ _CN_PATTERNS = [
 def _parse_date(text: str) -> str | None:
     if not text:
         return None
-    for pat, _ in _CN_PATTERNS:
+    patterns = [
+        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})",
+        r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日",
+    ]
+    for pat in patterns:
         m = re.search(pat, text)
         if m:
             try:

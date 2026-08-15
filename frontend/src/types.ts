@@ -1,9 +1,12 @@
 // GatherInfo — types for the collection platform
+import type { SourceGroupId } from "./sourceGroups";
+
 export interface Source {
   id: string;
   name: string;
   description: string | null;
   channel: string;
+  source_group?: SourceGroupId | null;
   is_active: boolean;
   is_configured: boolean;
   base_url: string | null;
@@ -32,11 +35,14 @@ export interface Topic {
   keywords: string[];
   keyword_tags: KeywordTag[] | null;
   description_prompt: string | null;
+  ai_research_model_id: string | null;
   synonyms: string[] | null;
   categories: string[] | null;
   focus_countries: string[] | null;
   focus_languages: string[] | null;
   source_ids: string[] | null;
+  collection_model_ids: string[] | null;
+  prompt_template_ids: string[] | null;
   target_urls: string[] | null;
   auto_tag_rules: AutoTagRule[] | null;
   collect_window_days: number;
@@ -46,13 +52,48 @@ export interface Topic {
   is_configured: boolean;
   auto_report: boolean;
   auto_report_model_id: string | null;
+  auto_report_type: "analytical" | "archive";
   last_collection_run_id: string | null;
   source_names: string[];
   total_items_collected: number;
+  current_item_count: number;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface ResearchRound {
+  round_number: number;
+  status: string;
+  items_new: number;
+  run_ids: string[];
+  error_log: string | null;
+}
+
+export interface ResearchJob {
+  id: string;
+  topic_id: string;
+  objective: string;
+  model_id: string | null;
+  status: "pending" | "running" | "completed" | "failed";
+  max_rounds: number;
+  current_round: number;
+  target_items: number;
+  result_count: number;
+  result_item_ids: string[];
+  progress: Array<Record<string, unknown>>;
+  error_log: string | null;
+  created_at: string;
+  completed_at: string | null;
+  rounds: ResearchRound[];
+  acceptance_policy: Record<string, number>;
+  acceptance_result: {
+    passed?: boolean;
+    metrics?: Record<string, number>;
+    checks?: Record<string, boolean>;
+    gaps?: string[];
+  };
 }
 
 export interface KeywordTag {
@@ -67,14 +108,21 @@ export interface AutoTagRule {
 }
 
 export interface CollectedItem {
-  id: string;
-  source_id: string;
-  run_id: string | null;
-  title: string;
+ id: string;
+ source_id: string;
+ run_id: string | null;
+  topic_id: string | null;
+ title: string;
+  title_zh: string | null;
   content: string | null;
+  content_zh: string | null;
   summary: string | null;
+  summary_zh: string | null;
   url: string | null;
   language: string | null;
+  translation_status: string | null;
+  enforcement_review: Record<string, unknown> | null;
+  quality_review: Record<string, unknown> | null;
   category: string | null;
   tags: TagRef[];
   entities: Record<string, unknown> | null;
@@ -151,6 +199,12 @@ export interface DashboardData {
     total_tags: number;
   };
   categories: { category: string; count: number }[];
+  topic_stats: {
+    topic_id: string;
+    topic_name: string;
+    item_count: number;
+    last_collected_at: string | null;
+  }[];
   languages: { language: string; count: number }[];
   top_tags: { id: string; namespace: string; value: string; count: number }[];
   source_health: {
@@ -178,6 +232,20 @@ export interface CollectRun {
   error_log: string[] | null;
 }
 
+export interface RunFailure {
+  run_id: string;
+  batch_id: string | null;
+  source_id: string;
+  source_name: string;
+  source_channel: string;
+  errors: string[];
+  category: string;
+  repairable: boolean;
+  recurring_failures: number;
+  recommendation: string;
+  suggested_action: "edit_source" | "delete_candidate" | string;
+}
+
 export interface CollectResult {
   run: CollectRun;
   total_items: number;
@@ -202,12 +270,30 @@ export interface ItemList {
   page_size: number;
 }
 
+export interface InventoryRow {
+  id: string;
+  label: string;
+  count: number;
+  latest_at: string | null;
+  topic_id?: string | null;
+}
+
+export interface ItemInventory {
+  total_items: number;
+  topics: InventoryRow[];
+  categories: InventoryRow[];
+  batches: InventoryRow[];
+  sources: InventoryRow[];
+  statuses: InventoryRow[];
+  generated_at: string | null;
+}
+
 // ── Model Configuration ────────────────────────────────────────────────
 
 export interface ModelConfig {
   id: string;
   name: string;
-  provider: string;        // ollama | openai | lmstudio | custom
+  provider: string;        // ollama | ollama_cloud | openai | lmstudio | custom
   base_url: string | null;
   api_key: string | null;
   model_name: string;
@@ -236,6 +322,7 @@ export interface Report {
   topic_id: string;
   topic_name?: string;
   title: string;
+  report_type: "analytical" | "archive";
   content: string | null;
   summary: string | null;
   status: string;           // pending | generating | completed | failed
@@ -288,6 +375,136 @@ export interface AutoDiscoverResult {
   providers: DiscoveredProvider[];
 }
 
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  is_active: boolean;
+  topic_count: number;
+  linked_experts: string[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SupplyChainDashboard {
+  country: string;
+  investigation_id?: string | null;
+  entities: number;
+  cases: number;
+  shipments: number;
+  evidence: number;
+  open_source_evidence: number;
+  reportable: number;
+  reports: number;
+}
+
+export interface SupplyChainInvestigation {
+  id: string;
+  country: string;
+  name: string;
+  description: string | null;
+  status: string;
+  entity_ids: string[];
+  case_ids: string[];
+  shipment_ids: string[];
+  evidence_ids: string[];
+  open_source_evidence_ids: string[];
+    report_ids: string[];
+    completeness_score: number;
+    completeness_level: string;
+    completeness_details: Record<string, number>;
+    completeness_maximums: Record<string, number>;
+    verification_gaps: string[];
+    created_at: string | null;
+  }
+
+export interface SupplyChainEntity {
+  id: string;
+  name: string;
+  name_zh: string | null;
+  country: string;
+  entity_type: string;
+  aliases: string[];
+  parent_id: string | null;
+  defense_roles: string[];
+  source_url: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface SupplyChainCase {
+  id: string;
+  country: string;
+  title: string;
+  procurement_agency: string | null;
+  procurement_reference: string | null;
+  procurement_date: string | null;
+  supplier_entity_id: string | null;
+  product: string | null;
+  target_program: string | null;
+  source_url: string | null;
+  source_excerpt: string | null;
+  status: string;
+}
+
+export interface SupplyChainShipment {
+  id: string;
+  exporter_name: string;
+  importer_entity_id: string | null;
+  importer_name: string;
+  product: string;
+  hs_code: string | null;
+  shipment_date: string | null;
+  weight_kg: number | null;
+  origin_country: string | null;
+  destination_country: string | null;
+  bill_no: string | null;
+  source_name: string | null;
+  source_url: string | null;
+}
+
+export interface SupplyChainEvidence {
+  id: string;
+  case_id: string;
+  shipment_id: string;
+  relation_type: string;
+  evidence_grade: "A" | "B" | "C";
+  score: number;
+  status: string;
+  reasoning: string | null;
+  model_review: Record<string, unknown> | null;
+  is_reportable: boolean;
+}
+
+export interface SupplyChainOpenSourceEvidence {
+  id: string;
+  case_id: string | null;
+  title: string;
+  source_type: string;
+  source_publisher: string | null;
+  source_url: string;
+  source_excerpt: string | null;
+  verified_facts: Record<string, unknown> | null;
+  evidence_grade: "A" | "B" | "C";
+  status: string;
+  limitations: string[];
+}
+
+export interface SupplyChainReport {
+  id: string;
+  country: string;
+  title: string;
+  case_ids: string[];
+  evidence_ids: string[];
+  model_id: string | null;
+  status: string;
+  content: string | null;
+  summary: string | null;
+  error_log: string | null;
+  generated_at: string | null;
+}
+
 // ── Search Tool Config ─────────────────────────────────────────────────
 
 export interface SearchToolConfig {
@@ -301,6 +518,56 @@ export interface SearchToolConfig {
   is_default: boolean;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface SupplyChainDiscovery {
+  id: string;
+  investigation_id: string | null;
+  status: string;
+  country: string;
+  case_id: string;
+  shipment_id: string;
+  title: string;
+  target_program: string | null;
+  exporter_name: string;
+  importer_name: string;
+  product: string;
+  score: number;
+  evidence_grade: string;
+  verified_facts: Record<string, unknown> | null;
+  review_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface SupplyChainDiscoveryResult {
+  cases_scanned: number;
+  shipments_scanned: number;
+  candidates_matched: number;
+  candidates_created: number;
+  duplicates_skipped?: number;
+  discoveries: SupplyChainDiscovery[];
+  search_errors?: string[];
+  research_trace?: Record<string, unknown>;
+}
+
+export interface MCPToolCatalogItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  kind: "mcp" | "provider";
+  tool_type?: string;
+  is_active: boolean;
+  requires_api_key: boolean;
+  parameter_count?: number;
+  config?: Record<string, unknown>;
+}
+
+export interface MCPToolCatalog {
+  mcp_tools: MCPToolCatalogItem[];
+  providers: MCPToolCatalogItem[];
+  summary: { mcp_count: number; provider_count: number; active_provider_count: number };
 }
 
 // ── List Models Result ───────────────────────────────────────────────
@@ -345,6 +612,15 @@ export interface BatchOut {
   runs: BatchRunOut[];
 }
 
+export interface CollectionProgressEvent {
+  stage: string;
+  status: "running" | "completed" | "failed" | "skipped" | string;
+  message: string;
+  item_title: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ActiveRunOut {
   id: string;
   source_id: string;
@@ -358,6 +634,11 @@ export interface ActiveRunOut {
   started_at: string | null;
   duration_seconds: number | null;
   batch_id: string | null;
+  progress_events: CollectionProgressEvent[];
+  batch_total_sources: number;
+  batch_completed_sources: number;
+  batch_failed_sources: number;
+  batch_active_sources: number;
 }
 
 // ── Notifications ───────────────────────────────────────────────────────
@@ -375,4 +656,77 @@ export interface NotificationConfig {
   last_sent_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+
+// ── YMG-Deep integration ───────────────────────────────────────────────
+export interface YmgEvidenceItem {
+  id: string;
+  title: string;
+  url: string | null;
+  summary: string | null;
+  source: string | null;
+  published_at: string | null;
+  language: string | null;
+}
+
+export interface YmgAnalyzeResponse {
+  analysis_topic: string;
+  evidence_count: number;
+  evidence_digest: string;
+  evidence_items: YmgEvidenceItem[];
+  ymg_session_id: string | null;
+  ymg_status: string;
+  ymg_message: string | null;
+  ymg_base_url: string;
+  material_set_id: string;
+  handoff_run_id: string;
+}
+
+export interface YmgHealthResponse {
+  reachable: boolean;
+  base_url: string;
+  message: string | null;
+}
+
+export interface HaiSeePushResponse {
+  batch_id: string | null;
+  batch_ids: string[];
+  task_ids: string[];
+  status: string;
+  web_url: string;
+  material_set_id: string;
+  handoff_run_id: string;
+}
+
+export interface HaiSeeHealthResponse {
+  reachable: boolean;
+  base_url: string;
+  message: string | null;
+}
+
+export interface HandoffRun {
+  id: string;
+  material_set_id: string;
+  target: "ymg_deep" | "haisee";
+  status: string;
+  remote_session_id: string | null;
+  remote_batch_ids: string[];
+  remote_task_ids: string[];
+  error_message: string | null;
+  created_at: string | null;
+}
+
+export interface MaterialSet {
+  id: string;
+  name: string;
+  topic_id: string | null;
+  report_id: string | null;
+  source_type: string;
+  source_ref_id: string | null;
+  item_ids: string[];
+  item_count: number;
+  is_archived: boolean;
+  created_at: string | null;
+  handoff_runs: HandoffRun[];
 }

@@ -1,5 +1,5 @@
 """Report schemas."""
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 from .common import IsoDT
 
@@ -8,6 +8,7 @@ class ReportOut(BaseModel):
     id: str
     topic_id: str
     title: str
+    report_type: Literal["analytical", "archive"] = "analytical"
     content: str | None = None
     summary: str | None = None
     status: str
@@ -34,15 +35,21 @@ class ReportListOut(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     topic_id: str
+    report_type: Literal["analytical", "archive"] = "analytical"
     model_id: str | None = None
     model_name_override: str | None = None
+    title: str | None = None
     collection_run_id: str | None = None
+    collection_run_ids: list[str] | None = None
+    date_from: str | None = None
+    date_to: str | None = None
     include_content: bool = True
     language: str = "zh"
 
 
 class BatchGenerateRequest(BaseModel):
     topic_ids: list[str] = []
+    report_type: Literal["analytical", "archive"] = "analytical"
     model_id: str | None = None
     model_name_override: str | None = None
     collection_run_ids: list[str] | None = None

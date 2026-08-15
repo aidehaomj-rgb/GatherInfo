@@ -35,6 +35,8 @@ class Topic(Base):
     keyword_tags = Column(JSON, nullable=True)
     auto_tag_rules = Column(JSON, nullable=True)
     source_ids = Column(JSON, nullable=True)
+    collection_model_ids = Column(JSON, nullable=True)
+    prompt_template_ids = Column(JSON, nullable=True)
 
     schedule_cron = Column(String(100), nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
@@ -42,7 +44,9 @@ class Topic(Base):
 
     auto_report = Column(Boolean, default=False)
     auto_report_model_id = Column(String(80), nullable=True)
+    auto_report_type = Column(String(20), default="analytical")
     description_prompt = Column(Text, nullable=True)
+    ai_research_model_id = Column(String(80), nullable=True)
 
     last_run_at = Column(DateTime(timezone=True), nullable=True)
     last_collection_run_id = Column(String(80), nullable=True)
@@ -57,6 +61,22 @@ class Topic(Base):
 
     def __repr__(self):
         return f"<Topic id={self.id} name={self.name}>"
+
+
+class PromptTemplate(Base):
+    """Reusable collection instruction that can be attached to topics."""
+    __tablename__ = "prompt_templates"
+
+    id = Column(String(80), primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    content = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    def __repr__(self):
+        return f"<PromptTemplate id={self.id} name={self.name}>"
 
 
 class ScheduleConfig(Base):
@@ -111,6 +131,7 @@ class Report(Base):
     id = Column(String(80), primary_key=True)
     topic_id = Column(String(80), ForeignKey("topics.id"), nullable=False)
     title = Column(String(500), nullable=False)
+    report_type = Column(String(20), default="analytical")
     content = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     status = Column(String(20), default="pending")
@@ -152,6 +173,96 @@ class SearchToolConfig(Base):
         return f"<SearchToolConfig id={self.id} type={self.tool_type}>"
 
 
+class ResearchJob(Base):
+    """Persistent multi-round public-web research task."""
+    __tablename__ = "research_jobs"
+
+    id = Column(String(80), primary_key=True)
+    topic_id = Column(String(80), ForeignKey("topics.id"), nullable=False, index=True)
+    objective = Column(Text, nullable=False)
+    model_id = Column(String(80), nullable=True)
+    status = Column(String(20), default="pending", index=True)
+    max_rounds = Column(Integer, default=3)
+    current_round = Column(Integer, default=0)
+    target_items = Column(Integer, default=10)
+    acceptance_policy = Column(JSON, nullable=True)
+    acceptance_result = Column(JSON, nullable=True)
+    run_ids = Column(JSON, nullable=True)
+    result_item_ids = Column(JSON, nullable=True)
+    progress = Column(JSON, nullable=True)
+    error_log = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ResearchRound(Base):
+    __tablename__ = "research_rounds"
+
+    id = Column(String(100), primary_key=True)
+    job_id = Column(String(80), ForeignKey("research_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    round_number = Column(Integer, nullable=False)
+    prompt = Column(Text, nullable=False)
+    run_ids = Column(JSON, nullable=True)
+    item_ids = Column(JSON, nullable=True)
+    items_new = Column(Integer, default=0)
+    status = Column(String(20), default="pending")
+    error_log = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ResearchCase(Base):
+    __tablename__ = "research_cases"
+    id = Column(String(80), primary_key=True)
+    topic_id = Column(String(80), ForeignKey("topics.id"), nullable=False, index=True)
+    primary_item_id = Column(String(120), ForeignKey("collected_items.id"), nullable=False, unique=True)
+    title = Column(String(500), nullable=False)
+    jurisdiction = Column(String(100), nullable=True)
+    china_relevance = Column(String(30), nullable=True, index=True)
+    verification_status = Column(String(30), default="single_source", index=True)
+    source_count = Column(Integer, default=1)
+    entity_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class ResearchEntity(Base):
+    __tablename__ = "research_entities"
+    id = Column(String(80), primary_key=True)
+    canonical_name = Column(String(500), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)
+    aliases = Column(JSON, nullable=True)
+    identifiers = Column(JSON, nullable=True)
+    confidence = Column(Float, default=0.5)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class ResearchCaseEntity(Base):
+    __tablename__ = "research_case_entities"
+    id = Column(String(100), primary_key=True)
+    case_id = Column(String(80), ForeignKey("research_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_id = Column(String(80), ForeignKey("research_entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(80), nullable=True)
+    evidence_text = Column(Text, nullable=True)
+    source_item_id = Column(String(120), ForeignKey("collected_items.id"), nullable=True)
+    confidence = Column(Float, default=0.5)
+
+
+class ResearchEvidence(Base):
+    __tablename__ = "research_evidence"
+    id = Column(String(100), primary_key=True)
+    case_id = Column(String(80), ForeignKey("research_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id = Column(String(120), ForeignKey("collected_items.id"), nullable=False, index=True)
+    url = Column(String(2000), nullable=False)
+    domain = Column(String(300), nullable=True, index=True)
+    evidence_type = Column(String(50), default="source")
+    quote = Column(Text, nullable=True)
+    is_independent = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+
+
 class SystemConfig(Base):
     """Global system settings — single-row table (id='global')."""
     __tablename__ = "system_config"
@@ -161,6 +272,8 @@ class SystemConfig(Base):
     report_output_dir = Column(String(800), nullable=True)
     report_dir_pattern = Column(String(100), default="%Y-%m-%d")
     report_formats = Column(JSON, default=lambda: ["docx", "pdf"])
+    featured_item_ids = Column(JSON, nullable=True)
+    featured_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utc_now)
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 

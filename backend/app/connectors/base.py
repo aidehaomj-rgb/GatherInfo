@@ -78,6 +78,17 @@ class BaseCollector(ABC):
 
     def __init__(self, config: SourceConfig):
         self.config = config
+        self.window_start: datetime | None = None
+        self.window_end: datetime | None = None
+
+    def set_collection_window(
+        self,
+        window_start: datetime | None,
+        window_end: datetime | None,
+    ) -> None:
+        """Attach a topic publication window for connectors that support server-side filtering."""
+        self.window_start = window_start
+        self.window_end = window_end
 
     @abstractmethod
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
@@ -91,14 +102,22 @@ class BaseCollector(ABC):
     def _new_run_id(self) -> str:
         return f"run-{uuid4().hex[:12]}"
 
-    async def execute(self, run: CollectionRun, keywords: list[str]) -> CollectResult:
+    async def execute(
+        self,
+        run: CollectionRun,
+        keywords: list[str],
+        max_items: int | None = None,
+    ) -> CollectResult:
         """Full lifecycle: fetch → populate run record → return result."""
         start = time.monotonic()
         run.status = JobStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
 
         try:
-            result = await self.fetch(keywords, max_items=self.config.max_items_per_run)
+            result = await self.fetch(
+                keywords,
+                max_items=max_items or self.config.max_items_per_run,
+            )
         except Exception as exc:
             run.status = JobStatus.FAILED
             run.completed_at = datetime.now(timezone.utc)
@@ -117,6 +136,9 @@ class BaseCollector(ABC):
         run.duration_ms = int((time.monotonic() - start) * 1000)
         run.error_log = result.error_log
         run.status = result.status
+        result.run_id = run.id
+        result.source_id = run.source_id
+        result.duration_ms = run.duration_ms
         return result
 
 

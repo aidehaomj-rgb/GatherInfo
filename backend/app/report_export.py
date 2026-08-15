@@ -13,6 +13,7 @@ Design notes:
 from __future__ import annotations
 
 import html as _html
+import logging
 import os
 import re
 from datetime import datetime
@@ -21,20 +22,28 @@ from app.database import DATA_DIR
 from app.models import Report, SystemConfig, Topic
 
 SUPPORTED_FORMATS = ("md", "html", "docx", "pdf")
+logger = logging.getLogger(__name__)
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
-def export_report(report: Report, system: SystemConfig | None, topic: Topic | None) -> dict[str, str]:
+def export_report(
+    report: Report,
+    system: SystemConfig | None,
+    topic: Topic | None,
+    formats: list[str] | None = None,
+) -> dict[str, str]:
     """Render `report` to all configured formats. Returns {format: abs_path}.
 
-    Skips formats whose optional dependency is unavailable (records nothing for them).
+    Existing, valid files are retained. Failed formats are logged and omitted.
     """
-    formats = _resolve_formats(system)
+    target_formats = _resolve_formats(system) if formats is None else _valid_formats(formats)
     title = _resolve_title(report, system, topic)
     safe_title = _safe_filename(title)
 
-    root = (system.report_output_dir if system and system.report_output_dir else None) \
+    root = normalize_report_output_dir(
+        system.report_output_dir if system and system.report_output_dir else None,
+    ) \
         or os.path.join(DATA_DIR, "reports")
     pattern = (system.report_dir_pattern if system and system.report_dir_pattern else "%Y-%m-%d")
     subdir = datetime.now().strftime(pattern)
@@ -42,9 +51,9 @@ def export_report(report: Report, system: SystemConfig | None, topic: Topic | No
     os.makedirs(out_dir, exist_ok=True)
 
     body = report.content or ""
-    out_files: dict[str, str] = {}
+    out_files = valid_output_files(report.output_files)
 
-    for fmt in formats:
+    for fmt in target_formats:
         path = os.path.join(out_dir, f"{safe_title}.{fmt}")
         try:
             if fmt == "md":
@@ -59,10 +68,10 @@ def export_report(report: Report, system: SystemConfig | None, topic: Topic | No
                 continue
             out_files[fmt] = path
         except ImportError:
-            # Optional dependency missing — skip this format silently.
+            logger.warning("Report %s export skipped for %s: optional dependency unavailable", report.id, fmt)
             continue
-        except Exception:
-            # Never let one format failure abort the others.
+        except Exception as exc:
+            logger.exception("Report %s export failed for %s: %s", report.id, fmt, exc)
             continue
 
     report.output_files = out_files
@@ -74,7 +83,37 @@ def export_report(report: Report, system: SystemConfig | None, topic: Topic | No
 
 def _resolve_formats(system: SystemConfig | None) -> list[str]:
     fmts = (system.report_formats if system and system.report_formats else None) or list(SUPPORTED_FORMATS)
-    return [f for f in fmts if f in SUPPORTED_FORMATS]
+    return _valid_formats(fmts)
+
+
+def _valid_formats(formats: list[str]) -> list[str]:
+    return list(dict.fromkeys(str(fmt).lower() for fmt in formats if str(fmt).lower() in SUPPORTED_FORMATS))
+
+
+def normalize_report_output_dir(value: str | None) -> str | None:
+    """Normalize user-entered output paths and tolerate copied shell quotes."""
+    if not value:
+        return None
+    normalized = value.strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
+        normalized = normalized[1:-1].strip()
+    if not normalized:
+        return None
+    expanded = os.path.expanduser(normalized)
+    if os.name == "nt" and expanded.startswith("/"):
+        return expanded
+    return os.path.abspath(expanded)
+
+
+def valid_output_files(files: dict | None) -> dict[str, str]:
+    """Keep only download-ready absolute paths from persisted export metadata."""
+    if not isinstance(files, dict):
+        return {}
+    return {
+        fmt: path for fmt, path in files.items()
+        if fmt in SUPPORTED_FORMATS and isinstance(path, str)
+        and os.path.isabs(path) and os.path.isfile(path)
+    }
 
 
 def _resolve_title(report: Report, system: SystemConfig | None, topic: Topic | None) -> str:

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, or_
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -128,6 +129,33 @@ def delete_notification(notif_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/prune", response_model=dict)
+def prune_notifications(db: Session = Depends(get_db)):
+    """清理测试、无效、未激活的通知配置。"""
+    patterns = [
+        NotificationConfig.name.ilike("%test%"),
+        NotificationConfig.webhook_url.ilike("%example.com%"),
+        NotificationConfig.webhook_url.ilike("%httpbin.org%"),
+        NotificationConfig.webhook_url.ilike("%localhost%"),
+        NotificationConfig.email_to.ilike("%test@example.com%"),
+        NotificationConfig.email_to.ilike("%localhost%"),
+    ]
+    empty = or_(
+        and_(NotificationConfig.channel == "webhook", NotificationConfig.webhook_url == ""),
+        and_(NotificationConfig.channel == "email", NotificationConfig.email_to == ""),
+    )
+    query = db.query(NotificationConfig).filter(
+        or_(NotificationConfig.is_active == False, or_(*patterns), empty)
+    )
+    count = query.count()
+    for cfg in query.all():
+        db.delete(cfg)
+    db.commit()
+    return {"deleted": count}
+
+
+
+
 @router.post("/test", response_model=TestNotificationResponse)
 def test_notification(data: TestNotificationRequest, db: Session = Depends(get_db)):
     cfg = db.query(NotificationConfig).filter(NotificationConfig.id == data.id).first()
@@ -136,14 +164,16 @@ def test_notification(data: TestNotificationRequest, db: Session = Depends(get_d
 
     from app.database import SessionLocal
     sender = NotificationSender(SessionLocal)
-    test_payload = {
-        "event": "test",
-        "subject": f"[GatherInfo Test] Notification: {cfg.name}",
-        "body": "This is a test notification from GatherInfo.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
     try:
-        sender.send("new_items", test_payload)
+        sender.send_single(cfg.id, {
+            "event": "test",
+            "topic_id": cfg.id,
+            "topic_name": cfg.name,
+            "source_id": cfg.id,
+            "source_name": cfg.name,
+            "total_new": 1,
+            "batch_id": None,
+        })
         return TestNotificationResponse(success=True, message=f"Test notification sent via {cfg.channel}")
     except Exception as exc:
         return TestNotificationResponse(success=False, message=str(exc))

@@ -1,5 +1,6 @@
 """Topic business logic."""
 import logging
+import re
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -14,8 +15,8 @@ def _normalize_keywords(keywords: list[str]) -> list[str]:
     for kw in keywords:
         if not kw or not kw.strip():
             continue
-        kw = kw.replace("，", ",").replace("：", ":").replace("；", ";").strip()
-        result.append(kw)
+        parts = re.split(r"[,，;；、]", kw.replace("：", ":"))
+        result.extend(part.strip() for part in parts if part.strip())
     return result
 
 

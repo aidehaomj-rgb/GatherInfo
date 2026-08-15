@@ -1,13 +1,55 @@
 """Tag business logic — query, merge, stats, ensure."""
 import logging
+import re
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models import Tag, item_tags
 
 logger = logging.getLogger(__name__)
+
+_MOJIBAKE_QUESTION_MARKS = re.compile(r"\?{2,}")
+_DATE_WITH_QUESTION_MARKS = re.compile(r"^\d{4}-\d{2}-\d{2}\?+$")
+_PLAIN_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_valid_tag_value(value: object) -> bool:
+    """Return whether a value is meaningful enough to be stored as a tag."""
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip()
+    if len(normalized) < 2:
+        return False
+    return not (
+        _MOJIBAKE_QUESTION_MARKS.search(normalized)
+        or _DATE_WITH_QUESTION_MARKS.fullmatch(normalized)
+        or _PLAIN_DATE.fullmatch(normalized)
+        or "\ufffd" in normalized
+    )
+
+
+def _require_valid_tag_value(value: object) -> str:
+    if not is_valid_tag_value(value):
+        raise HTTPException(422, "标签内容无效或包含乱码")
+    return str(value).strip()
+
+
+def refresh_tag_counts(db: Session, tag_ids: list[str] | None = None) -> None:
+    """Synchronize cached tag counts from the item-tag association table."""
+    counts_query = db.query(item_tags.c.tag_id, func.count(item_tags.c.item_id))
+    if tag_ids:
+        counts_query = counts_query.filter(item_tags.c.tag_id.in_(tag_ids))
+    counts = dict(counts_query.group_by(item_tags.c.tag_id).all())
+
+    tags_query = db.query(Tag)
+    if tag_ids:
+        tags_query = tags_query.filter(Tag.id.in_(tag_ids))
+    for tag in tags_query.all():
+        tag.item_count = int(counts.get(tag.id, 0))
+    db.commit()
 
 
 def list_tags(
@@ -17,6 +59,7 @@ def list_tags(
     limit: int = 100,
 ):
     """List tags with optional namespace filter and sorting."""
+    refresh_tag_counts(db)
     q = db.query(Tag)
     if namespace:
         q = q.filter(Tag.namespace == namespace)
@@ -31,6 +74,7 @@ def list_tags(
 
 def ensure_tag(db: Session, namespace: str, value: str, color: Optional[str] = None) -> Tag:
     """Get or create a tag. Atomically updates item_count on existing tags."""
+    value = _require_valid_tag_value(value)
     tag_id = f"tag-{namespace}-{value}".lower().replace(" ", "-")[:80]
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
@@ -45,6 +89,10 @@ def update_tag(db: Session, tag_id: str, data: dict) -> Tag:
     t = db.query(Tag).filter(Tag.id == tag_id).first()
     if not t:
         raise HTTPException(404, f"Tag not found: {tag_id}")
+    if "value" in data:
+        data = {**data, "value": _require_valid_tag_value(data["value"])}
+    if "label" in data and data["label"] is not None:
+        data = {**data, "label": _require_valid_tag_value(data["label"])}
     for k, v in data.items():
         setattr(t, k, v)
     db.commit()
@@ -106,6 +154,7 @@ def tag_stats(db: Session, limit: int = 50) -> list[dict]:
     """Compute per-tag distribution stats (categories, languages, sources)."""
     from app.collection_schemas import TagStatsOut
 
+    refresh_tag_counts(db)
     tags = db.query(Tag).order_by(Tag.item_count.desc()).limit(limit).all()
     result = []
     for tag in tags:

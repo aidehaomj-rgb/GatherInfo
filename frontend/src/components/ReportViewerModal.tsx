@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 import type { Report } from "../types";
 import { RenderMarkdown } from "./shared/RenderMarkdown";
+import { formatBeijingDateTime } from "../utils/date";
 
 interface Props {
   report: Report;
@@ -27,8 +28,8 @@ export function ReportViewerModal({ report, onClose }: Props) {
           </div>
         </div>
         <div className="report-meta" style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginBottom: 16, padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
-          基于 {report.item_count} 条采集信息
-          {report.generated_at && <> · {new Date(report.generated_at).toLocaleString("zh")}</>}
+          报告快照：生成时基于 {report.item_count} 条采集信息
+          {report.generated_at && <> · {formatBeijingDateTime(report.generated_at)}</>}
           {report.tokens_used > 0 && <> · 使用 {report.tokens_used} tokens</>}
         </div>
         <div className="report-content" style={{ fontSize: "0.85rem", lineHeight: 1.7, maxHeight: "60vh", overflowY: "auto" }}>

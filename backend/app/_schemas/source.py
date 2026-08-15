@@ -7,7 +7,8 @@ class SourceCreate(BaseModel):
     id: str | None = Field(default=None, max_length=80, description="留空则由后端从 name 自动生成")
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
-    channel: str = Field(description="official | rss | commercial | web_scrape | api_search | social | deepweb | manual")
+    channel: str = Field(description="official | rss | commercial | web_scrape | api_search | ai_research | social | deepweb | manual")
+    source_group: str = Field(default="other", min_length=1, max_length=80)
     is_active: bool = True
     base_url: str | None = None
     api_endpoint: str | None = None
@@ -30,6 +31,8 @@ class SourceCreate(BaseModel):
 class SourceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    channel: str | None = None
+    source_group: str | None = Field(default=None, min_length=1, max_length=80)
     is_active: bool | None = None
     base_url: str | None = None
     api_endpoint: str | None = None
@@ -38,6 +41,9 @@ class SourceUpdate(BaseModel):
     api_key: str | None = None
     auth_config: dict | None = None
     rate_limit_rps: float | None = None
+    max_retries: int | None = Field(default=None, ge=0)
+    timeout_seconds: int | None = Field(default=None, gt=0)
+    max_items_per_run: int | None = Field(default=None, gt=0)
     default_keywords: list[str] | None = None
     default_categories: list[str] | None = None
     languages: list[str] | None = None
@@ -48,11 +54,15 @@ class SourceOut(BaseModel):
     name: str
     description: str | None = None
     channel: str
+    source_group: str = "other"
     is_active: bool
     base_url: str | None = None
     api_endpoint: str | None = None
     homepage_url: str | None = None
     api_key: str | None = None
+    rate_limit_rps: float = 1.0
+    timeout_seconds: int = 30
+    max_items_per_run: int = 100
     default_keywords: list | None = None
     default_categories: list | None = None
     languages: list | None = None

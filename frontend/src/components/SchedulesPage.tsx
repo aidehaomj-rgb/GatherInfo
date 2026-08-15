@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, Play, Clock } from "lucide-react";
 import { fetchSchedules, createSchedule, deleteSchedule, runScheduleNow, fetchTopics, fetchSources } from "../api";
 import type { Schedule, Topic, Source } from "../types";
+import { formatBeijingDateTime } from "../utils/date";
 
 // ── Cron utilities ──────────────────────────────────────────────────────────
 
@@ -150,7 +151,7 @@ export function SchedulesPage() {
                   <strong>主题:</strong>{" "}
                   {s.topic_ids.map((tid) => {
                     const t = topics.find((x) => x.id === tid);
-                    return <span key={tid} className="chip">{t?.name || tid} ({t?.total_items_collected ?? 0}条)</span>;
+                    return <span key={tid} className="chip">{t?.name || tid} ({t?.current_item_count ?? 0}条)</span>;
                   })}
                 </div>
               ) : s.topic_ids?.length ? (
@@ -158,8 +159,8 @@ export function SchedulesPage() {
               ) : null}
               <div className="text-muted small">
                 已运行: {s.run_count} 次
-                {s.last_run_at && <> · 最后: {new Date(s.last_run_at).toLocaleString("zh")}</>}
-                {s.next_run_at && <> · 下次: {new Date(s.next_run_at).toLocaleString("zh")}</>}
+                {s.last_run_at && <> · 最后: {formatBeijingDateTime(s.last_run_at)}</>}
+                {s.next_run_at && <> · 下次: {formatBeijingDateTime(s.next_run_at)}</>}
                 {s.last_status && <> · 状态: {s.last_status}</>}
               </div>
             </div>
@@ -243,7 +244,7 @@ function ScheduleForm({ topics, onSave, onClose }: ScheduleFormProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 600 }}>
+      <div className="modal modal--config" onClick={(e) => e.stopPropagation()}>
         <h3>新建周期调度</h3>
 
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -363,7 +364,7 @@ function ScheduleForm({ topics, onSave, onClose }: ScheduleFormProps) {
                   onClick={() => setSelectedTopics((prev) => prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id])}
                 >
                   <strong>{t.name}</strong>
-                  <span className="text-muted small">{t.total_items_collected} 条</span>
+                  <span className="text-muted small">{t.current_item_count} 条</span>
                 </button>
               ))}
               {topics.length === 0 && <span className="text-muted small">暂无主题，请先在主题管理中创建主题。</span>}
