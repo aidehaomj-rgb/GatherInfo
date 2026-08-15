@@ -79,6 +79,32 @@ class TestEnsureTag:
         finally:
             db.close()
 
+    def test_rejects_date_with_mojibake_question_marks(self):
+        from app.services.tag_service import ensure_tag
+        db = SessionLocal()
+        try:
+            try:
+                ensure_tag(db, "portfolio", "2026-08-13????")
+                assert False, "Expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 422
+            assert db.query(Tag).filter(Tag.value == "2026-08-13????").first() is None
+        finally:
+            db.close()
+
+    def test_rejects_plain_date_tag(self):
+        from app.services.tag_service import ensure_tag
+        db = SessionLocal()
+        try:
+            try:
+                ensure_tag(db, "event", "2026-08-13")
+                assert False, "Expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 422
+            assert db.query(Tag).filter(Tag.value == "2026-08-13").first() is None
+        finally:
+            db.close()
+
 
 class TestTagServiceCRUD:
     """Test tag_service update/delete."""
@@ -105,6 +131,21 @@ class TestTagServiceCRUD:
                 assert False, "Expected HTTPException"
             except HTTPException as e:
                 assert e.status_code == 404
+        finally:
+            db.close()
+
+    def test_update_rejects_mojibake_label(self):
+        from app.services.tag_service import ensure_tag, update_tag
+        db = SessionLocal()
+        try:
+            tag = ensure_tag(db, "src", "valid-update-target")
+            db.commit()
+            _created_tag_ids.append(tag.id)
+            try:
+                update_tag(db, tag.id, {"label": "2026-08-13????"})
+                assert False, "Expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 422
         finally:
             db.close()
 
@@ -226,6 +267,11 @@ class TestTagAPI:
         resp = client.get("/api/v1/tags/stats")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+    def test_update_rejects_plain_date_label(self):
+        resp = client.put("/api/v1/tags/category%3Atrade", json={"label": "2026-08-13"})
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "标签内容无效或包含乱码"
 
     def test_merge_tags_api(self):
         from app.services.tag_service import ensure_tag

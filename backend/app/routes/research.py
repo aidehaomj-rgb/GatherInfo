@@ -221,6 +221,12 @@ def list_tool_catalog(db: Session = Depends(get_db)):
         "open_research_case": "案件图谱", "broad_web_search": "广泛搜索",
         "multilingual_news_search": "多语种搜索", "case_image_search": "多模态搜索",
         "official_pdf_search": "附件搜索",
+        "resolve_supply_chain_entity": "供应链核验",
+        "search_supply_chain_contracts": "供应链核验",
+        "search_supply_chain_trade_records": "供应链核验",
+        "deep_search_china_trade_records": "供应链核验",
+        "search_supply_chain_part_numbers": "供应链核验",
+        "verify_supply_chain_end_use": "供应链核验",
     }
     mcp_tools = [
         {"id": tool["name"], "name": tool["name"], "description": tool["description"],

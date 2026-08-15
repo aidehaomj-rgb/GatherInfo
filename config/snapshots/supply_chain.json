@@ -3095,6 +3095,42 @@
       "notes": "司法部称2011—2013年Norton招募企业代为投标，但该公告未列出全部代理公司和对应PIID。"
     },
     {
+      "id": "ent-online-0c3ccb9dbfc4",
+      "name": "Teledyne FLIR",
+      "name_zh": null,
+      "country": "United States",
+      "entity_type": "defense_supplier",
+      "aliases": null,
+      "parent_id": null,
+      "defense_roles": null,
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "notes": "联网供应链专家发现，待人工审核。"
+    },
+    {
+      "id": "ent-online-567e807c4457",
+      "name": "川崎重工业有限公司（Kawasaki Heavy Industries Ltd）",
+      "name_zh": null,
+      "country": "Japan",
+      "entity_type": "defense_supplier",
+      "aliases": null,
+      "parent_id": null,
+      "defense_roles": null,
+      "source_url": "https://news.google.com/rss/articles/CBMifkFVX3lxTFAtTUh1RDYwWGh3c3VJYlpkNkFpSWNaWEhmT0JSSDNSV296eEFYVWpPTzN2X2lsOXVscFBPRHg3NHZPV2NrN2FWYUNjbkx0dzV5dWt0UFBURjZueG1IbUhBdVJMUEJGbHNsTmpZSFA4UnprdW42NDJqMXVfWERtQQ?oc=5",
+      "notes": "联网供应链专家发现，待人工审核。"
+    },
+    {
+      "id": "ent-online-9e77d23a5c4a",
+      "name": "美国海关与边境保护局（U.S. Customs and Border Protection）",
+      "name_zh": null,
+      "country": "United States",
+      "entity_type": "defense_supplier",
+      "aliases": null,
+      "parent_id": null,
+      "defense_roles": null,
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "notes": "联网供应链专家发现，待人工审核。"
+    },
+    {
       "id": "ent-pivotal-electronics-uk",
       "name": "Pivotal Electronics",
       "name_zh": "Pivotal Electronics（英国）",
@@ -4881,6 +4917,54 @@
       "status": "monitoring"
     },
     {
+      "id": "case-online-0c3ccb9dbfc4",
+      "country": "United States",
+      "title": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems",
+      "procurement_agency": "U.S. Customs and Border Protection",
+      "procurement_reference": null,
+      "procurement_date": null,
+      "supplier_entity_id": "ent-online-0c3ccb9dbfc4",
+      "product": "Mobile Surveillance Systems",
+      "target_program": "Mobile Surveillance Systems",
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "source_excerpt": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems",
+      "status": "needs_review"
+    },
+    {
+      "id": "case-online-567e807c4457",
+      "country": "Japan",
+      "title": "待核实国防合同或项目",
+      "procurement_agency": null,
+      "procurement_reference": null,
+      "procurement_date": null,
+      "supplier_entity_id": "ent-online-567e807c4457",
+      "product": "组件",
+      "target_program": null,
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": null,
+      "source_excerpt": null,
+      "status": "needs_review"
+    },
+    {
+      "id": "case-online-9e77d23a5c4a",
+      "country": "United States",
+      "title": "移动监视系统",
+      "procurement_agency": "U.S. Customs and Border Protection",
+      "procurement_reference": null,
+      "procurement_date": null,
+      "supplier_entity_id": "ent-online-9e77d23a5c4a",
+      "product": "移动监视系统",
+      "target_program": "移动监视系统",
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "source_excerpt": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems Business Wire",
+      "status": "needs_review"
+    },
+    {
       "id": "case-rare-earth-salts-dpa-terbium",
       "country": "United States",
       "title": "美国国防部支持Rare Earth Salts扩大氧化铽产能",
@@ -6575,6 +6659,69 @@
       "raw_record": {
         "verification_date": "2026-07-31",
         "scope": "供应链替代趋势记录"
+      }
+    },
+    {
+      "id": "shp-online-0c3ccb9dbfc4",
+      "exporter_name": "待识别中国供应商",
+      "exporter_country": "China",
+      "importer_entity_id": "ent-online-0c3ccb9dbfc4",
+      "importer_name": "Teledyne FLIR",
+      "product": "Mobile Surveillance Systems",
+      "hs_code": null,
+      "shipment_date": null,
+      "weight_kg": null,
+      "quantity": null,
+      "quantity_unit": null,
+      "origin_country": "China",
+      "destination_country": "United States",
+      "bill_no": null,
+      "source_name": "联网公开来源",
+      "source_url": null,
+      "raw_record": {
+        "excerpt": null
+      }
+    },
+    {
+      "id": "shp-online-567e807c4457",
+      "exporter_name": "待识别中国供应商",
+      "exporter_country": "China",
+      "importer_entity_id": "ent-online-567e807c4457",
+      "importer_name": "川崎重工业有限公司（Kawasaki Heavy Industries Ltd）",
+      "product": "组件",
+      "hs_code": null,
+      "shipment_date": null,
+      "weight_kg": null,
+      "quantity": null,
+      "quantity_unit": null,
+      "origin_country": "China",
+      "destination_country": "Japan",
+      "bill_no": "ImportGenius",
+      "source_name": "联网公开来源",
+      "source_url": "https://news.google.com/rss/articles/CBMifkFVX3lxTFAtTUh1RDYwWGh3c3VJYlpkNkFpSWNaWEhmT0JSSDNSV296eEFYVWpPTzN2X2lsOXVscFBPRHg3NHZPV2NrN2FWYUNjbkx0dzV5dWt0UFBURjZueG1IbUhBdVJMUEJGbHNsTmpZSFA4UnprdW42NDJqMXVfWERtQQ?oc=5",
+      "raw_record": {
+        "excerpt": ""
+      }
+    },
+    {
+      "id": "shp-online-9e77d23a5c4a",
+      "exporter_name": "泰德林FLIR（Teledyne FLIR）",
+      "exporter_country": "China",
+      "importer_entity_id": "ent-online-9e77d23a5c4a",
+      "importer_name": "美国海关与边境保护局（U.S. Customs and Border Protection）",
+      "product": "移动监视系统",
+      "hs_code": null,
+      "shipment_date": null,
+      "weight_kg": null,
+      "quantity": null,
+      "quantity_unit": null,
+      "origin_country": "China",
+      "destination_country": "United States",
+      "bill_no": null,
+      "source_name": "联网公开来源",
+      "source_url": null,
+      "raw_record": {
+        "excerpt": null
       }
     },
     {
@@ -12126,6 +12273,58 @@
       ]
     },
     {
+      "id": "ose-online-contract-0c3ccb9dbfc4",
+      "case_id": "case-online-0c3ccb9dbfc4",
+      "title": "国防合同或官方项目证据",
+      "source_type": "official_contract",
+      "source_publisher": null,
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "source_excerpt": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems",
+      "verified_facts": [
+        "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems"
+      ],
+      "evidence_grade": "B",
+      "status": "follow_up",
+      "limitations": [
+        "缺乏贸易记录或提单索引，无法确认目标企业从中国进口相关产品。"
+      ]
+    },
+    {
+      "id": "ose-online-contract-9e77d23a5c4a",
+      "case_id": "case-online-9e77d23a5c4a",
+      "title": "国防合同或官方项目证据",
+      "source_type": "official_contract",
+      "source_publisher": null,
+      "source_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+      "source_excerpt": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems Business Wire",
+      "verified_facts": [
+        "移动监视系统"
+      ],
+      "evidence_grade": "B",
+      "status": "follow_up",
+      "limitations": [
+        "缺乏进口记录/贸易记录"
+      ]
+    },
+    {
+      "id": "ose-online-trade-567e807c4457",
+      "case_id": "case-online-567e807c4457",
+      "title": "中国来源进口或贸易证据",
+      "source_type": "trade_record",
+      "source_publisher": null,
+      "source_url": "https://news.google.com/rss/articles/CBMifkFVX3lxTFAtTUh1RDYwWGh3c3VJYlpkNkFpSWNaWEhmT0JSSDNSV296eEFYVWpPTzN2X2lsOXVscFBPRHg3NHZPV2NrN2FWYUNjbkx0dzV5dWt0UFBURjZueG1IbUhBdVJMUEJGbHNsTmpZSFA4UnprdW42NDJqMXVfWERtQQ?oc=5",
+      "source_excerpt": "",
+      "verified_facts": [
+        "待识别中国供应商",
+        "组件"
+      ],
+      "evidence_grade": "B",
+      "status": "follow_up",
+      "limitations": [
+        "Contract evidence missing for Kawasaki Heavy Industries Ltd."
+      ]
+    },
+    {
       "id": "ose-quadrant-2025-corporate-plea",
       "case_id": "case-us-lead-quadrant-fighter-magnets",
       "title": "Quadrant 2025年公司认罪协议：承认向中国传输受控磁体图纸",
@@ -14001,6 +14200,921 @@
       "summary": "美国正通过DLA战时保障评估和《国防生产法》投资补齐钐、钆等关键稀土能力，但G.E. Chaplin等防务稀土关联主体仍持续采购中国企业产品。福建金龙稀土发运的22,340千克受控氧化钆由C5仓储收货，相关节点与G.E. Chaplin存在人员及历史货物流联系，真实买方和最终用途需继续核查。",
       "error_log": null,
       "generated_at": "2026-07-30T12:26:16.763688"
+    }
+  ],
+  "discovery_candidates": [
+    {
+      "id": "candidate-87e87b19cad9",
+      "country": "India",
+      "case_id": "case-india-rossell-boeing-ah64",
+      "shipment_id": "shp-india-rossell-6847125",
+      "supplier_entity_id": "ent-india-rossell-techsys",
+      "title": "Rossell向波音交付AH-64线束与电气面板",
+      "target_program": "Boeing AH-64 Apache worldwide supply chain",
+      "exporter_name": "Shaoxing Kabletex Import & Export Co., Ltd.",
+      "importer_name": "Rossell Techsys",
+      "product": "Cable/wire P/N 681-097143-005",
+      "score": 80,
+      "evidence_grade": "B",
+      "verified_facts": {
+        "china_origin": true,
+        "same_or_related_importer": true,
+        "procurement_date": "2019-06-10T00:00:00",
+        "shipment_date": "2025-12-12T00:00:00",
+        "product_overlap": true,
+        "date_distance_days": 2377,
+        "mcp_checks": {
+          "entity_resolved": true,
+          "contract_source_verified": true,
+          "trade_batch_verified": true,
+          "part_number_match": false,
+          "matched_part_numbers": [],
+          "end_use_verified": true,
+          "enabled_tools": [
+            "resolve_supply_chain_entity",
+            "search_supply_chain_contracts",
+            "search_supply_chain_part_numbers",
+            "search_supply_chain_trade_records",
+            "verify_supply_chain_end_use"
+          ]
+        }
+      },
+      "status": "rejected",
+      "review_note": null,
+      "investigation_id": null,
+      "reviewed_at": "2026-08-15T09:17:04.304058"
+    },
+    {
+      "id": "candidate-aaa1113d7c5f",
+      "country": "India",
+      "case_id": "case-india-rossell-boeing-ah64",
+      "shipment_id": "shp-india-rossell-5706163",
+      "supplier_entity_id": "ent-india-rossell-techsys",
+      "title": "Rossell向波音交付AH-64线束与电气面板",
+      "target_program": "Boeing AH-64 Apache worldwide supply chain",
+      "exporter_name": "Shaoxing Kabletex Import & Export Co., Ltd.",
+      "importer_name": "Rossell Techsys",
+      "product": "Cable/wire P/N 681-096871-070",
+      "score": 80,
+      "evidence_grade": "B",
+      "verified_facts": {
+        "china_origin": true,
+        "same_or_related_importer": true,
+        "procurement_date": "2019-06-10T00:00:00",
+        "shipment_date": "2025-12-12T00:00:00",
+        "product_overlap": true,
+        "date_distance_days": 2377,
+        "mcp_checks": {
+          "entity_resolved": true,
+          "contract_source_verified": true,
+          "trade_batch_verified": true,
+          "part_number_match": false,
+          "matched_part_numbers": [],
+          "end_use_verified": true,
+          "enabled_tools": [
+            "resolve_supply_chain_entity",
+            "search_supply_chain_contracts",
+            "search_supply_chain_part_numbers",
+            "search_supply_chain_trade_records",
+            "verify_supply_chain_end_use"
+          ]
+        }
+      },
+      "status": "rejected",
+      "review_note": null,
+      "investigation_id": null,
+      "reviewed_at": "2026-08-15T09:17:05.494227"
+    },
+    {
+      "id": "candidate-online-0c3ccb9dbfc4",
+      "country": "United States",
+      "case_id": "case-online-0c3ccb9dbfc4",
+      "shipment_id": "shp-online-0c3ccb9dbfc4",
+      "supplier_entity_id": "ent-online-0c3ccb9dbfc4",
+      "title": "泰莱达·菲力尔获美国海关与边境保护局2880万美元移动监控系统合同",
+      "target_program": "移动监控系统项目",
+      "exporter_name": "待识别中国供应商",
+      "importer_name": "泰莱达·菲力尔（Teledyne FLIR）",
+      "product": "移动监控系统",
+      "score": 70,
+      "evidence_grade": "C",
+      "verified_facts": {
+        "online_research": true,
+        "evidence_status": "contract_only",
+        "contract_evidence_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+        "trade_evidence_url": null,
+        "supporting_urls": [
+          "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+          "http://www.photomet.com.cn/about.html"
+        ],
+        "limitations": [
+          "缺乏贸易记录或提单索引，无法确认目标企业从中国进口相关产品。"
+        ],
+        "research_trace": {
+          "configured_rounds": 1,
+          "initial_searches": 3,
+          "follow_up_queries": [],
+          "rounds": [],
+          "sources_found": 25,
+          "sources_read": 9,
+          "method": "multi_round_online_evidence_research",
+          "discovery_paths": [
+            "trade_to_defense",
+            "defense_to_trade",
+            "identity_product_time_bridge"
+          ],
+          "trade_year_priority": 2026,
+          "china_trade_signal_count": 6,
+          "military_use_signal_count": 3,
+          "candidate_threshold": "双源闭合优先；单边强来源仅作为C级待补证线索"
+        },
+        "original_fields": {
+          "importer_name": "Teledyne FLIR",
+          "exporter_name": "待识别中国供应商",
+          "product": "Mobile Surveillance Systems",
+          "contract_title": "Teledyne FLIR Defense Awarded $28.8 Million Contract by U.S. Customs and Border Protection for Mobile Surveillance Systems",
+          "target_program": "Mobile Surveillance Systems"
+        },
+        "evidence_gap": "待补中国进口记录、提单或中国供应商证据"
+      },
+      "status": "pending",
+      "review_note": null,
+      "investigation_id": null,
+      "reviewed_at": null
+    },
+    {
+      "id": "candidate-online-567e807c4457",
+      "country": "Japan",
+      "case_id": "case-online-567e807c4457",
+      "shipment_id": "shp-online-567e807c4457",
+      "supplier_entity_id": "ent-online-567e807c4457",
+      "title": "待核实国防合同或项目",
+      "target_program": null,
+      "exporter_name": "待识别中国供应商",
+      "importer_name": "川崎重工业有限公司（Kawasaki Heavy Industries Ltd）",
+      "product": "组件",
+      "score": 60,
+      "evidence_grade": "C",
+      "verified_facts": {
+        "online_research": true,
+        "evidence_status": "trade_only",
+        "contract_evidence_url": null,
+        "trade_evidence_url": "https://news.google.com/rss/articles/CBMifkFVX3lxTFAtTUh1RDYwWGh3c3VJYlpkNkFpSWNaWEhmT0JSSDNSV296eEFYVWpPTzN2X2lsOXVscFBPRHg3NHZPV2NrN2FWYUNjbkx0dzV5dWt0UFBURjZueG1IbUhBdVJMUEJGbHNsTmpZSFA4UnprdW42NDJqMXVfWERtQQ?oc=5",
+        "supporting_urls": [
+          "https://news.google.com/rss/articles/CBMifkFVX3lxTFAtTUh1RDYwWGh3c3VJYlpkNkFpSWNaWEhmT0JSSDNSV296eEFYVWpPTzN2X2lsOXVscFBPRHg3NHZPV2NrN2FWYUNjbkx0dzV5dWt0UFBURjZueG1IbUhBdVJMUEJGbHNsTmpZSFA4UnprdW42NDJqMXVfWERtQQ?oc=5"
+        ],
+        "limitations": [
+          "Contract evidence missing for Kawasaki Heavy Industries Ltd."
+        ],
+        "original_fields": {
+          "importer_name": "Kawasaki Heavy Industries Ltd",
+          "exporter_name": "待识别中国供应商",
+          "product": "components",
+          "contract_title": "待核实国防合同或项目",
+          "target_program": null
+        },
+        "research_trace": {
+          "configured_rounds": 6,
+          "initial_searches": 9,
+          "follow_up_queries": [
+            {
+              "query": "site:gov.in \"Bharat Electronics\" \"contract number\" \"defence\" \"2024\"",
+              "mode": "web",
+              "gap": "缺乏印度国防合同的具体合同编号（2024年）",
+              "round": 2
+            },
+            {
+              "query": "site:gov.in \"Bharat Electronics\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号",
+              "round": 2
+            },
+            {
+              "query": "site:gov.in \"Bharat Electronics\" \"alias\" \"audit report\"",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics的企业别名及审计报告",
+              "round": 2
+            },
+            {
+              "query": "site:japan.go.jp \"defense procurement\" \"contract number\" \"2024\" \"naval\"",
+              "mode": "web",
+              "gap": "缺乏日本海军防务采购的具体合同编号（2024年）",
+              "round": 2
+            },
+            {
+              "query": "site:japan.go.jp \"defense procurement\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+              "mode": "web",
+              "gap": "缺少日本防务出口到中国的提单号与料号",
+              "round": 2
+            },
+            {
+              "query": "site:japan.go.jp \"defense procurement\" \"alias\" \"audit report\"",
+              "mode": "web",
+              "gap": "缺少日本防务采购相关企业的别名及审计报告",
+              "round": 2
+            },
+            {
+              "query": "site:gov.taiwan \"defense procurement\" \"contract number\" \"2024\" \"drone\"",
+              "mode": "web",
+              "gap": "缺乏台湾无人机防务采购的具体合同编号（2024年）",
+              "round": 2
+            },
+            {
+              "query": "site:gov.taiwan \"defense procurement\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+              "mode": "web",
+              "gap": "缺少台湾防务出口到中国的提单号与料号",
+              "round": 2
+            },
+            {
+              "query": "\"Bharat Electronics Ltd\" \"alternate names\" site:bharatelectronics.com",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics的企业别名",
+              "round": 3
+            },
+            {
+              "query": "\"Bharat Electronics\" \"audit report\" 2023 site:gov.in",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics的审计报告",
+              "round": 3
+            },
+            {
+              "query": "\"Bharat Electronics\" \"bill of lading\" China 2023 site:panjiva.com",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号",
+              "round": 3
+            },
+            {
+              "query": "\"Taiwan defense\" \"bill of lading\" China 2023 site:panjiva.com",
+              "mode": "web",
+              "gap": "缺少台湾防务出口到中国的提单号与料号",
+              "round": 3
+            },
+            {
+              "query": "\"Bharat Electronics\" \"Ministry of Defence\" contract 2023 site:gov.in",
+              "mode": "web",
+              "gap": "缺少印度国防合同或政府采购证据",
+              "round": 3
+            },
+            {
+              "query": "\"Japan Ministry of Defence\" \"Mitsubishi Heavy Industries\" contract 2023 site:mod.go.jp",
+              "mode": "web",
+              "gap": "缺少日本国防合同或政府采购证据",
+              "round": 3
+            },
+            {
+              "query": "\"China\" \"export\" \"Bharat Electronics\" 2023 site:china.org.cn",
+              "mode": "web",
+              "gap": "缺少中国出口或目标企业进口证据（印度）",
+              "round": 3
+            },
+            {
+              "query": "\"Taiwan Ministry of National Defence\" procurement report 2023 site:mod.gov.tw",
+              "mode": "web",
+              "gap": "缺少台湾防务采购报告或审计报告",
+              "round": 3
+            },
+            {
+              "query": "Bharat Electronics Ltd bill of lading to China 2023 part number site: customs.gov.cn",
+              "mode": "web",
+              "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号",
+              "round": 4
+            },
+            {
+              "query": "Bharat Electronics Ltd contract number 2022 Indian Army site: india.gov.in",
+              "mode": "web",
+              "gap": "缺少印度国防合同或政府采购证据",
+              "round": 4
+            },
+            {
+              "query": "Bharat Electronics Ltd alias Bharat Electronics Limited site: india.gov.in",
+              "mode": "web",
+              "gap": "缺少印度企业别名",
+              "round": 4
+            },
+            {
+              "query": "Bharat Electronics Ltd investigation 2023 site: india.gov.in",
+              "mode": "web",
+              "gap": "缺少印度已有调查或审计报告",
+              "round": 4
+            },
+            {
+              "query": "China export to India defense equipment bill of lading 2023 site: customs.gov.cn",
+              "mode": "web",
+              "gap": "缺少中国出口或目标企业进口证据（印度）",
+              "round": 4
+            },
+            {
+              "query": "Japan Ministry of Defense procurement contract 2023 contract number site: jdm.go.jp",
+              "mode": "web",
+              "gap": "缺少日本国防合同或政府采购证据",
+              "round": 4
+            },
+            {
+              "query": "Taiwan Ministry of National Defense defense export bill of lading to China 2023 site: customs.gov.tw",
+              "mode": "web",
+              "gap": "缺少台湾防务出口到中国的提单号与料号",
+              "round": 4
+            },
+            {
+              "query": "Taiwan Ministry of National Defense defense procurement audit report 2023 site: gov.tw",
+              "mode": "web",
+              "gap": "缺少台湾防务采购报告或审计报告",
+              "round": 4
+            },
+            {
+              "query": "India Ministry of Defence procurement audit 2023 site:gov.in",
+              "mode": "web",
+              "gap": "India investigation/audit report",
+              "round": 5
+            },
+            {
+              "query": "Taiwan Ministry of National Defense procurement audit 2023 site:gov.tw",
+              "mode": "web",
+              "gap": "Taiwan defense procurement audit",
+              "round": 5
+            },
+            {
+              "query": "Japan Ministry of Defense F-35 procurement contract 2023 site:japan.go.jp",
+              "mode": "web",
+              "gap": "Japan defense contract evidence",
+              "round": 5
+            },
+            {
+              "query": "China customs export defense equipment to India 2023 site:china.com",
+              "mode": "web",
+              "gap": "China export evidence",
+              "round": 5
+            },
+            {
+              "query": "Bharat Electronics Limited alias BEL site:gov.in",
+              "mode": "web",
+              "gap": "Company alias",
+              "round": 5
+            },
+            {
+              "query": "Japan Ministry of Defense contract number 2023 F-35 site:japan.go.jp",
+              "mode": "web",
+              "gap": "Contract number",
+              "round": 5
+            },
+            {
+              "query": "Taiwan Ministry of National Defense bill of lading number 2023 J-15 site:gov.tw",
+              "mode": "web",
+              "gap": "Bill of lading number",
+              "round": 5
+            },
+            {
+              "query": "China customs export part number 123456 defense equipment India 2023 site:china.com",
+              "mode": "web",
+              "gap": "Part number",
+              "round": 5
+            },
+            {
+              "query": "site:gov.tw 台湾 航空 2024 提单号 防务出口 中国",
+              "mode": "web",
+              "gap": "缺少台湾防务出口到中国的提单号",
+              "round": 6
+            },
+            {
+              "query": "site:gov.tw 台湾 航空 2024 料号 防务出口 中国",
+              "mode": "web",
+              "gap": "缺少台湾防务出口到中国的料号",
+              "round": 6
+            },
+            {
+              "query": "site:gov.tw 台湾 航空 2024 审计报告 防务出口 中国",
+              "mode": "web",
+              "gap": "缺少台湾防务采购报告或审计报告",
+              "round": 6
+            },
+            {
+              "query": "site:gov.jp 国防 2023 合同番号 防务 采购",
+              "mode": "web",
+              "gap": "缺少日本防务合同证据",
+              "round": 6
+            },
+            {
+              "query": "site:gov.jp 国防 2023 审计报告 防务 采购",
+              "mode": "web",
+              "gap": "缺少日本防务审计报告",
+              "round": 6
+            },
+            {
+              "query": "site:gov.in 国防 2023 审计报告 采购",
+              "mode": "web",
+              "gap": "缺少印度调查/审计报告",
+              "round": 6
+            },
+            {
+              "query": "site:gov.in 国防 2023 合同番号 采购",
+              "mode": "web",
+              "gap": "缺少印度防务合同证据",
+              "round": 6
+            },
+            {
+              "query": "site:gov.cn 中国 2023 出口 防务 进口 印度 合同编号",
+              "mode": "web",
+              "gap": "缺少中国出口或目标企业进口证据（印度）",
+              "round": 6
+            }
+          ],
+          "rounds": [
+            {
+              "round": 2,
+              "queries": [
+                {
+                  "query": "site:gov.in \"Bharat Electronics\" \"contract number\" \"defence\" \"2024\"",
+                  "mode": "web",
+                  "gap": "缺乏印度国防合同的具体合同编号（2024年）"
+                },
+                {
+                  "query": "site:gov.in \"Bharat Electronics\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号"
+                },
+                {
+                  "query": "site:gov.in \"Bharat Electronics\" \"alias\" \"audit report\"",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics的企业别名及审计报告"
+                },
+                {
+                  "query": "site:japan.go.jp \"defense procurement\" \"contract number\" \"2024\" \"naval\"",
+                  "mode": "web",
+                  "gap": "缺乏日本海军防务采购的具体合同编号（2024年）"
+                },
+                {
+                  "query": "site:japan.go.jp \"defense procurement\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+                  "mode": "web",
+                  "gap": "缺少日本防务出口到中国的提单号与料号"
+                },
+                {
+                  "query": "site:japan.go.jp \"defense procurement\" \"alias\" \"audit report\"",
+                  "mode": "web",
+                  "gap": "缺少日本防务采购相关企业的别名及审计报告"
+                },
+                {
+                  "query": "site:gov.taiwan \"defense procurement\" \"contract number\" \"2024\" \"drone\"",
+                  "mode": "web",
+                  "gap": "缺乏台湾无人机防务采购的具体合同编号（2024年）"
+                },
+                {
+                  "query": "site:gov.taiwan \"defense procurement\" \"bill of lading\" \"China\" \"export\" \"part number\"",
+                  "mode": "web",
+                  "gap": "缺少台湾防务出口到中国的提单号与料号"
+                }
+              ],
+              "new_sources": 21
+            },
+            {
+              "round": 3,
+              "queries": [
+                {
+                  "query": "\"Bharat Electronics Ltd\" \"alternate names\" site:bharatelectronics.com",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics的企业别名"
+                },
+                {
+                  "query": "\"Bharat Electronics\" \"audit report\" 2023 site:gov.in",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics的审计报告"
+                },
+                {
+                  "query": "\"Bharat Electronics\" \"bill of lading\" China 2023 site:panjiva.com",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号"
+                },
+                {
+                  "query": "\"Taiwan defense\" \"bill of lading\" China 2023 site:panjiva.com",
+                  "mode": "web",
+                  "gap": "缺少台湾防务出口到中国的提单号与料号"
+                },
+                {
+                  "query": "\"Bharat Electronics\" \"Ministry of Defence\" contract 2023 site:gov.in",
+                  "mode": "web",
+                  "gap": "缺少印度国防合同或政府采购证据"
+                },
+                {
+                  "query": "\"Japan Ministry of Defence\" \"Mitsubishi Heavy Industries\" contract 2023 site:mod.go.jp",
+                  "mode": "web",
+                  "gap": "缺少日本国防合同或政府采购证据"
+                },
+                {
+                  "query": "\"China\" \"export\" \"Bharat Electronics\" 2023 site:china.org.cn",
+                  "mode": "web",
+                  "gap": "缺少中国出口或目标企业进口证据（印度）"
+                },
+                {
+                  "query": "\"Taiwan Ministry of National Defence\" procurement report 2023 site:mod.gov.tw",
+                  "mode": "web",
+                  "gap": "缺少台湾防务采购报告或审计报告"
+                }
+              ],
+              "new_sources": 30
+            },
+            {
+              "round": 4,
+              "queries": [
+                {
+                  "query": "Bharat Electronics Ltd bill of lading to China 2023 part number site: customs.gov.cn",
+                  "mode": "web",
+                  "gap": "缺少印度Bharat Electronics向中国出口的提单号与料号"
+                },
+                {
+                  "query": "Bharat Electronics Ltd contract number 2022 Indian Army site: india.gov.in",
+                  "mode": "web",
+                  "gap": "缺少印度国防合同或政府采购证据"
+                },
+                {
+                  "query": "Bharat Electronics Ltd alias Bharat Electronics Limited site: india.gov.in",
+                  "mode": "web",
+                  "gap": "缺少印度企业别名"
+                },
+                {
+                  "query": "Bharat Electronics Ltd investigation 2023 site: india.gov.in",
+                  "mode": "web",
+                  "gap": "缺少印度已有调查或审计报告"
+                },
+                {
+                  "query": "China export to India defense equipment bill of lading 2023 site: customs.gov.cn",
+                  "mode": "web",
+                  "gap": "缺少中国出口或目标企业进口证据（印度）"
+                },
+                {
+                  "query": "Japan Ministry of Defense procurement contract 2023 contract number site: jdm.go.jp",
+                  "mode": "web",
+                  "gap": "缺少日本国防合同或政府采购证据"
+                },
+                {
+                  "query": "Taiwan Ministry of National Defense defense export bill of lading to China 2023 site: customs.gov.tw",
+                  "mode": "web",
+                  "gap": "缺少台湾防务出口到中国的提单号与料号"
+                },
+                {
+                  "query": "Taiwan Ministry of National Defense defense procurement audit report 2023 site: gov.tw",
+                  "mode": "web",
+                  "gap": "缺少台湾防务采购报告或审计报告"
+                }
+              ],
+              "new_sources": 3
+            },
+            {
+              "round": 5,
+              "queries": [
+                {
+                  "query": "India Ministry of Defence procurement audit 2023 site:gov.in",
+                  "mode": "web",
+                  "gap": "India investigation/audit report"
+                },
+                {
+                  "query": "Taiwan Ministry of National Defense procurement audit 2023 site:gov.tw",
+                  "mode": "web",
+                  "gap": "Taiwan defense procurement audit"
+                },
+                {
+                  "query": "Japan Ministry of Defense F-35 procurement contract 2023 site:japan.go.jp",
+                  "mode": "web",
+                  "gap": "Japan defense contract evidence"
+                },
+                {
+                  "query": "China customs export defense equipment to India 2023 site:china.com",
+                  "mode": "web",
+                  "gap": "China export evidence"
+                },
+                {
+                  "query": "Bharat Electronics Limited alias BEL site:gov.in",
+                  "mode": "web",
+                  "gap": "Company alias"
+                },
+                {
+                  "query": "Japan Ministry of Defense contract number 2023 F-35 site:japan.go.jp",
+                  "mode": "web",
+                  "gap": "Contract number"
+                },
+                {
+                  "query": "Taiwan Ministry of National Defense bill of lading number 2023 J-15 site:gov.tw",
+                  "mode": "web",
+                  "gap": "Bill of lading number"
+                },
+                {
+                  "query": "China customs export part number 123456 defense equipment India 2023 site:china.com",
+                  "mode": "web",
+                  "gap": "Part number"
+                }
+              ],
+              "new_sources": 14
+            },
+            {
+              "round": 6,
+              "queries": [
+                {
+                  "query": "site:gov.tw 台湾 航空 2024 提单号 防务出口 中国",
+                  "mode": "web",
+                  "gap": "缺少台湾防务出口到中国的提单号"
+                },
+                {
+                  "query": "site:gov.tw 台湾 航空 2024 料号 防务出口 中国",
+                  "mode": "web",
+                  "gap": "缺少台湾防务出口到中国的料号"
+                },
+                {
+                  "query": "site:gov.tw 台湾 航空 2024 审计报告 防务出口 中国",
+                  "mode": "web",
+                  "gap": "缺少台湾防务采购报告或审计报告"
+                },
+                {
+                  "query": "site:gov.jp 国防 2023 合同番号 防务 采购",
+                  "mode": "web",
+                  "gap": "缺少日本防务合同证据"
+                },
+                {
+                  "query": "site:gov.jp 国防 2023 审计报告 防务 采购",
+                  "mode": "web",
+                  "gap": "缺少日本防务审计报告"
+                },
+                {
+                  "query": "site:gov.in 国防 2023 审计报告 采购",
+                  "mode": "web",
+                  "gap": "缺少印度调查/审计报告"
+                },
+                {
+                  "query": "site:gov.in 国防 2023 合同番号 采购",
+                  "mode": "web",
+                  "gap": "缺少印度防务合同证据"
+                },
+                {
+                  "query": "site:gov.cn 中国 2023 出口 防务 进口 印度 合同编号",
+                  "mode": "web",
+                  "gap": "缺少中国出口或目标企业进口证据（印度）"
+                }
+              ],
+              "new_sources": 36
+            }
+          ],
+          "sources_found": 168,
+          "sources_read": 17,
+          "method": "multi_round_online_evidence_research",
+          "discovery_paths": [
+            "trade_to_defense",
+            "defense_to_trade",
+            "identity_product_time_bridge"
+          ],
+          "trade_year_priority": 2026,
+          "deep_china_trade_search": true,
+          "china_trade_signal_count": 37,
+          "military_use_signal_count": 27,
+          "candidate_threshold": "双源闭合优先；单边强来源仅作为C级待补证线索"
+        },
+        "evidence_gap": "待补军工合同、采购项目或最终用途证据"
+      },
+      "status": "pending",
+      "review_note": null,
+      "investigation_id": null,
+      "reviewed_at": null
+    },
+    {
+      "id": "candidate-online-9e77d23a5c4a",
+      "country": "United States",
+      "case_id": "case-online-9e77d23a5c4a",
+      "shipment_id": "shp-online-9e77d23a5c4a",
+      "supplier_entity_id": "ent-online-9e77d23a5c4a",
+      "title": "移动监视系统",
+      "target_program": "移动监视系统",
+      "exporter_name": "泰德林FLIR（Teledyne FLIR）",
+      "importer_name": "美国海关与边境保护局（U.S. Customs and Border Protection）",
+      "product": "移动监视系统",
+      "score": 70,
+      "evidence_grade": "C",
+      "verified_facts": {
+        "online_research": true,
+        "evidence_status": "contract_only",
+        "contract_evidence_url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5",
+        "trade_evidence_url": null,
+        "supporting_urls": [
+          "https://news.google.com/rss/articles/CBMijgJBVV95cUxPcVpfY1VoU1F6bmlTWm5tU1hUSTJDNHZ6OUxma1Zlc2pBZExQT2hGSkNiU3MxNmZrdXBHMmVjNGpsUFpiNXdKdFdyNnZ2WjZTTkIzYjZKbHBNbjI0VjFYUl9lMWMxQ3hIR1pDSGR2YVFLSmZNMHE5U0c1S1RkQjdmanEyTmhpRm92dl9Mamo5RFZEM1pHT2o5Y1hrdW5iaWNBS2tOWFJBUTlKZ1RYOHQ2aExNNDhKcjVxSU9RQmhNTXZmM2lab05sNndmaU85NUk0MTBvS29iTm1sVzFxc0dRRFdqUjFFaE1qRXJlX1h2Tzhqb3kyVG5nX2xyeDVLRGxFY0N1Q21kLWE3M0hnU1E?oc=5"
+        ],
+        "limitations": [
+          "缺乏进口记录/贸易记录"
+        ],
+        "original_fields": {
+          "importer_name": "U.S. Customs and Border Protection",
+          "exporter_name": "Teledyne FLIR",
+          "product": "Mobile Surveillance Systems",
+          "contract_title": "Mobile Surveillance Systems",
+          "target_program": "Mobile Surveillance Systems"
+        },
+        "research_trace": {
+          "configured_rounds": 3,
+          "initial_searches": 12,
+          "follow_up_queries": [
+            {
+              "query": "site:mod.go.jp \"contract number\" \"Chinese component\" \"navy drones\" \"2023\" \"part number\"",
+              "mode": "web",
+              "gap": "Missing contract number and part number for Japanese Ministry of Defense procurement of Chinese components in navy drones (2023).",
+              "round": 2
+            },
+            {
+              "query": "site:mod.go.jp \"audit report\" \"Chinese component\" \"navy drones\" \"2023\"",
+              "mode": "web",
+              "gap": "Missing audit report on Japanese Ministry of Defense procurement of Chinese components in navy drones (2023).",
+              "round": 2
+            },
+            {
+              "query": "site:us.gov \"AeroVironment\" \"alias\" \"AeroV\" \"contract number\" \"counter-drone\" \"2026\" \"part number\"",
+              "mode": "web",
+              "gap": "Missing company alias, contract number, and part number for AeroVironment's $500M counter‑drone contract (2026).",
+              "round": 2
+            },
+            {
+              "query": "site:us.gov \"Teledyne FLIR\" \"alias\" \"Teledyne\" \"contract number\" \"mobile surveillance\" \"2026\" \"part number\"",
+              "mode": "web",
+              "gap": "Missing company alias, contract number, and part number for Teledyne FLIR's $28.8M mobile surveillance contract (2026).",
+              "round": 2
+            },
+            {
+              "query": "site:mod.gov.in \"contract number\" \"Chinese component\" \"defense procurement\" \"2024\" \"part number\"",
+              "mode": "web",
+              "gap": "Missing contract number and part number for Indian Ministry of Defence procurement of Chinese components (2024).",
+              "round": 2
+            },
+            {
+              "query": "site:mod.gov.tw \"contract number\" \"indigenous drone\" \"2025\" \"part number\"",
+              "mode": "web",
+              "gap": "Missing contract number and part number for Taiwanese Ministry of National Defense indigenous drone procurement (2025).",
+              "round": 2
+            },
+            {
+              "query": "site:mod.gov.tw \"audit report\" \"Chinese components\" \"autonomous vehicles\" \"2025\"",
+              "mode": "web",
+              "gap": "Missing audit report on Taiwanese Ministry of National Defense Chinese components in autonomous vehicles (2025).",
+              "round": 2
+            },
+            {
+              "query": "site:us.gov \"bill of lading\" \"Chinese export\" \"AeroVironment\" \"2026\"",
+              "mode": "web",
+              "gap": "Missing bill of lading number for Chinese export to AeroVironment (2026).",
+              "round": 2
+            },
+            {
+              "query": "\"Indian Ministry of Defence\" \"Chinese components\" \"contract number\" \"2024\" \"part number\" site:gov.in",
+              "mode": "web",
+              "gap": "Missing contract number and part number for Indian Ministry of Defence procurement of Chinese components (2024).",
+              "round": 3
+            },
+            {
+              "query": "\"Taiwan Ministry of National Defense\" \"audit report\" \"Chinese components\" \"autonomous vehicles\" \"2025\" site:gov.tw",
+              "mode": "web",
+              "gap": "Missing audit report on Taiwanese Ministry of National Defense Chinese components in autonomous vehicles (2025).",
+              "round": 3
+            },
+            {
+              "query": "\"Taiwan Ministry of National Defense\" \"indigenous drone procurement\" \"contract number\" \"2025\" \"part number\" site:gov.tw",
+              "mode": "web",
+              "gap": "Missing contract number and part number for Taiwanese Ministry of National Defense indigenous drone procurement (2025).",
+              "round": 3
+            },
+            {
+              "query": "\"AeroVironment\" \"$500M\" \"counter‑drone contract\" \"2026\" \"contract number\" \"part number\" site:us",
+              "mode": "web",
+              "gap": "Missing company alias, contract number, and part number for AeroVironment's $500M counter‑drone contract (2026).",
+              "round": 3
+            },
+            {
+              "query": "\"Teledyne FLIR\" \"$28.8M\" \"mobile surveillance contract\" \"2026\" \"contract number\" \"part number\" site:us",
+              "mode": "web",
+              "gap": "Missing company alias, contract number, and part number for Teledyne FLIR's $28.8M mobile surveillance contract (2026).",
+              "round": 3
+            },
+            {
+              "query": "\"AeroVironment\" \"bill of lading\" \"China\" \"2026\" \"export\" site:gov.cn",
+              "mode": "web",
+              "gap": "Missing bill of lading number for Chinese export to AeroVironment (2026).",
+              "round": 3
+            },
+            {
+              "query": "\"AVAV\" \"counter‑drone contract\" \"2026\" \"audit report\" site:us",
+              "mode": "web",
+              "gap": "Missing audit report for AeroVironment's $500M counter‑drone contract (2026).",
+              "round": 3
+            },
+            {
+              "query": "\"Teledyne FLIR\" \"mobile surveillance contract\" \"2026\" \"audit report\" site:us",
+              "mode": "web",
+              "gap": "Missing audit report for Teledyne FLIR's $28.8M mobile surveillance contract (2026).",
+              "round": 3
+            }
+          ],
+          "rounds": [
+            {
+              "round": 2,
+              "queries": [
+                {
+                  "query": "site:mod.go.jp \"contract number\" \"Chinese component\" \"navy drones\" \"2023\" \"part number\"",
+                  "mode": "web",
+                  "gap": "Missing contract number and part number for Japanese Ministry of Defense procurement of Chinese components in navy drones (2023)."
+                },
+                {
+                  "query": "site:mod.go.jp \"audit report\" \"Chinese component\" \"navy drones\" \"2023\"",
+                  "mode": "web",
+                  "gap": "Missing audit report on Japanese Ministry of Defense procurement of Chinese components in navy drones (2023)."
+                },
+                {
+                  "query": "site:us.gov \"AeroVironment\" \"alias\" \"AeroV\" \"contract number\" \"counter-drone\" \"2026\" \"part number\"",
+                  "mode": "web",
+                  "gap": "Missing company alias, contract number, and part number for AeroVironment's $500M counter‑drone contract (2026)."
+                },
+                {
+                  "query": "site:us.gov \"Teledyne FLIR\" \"alias\" \"Teledyne\" \"contract number\" \"mobile surveillance\" \"2026\" \"part number\"",
+                  "mode": "web",
+                  "gap": "Missing company alias, contract number, and part number for Teledyne FLIR's $28.8M mobile surveillance contract (2026)."
+                },
+                {
+                  "query": "site:mod.gov.in \"contract number\" \"Chinese component\" \"defense procurement\" \"2024\" \"part number\"",
+                  "mode": "web",
+                  "gap": "Missing contract number and part number for Indian Ministry of Defence procurement of Chinese components (2024)."
+                },
+                {
+                  "query": "site:mod.gov.tw \"contract number\" \"indigenous drone\" \"2025\" \"part number\"",
+                  "mode": "web",
+                  "gap": "Missing contract number and part number for Taiwanese Ministry of National Defense indigenous drone procurement (2025)."
+                },
+                {
+                  "query": "site:mod.gov.tw \"audit report\" \"Chinese components\" \"autonomous vehicles\" \"2025\"",
+                  "mode": "web",
+                  "gap": "Missing audit report on Taiwanese Ministry of National Defense Chinese components in autonomous vehicles (2025)."
+                },
+                {
+                  "query": "site:us.gov \"bill of lading\" \"Chinese export\" \"AeroVironment\" \"2026\"",
+                  "mode": "web",
+                  "gap": "Missing bill of lading number for Chinese export to AeroVironment (2026)."
+                }
+              ],
+              "new_sources": 56
+            },
+            {
+              "round": 3,
+              "queries": [
+                {
+                  "query": "\"Indian Ministry of Defence\" \"Chinese components\" \"contract number\" \"2024\" \"part number\" site:gov.in",
+                  "mode": "web",
+                  "gap": "Missing contract number and part number for Indian Ministry of Defence procurement of Chinese components (2024)."
+                },
+                {
+                  "query": "\"Taiwan Ministry of National Defense\" \"audit report\" \"Chinese components\" \"autonomous vehicles\" \"2025\" site:gov.tw",
+                  "mode": "web",
+                  "gap": "Missing audit report on Taiwanese Ministry of National Defense Chinese components in autonomous vehicles (2025)."
+                },
+                {
+                  "query": "\"Taiwan Ministry of National Defense\" \"indigenous drone procurement\" \"contract number\" \"2025\" \"part number\" site:gov.tw",
+                  "mode": "web",
+                  "gap": "Missing contract number and part number for Taiwanese Ministry of National Defense indigenous drone procurement (2025)."
+                },
+                {
+                  "query": "\"AeroVironment\" \"$500M\" \"counter‑drone contract\" \"2026\" \"contract number\" \"part number\" site:us",
+                  "mode": "web",
+                  "gap": "Missing company alias, contract number, and part number for AeroVironment's $500M counter‑drone contract (2026)."
+                },
+                {
+                  "query": "\"Teledyne FLIR\" \"$28.8M\" \"mobile surveillance contract\" \"2026\" \"contract number\" \"part number\" site:us",
+                  "mode": "web",
+                  "gap": "Missing company alias, contract number, and part number for Teledyne FLIR's $28.8M mobile surveillance contract (2026)."
+                },
+                {
+                  "query": "\"AeroVironment\" \"bill of lading\" \"China\" \"2026\" \"export\" site:gov.cn",
+                  "mode": "web",
+                  "gap": "Missing bill of lading number for Chinese export to AeroVironment (2026)."
+                },
+                {
+                  "query": "\"AVAV\" \"counter‑drone contract\" \"2026\" \"audit report\" site:us",
+                  "mode": "web",
+                  "gap": "Missing audit report for AeroVironment's $500M counter‑drone contract (2026)."
+                },
+                {
+                  "query": "\"Teledyne FLIR\" \"mobile surveillance contract\" \"2026\" \"audit report\" site:us",
+                  "mode": "web",
+                  "gap": "Missing audit report for Teledyne FLIR's $28.8M mobile surveillance contract (2026)."
+                }
+              ],
+              "new_sources": 22
+            }
+          ],
+          "sources_found": 160,
+          "sources_read": 13,
+          "method": "multi_round_online_evidence_research",
+          "discovery_paths": [
+            "trade_to_defense",
+            "defense_to_trade",
+            "identity_product_time_bridge"
+          ],
+          "trade_year_priority": 2026,
+          "china_trade_signal_count": 9,
+          "military_use_signal_count": 26,
+          "candidate_threshold": "双源闭合优先；单边强来源仅作为C级待补证线索"
+        }
+      },
+      "status": "rejected",
+      "review_note": null,
+      "investigation_id": null,
+      "reviewed_at": "2026-08-15T13:46:03.940601"
     }
   ]
 }

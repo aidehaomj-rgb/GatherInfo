@@ -19,7 +19,11 @@ def result(run_id: str, source_id: str, items: list[FetchItem], errors: list[str
 
 
 def detect_lang(text: str) -> str:
-    """Detect if text is Chinese or English based on CJK character count."""
+    """Best-effort language detection for the built-in multilingual search paths."""
+    if len(re.findall(r'[\u0900-\u097f]', text[:500])) > 3:
+        return "hi"
+    if len(re.findall(r'[\u3040-\u30ff]', text[:500])) > 3:
+        return "ja"
     cjk = len(re.findall(r'[一-鿿]', text[:500]))
     return "zh" if cjk > 3 else "en"
 

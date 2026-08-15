@@ -9,6 +9,10 @@ type EditorState = Pick<PromptTemplate, "name" | "description" | "content" | "is
 
 const EMPTY_EDITOR: EditorState = { name: "", description: "", content: "", is_active: true };
 
+function compactPromptPreview(content: string) {
+  return content.replace(/\s+/g, " ").trim();
+}
+
 export function PromptTemplatesPage() {
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,21 +66,22 @@ export function PromptTemplatesPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <div><h2>提示词库</h2><p className="text-muted">集中维护采集指令，并挂载到一个或多个主题。</p></div>
+        <div><h2>提示词库</h2><p className="text-muted">集中维护主题和专家流程使用的采集指令。</p></div>
         <button type="button" className="btn btn-primary" onClick={() => openEditor(null)}><Plus size={14} /> 新建提示词</button>
       </div>
       {error && <div className="error-banner">{error}</div>}
-      <div className="card-list">
+      <div className="prompt-template-grid">
         {prompts.map((prompt) => (
           <article className="card-item prompt-template-card" key={prompt.id}>
             <div className="card-item-header">
-              <div><h4>{prompt.name}</h4><p className="text-muted small">{prompt.description || "暂无说明"}</p></div>
+              <h4 title={prompt.name}>{prompt.name}</h4>
               <div className="card-item-actions">
                 <span className={`badge ${prompt.is_active ? "badge--green" : "badge--gray"}`}>{prompt.is_active ? "启用" : "停用"}</span>
-                <span className="badge badge--blue">已挂载 {prompt.topic_count} 个主题</span>
+                {(prompt.linked_experts ?? []).map((expert) => <span className="badge badge--blue" key={expert}>关联 {expert}</span>)}
               </div>
             </div>
-            <pre className="prompt-template-card__preview">{prompt.content}</pre>
+            <p className="prompt-template-card__description">{prompt.description || "暂无说明"}</p>
+            <p className="prompt-template-card__preview">{compactPromptPreview(prompt.content)}</p>
             <div className="card-item-footer">
               <button type="button" className="btn btn-sm btn-ghost" onClick={() => openEditor(prompt)}><Edit3 size={12} /> 编辑</button>
               <button type="button" className="btn btn-sm btn-danger" onClick={() => setDeleting(prompt)}><Trash2 size={12} /> 删除</button>

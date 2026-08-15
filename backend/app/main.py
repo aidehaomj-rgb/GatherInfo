@@ -118,11 +118,13 @@ async def log_requests(request: Request, call_next):
 # ── Exception handlers ───────────────────────────────────────────────
 
 async def validation_exception_handler(request: Request, exc):
+    errors = exc.errors() if callable(getattr(exc, "errors", None)) else None
+    detail = getattr(exc, "detail", "Validation error")
     return JSONResponse(
         status_code=422,
         content={
-            "detail": "Validation error",
-            "errors": exc.errors(),
+            "detail": detail,
+            "errors": errors,
         },
     )
 

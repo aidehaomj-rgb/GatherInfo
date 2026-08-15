@@ -24,6 +24,7 @@ def test_supply_chain_snapshot_covers_every_page_dataset() -> None:
         "evidence",
         "open_source_evidence",
         "reports",
+        "discovery_candidates",
     }
 
 

@@ -21,6 +21,7 @@ from app.models import (  # noqa: E402
     SearchToolConfig,
     SourceConfig,
     SupplyChainCase,
+    SupplyChainDiscoveryCandidate,
     SupplyChainEntity,
     SupplyChainEvidence,
     SupplyChainInvestigation,
@@ -98,6 +99,12 @@ SUPPLY_CHAIN_MODELS = {
     "reports": (SupplyChainReport, (
         "id", "country", "title", "case_ids", "evidence_ids", "model_id",
         "status", "content", "summary", "error_log", "generated_at",
+    )),
+    "discovery_candidates": (SupplyChainDiscoveryCandidate, (
+        "id", "country", "case_id", "shipment_id", "supplier_entity_id",
+        "title", "target_program", "exporter_name", "importer_name", "product",
+        "score", "evidence_grade", "verified_facts", "status", "review_note",
+        "investigation_id", "reviewed_at",
     )),
 }
 CONTENT_TABLES = (

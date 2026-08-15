@@ -43014,12 +43014,7 @@
       "collection_run_id": "codex-forum-high-customs-risk-20260813",
       "date_range_start": "2026-07-15T00:00:00",
       "date_range_end": "2026-08-11T00:00:00",
-      "output_files": {
-        "md": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\外贸论坛违规清关与走私风险线索_情报报告_2026-08-13.md",
-        "html": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\外贸论坛违规清关与走私风险线索_情报报告_2026-08-13.html",
-        "pdf": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\外贸论坛违规清关与走私风险线索_情报报告_2026-08-13.pdf",
-        "docx": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\外贸论坛高海关监管风险线索报告（2026年8月13日）.docx"
-      },
+      "output_files": {},
       "output_dir": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13",
       "generated_at": "2026-08-13T03:19:45.500392",
       "created_at": "2026-08-13T03:19:45.555980",
@@ -43112,12 +43107,7 @@
       "collection_run_id": "codex-current-affairs-customs-20260813",
       "date_range_start": "2026-04-28T00:00:00",
       "date_range_end": "2026-08-05T00:00:00",
-      "output_files": {
-        "md": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\涉进出口时政热点_情报报告_2026-08-13.md",
-        "html": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\涉进出口时政热点_情报报告_2026-08-13.html",
-        "pdf": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\涉进出口时政热点_情报报告_2026-08-13.pdf",
-        "docx": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\涉进出口时政热点海关监管风险简报（2026年8月13日）.docx"
-      },
+      "output_files": {},
       "output_dir": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13",
       "generated_at": "2026-08-13T03:01:38.270013",
       "created_at": "2026-08-13T02:40:16.807201",
@@ -43159,12 +43149,7 @@
       "collection_run_id": "run-63e4473d2bfa",
       "date_range_start": "2026-07-16T04:00:00",
       "date_range_end": "2026-08-12T03:01:30",
-      "output_files": {
-        "md": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\执法信息采集_情报报告_2026-08-13.md",
-        "html": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\执法信息采集_情报报告_2026-08-13.html",
-        "pdf": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\执法信息采集_情报报告_2026-08-13.pdf",
-        "docx": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13\\执法信息采集_境外执法信息智能简报_2026-08-13.docx"
-      },
+      "output_files": {},
       "output_dir": "D:\\gatherinfo-yz\\data\\reports\\2026-08-13",
       "generated_at": "2026-08-13T10:27:30.839679",
       "created_at": "2026-08-13T02:23:33.421387",
@@ -43265,7 +43250,7 @@
       "icon": null,
       "extra": null,
       "item_count": 99,
-      "last_seen_at": "2026-08-14T01:00:04.470826",
+      "last_seen_at": "2026-08-15T00:01:40.889073",
       "created_at": "2026-06-12T12:16:25.924958"
     },
     {
@@ -43289,7 +43274,7 @@
       "icon": null,
       "extra": null,
       "item_count": 148,
-      "last_seen_at": "2026-08-14T01:00:06.436272",
+      "last_seen_at": "2026-08-15T00:01:41.241187",
       "created_at": "2026-06-11T01:06:44.196432"
     },
     {
@@ -43301,7 +43286,7 @@
       "icon": null,
       "extra": null,
       "item_count": 3,
-      "last_seen_at": "2026-08-14T00:01:38.188755",
+      "last_seen_at": "2026-08-15T00:01:38.325432",
       "created_at": "2026-06-12T12:16:26.190106"
     },
     {
@@ -43337,7 +43322,7 @@
       "icon": null,
       "extra": null,
       "item_count": 168,
-      "last_seen_at": "2026-08-14T01:00:06.320025",
+      "last_seen_at": "2026-08-15T00:01:41.215767",
       "created_at": "2026-07-23T05:37:40.483726"
     },
     {
@@ -43349,7 +43334,7 @@
       "icon": null,
       "extra": null,
       "item_count": 123,
-      "last_seen_at": "2026-08-14T01:00:06.343004",
+      "last_seen_at": "2026-08-15T00:01:40.916627",
       "created_at": "2026-06-11T01:06:44.242276"
     },
     {
@@ -43361,7 +43346,7 @@
       "icon": null,
       "extra": null,
       "item_count": 225,
-      "last_seen_at": "2026-08-14T01:00:06.462917",
+      "last_seen_at": "2026-08-15T00:01:41.185856",
       "created_at": "2026-06-11T01:06:44.180368"
     },
     {
@@ -44131,18 +44116,6 @@
       "item_count": 10,
       "last_seen_at": "2026-08-13T14:47:15.275030",
       "created_at": "2026-08-08T01:45:35.337373"
-    },
-    {
-      "id": "portfolio:2026-08-13????",
-      "namespace": "portfolio",
-      "value": "2026-08-13????",
-      "label": "2026-08-13????",
-      "color": null,
-      "icon": null,
-      "extra": null,
-      "item_count": 20,
-      "last_seen_at": null,
-      "created_at": "2026-08-13T02:09:11.851770"
     },
     {
       "id": "region:asean",
@@ -45584,10 +45557,6 @@
     },
     {
       "item_id": "472a75422de01d1b",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "472a75422de01d1b",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -45936,10 +45905,6 @@
     },
     {
       "item_id": "5e6620794538ec29",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "5e6620794538ec29",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -46171,10 +46136,6 @@
       "tag_id": "category:technology"
     },
     {
-      "item_id": "728b2571123af33b",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
       "item_id": "72c067ac666d1d40",
       "tag_id": "category:trade"
     },
@@ -46241,10 +46202,6 @@
     {
       "item_id": "7801809f62b51d65",
       "tag_id": "category:technology"
-    },
-    {
-      "item_id": "7801809f62b51d65",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "7801809f62b51d65",
@@ -46852,10 +46809,6 @@
     },
     {
       "item_id": "a5128dfb24239123",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "a5128dfb24239123",
       "tag_id": "weekly:出口管制"
     },
     {
@@ -47001,10 +46954,6 @@
     {
       "item_id": "b6de316cf4c55c92",
       "tag_id": "category:technology"
-    },
-    {
-      "item_id": "b6de316cf4c55c92",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "b778aab1d5e817ac",
@@ -47233,10 +47182,6 @@
     {
       "item_id": "c83067167a680499",
       "tag_id": "category:technology"
-    },
-    {
-      "item_id": "c83067167a680499",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "c834cfe3e22544ef",
@@ -48024,10 +47969,6 @@
     },
     {
       "item_id": "codex-malaysia-johor-chinese-scam-arrests-20260729",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "codex-malaysia-johor-chinese-scam-arrests-20260729",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -48041,10 +47982,6 @@
     {
       "item_id": "codex-malaysia-melaka-chinese-scam-arrests-20260716",
       "tag_id": "china_relevance:强涉华关联"
-    },
-    {
-      "item_id": "codex-malaysia-melaka-chinese-scam-arrests-20260716",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "codex-malaysia-melaka-chinese-scam-arrests-20260716",
@@ -48097,10 +48034,6 @@
     {
       "item_id": "codex-ph-china-frozen-food-20260721",
       "tag_id": "china_relevance:强涉华关联"
-    },
-    {
-      "item_id": "codex-ph-china-frozen-food-20260721",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "codex-ph-china-frozen-food-20260721",
@@ -48192,10 +48125,6 @@
     },
     {
       "item_id": "codex-sri-lanka-chinese-cigarettes-20260717",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "codex-sri-lanka-chinese-cigarettes-20260717",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -48229,10 +48158,6 @@
     {
       "item_id": "codex-thailand-origin-fraud-20260722",
       "tag_id": "china_relevance:强涉华关联"
-    },
-    {
-      "item_id": "codex-thailand-origin-fraud-20260722",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "codex-thailand-origin-fraud-20260722",
@@ -48372,10 +48297,6 @@
     },
     {
       "item_id": "codex-us-chinese-meth-australia-20260724",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "codex-us-chinese-meth-australia-20260724",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -48393,10 +48314,6 @@
     {
       "item_id": "codex-us-chinese-turtle-trafficking-20260723",
       "tag_id": "china_relevance:强涉华关联"
-    },
-    {
-      "item_id": "codex-us-chinese-turtle-trafficking-20260723",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "codex-us-chinese-turtle-trafficking-20260723",
@@ -48485,10 +48402,6 @@
     {
       "item_id": "codex-us-unapproved-chinese-drugs-20260723",
       "tag_id": "china_relevance:强涉华关联"
-    },
-    {
-      "item_id": "codex-us-unapproved-chinese-drugs-20260723",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "codex-us-unapproved-chinese-drugs-20260723",
@@ -48660,10 +48573,6 @@
     },
     {
       "item_id": "d52e0212764204bd",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "d52e0212764204bd",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -48705,10 +48614,6 @@
     {
       "item_id": "d85097cfe3ca9634",
       "tag_id": "category:technology"
-    },
-    {
-      "item_id": "d85097cfe3ca9634",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "d8fa9ff06d388a53",
@@ -48773,10 +48678,6 @@
     {
       "item_id": "dc80af8e8b74466d",
       "tag_id": "category:trade"
-    },
-    {
-      "item_id": "dc80af8e8b74466d",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "dc80af8e8b74466d",
@@ -49124,10 +49025,6 @@
     },
     {
       "item_id": "f7ced9411d07dd37",
-      "tag_id": "portfolio:2026-08-13????"
-    },
-    {
-      "item_id": "f7ced9411d07dd37",
       "tag_id": "weekly:执法查获"
     },
     {
@@ -49185,10 +49082,6 @@
     {
       "item_id": "fbe3d09ff7874331",
       "tag_id": "category:general"
-    },
-    {
-      "item_id": "fbe3d09ff7874331",
-      "tag_id": "portfolio:2026-08-13????"
     },
     {
       "item_id": "fbe3d09ff7874331",

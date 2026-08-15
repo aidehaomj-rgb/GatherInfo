@@ -4,18 +4,24 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.connectors.tavily_search import TavilyCollector
 from app.database import get_db
 from app.llm_client import call_llm
 from app.model_defaults import get_default_model
+from app.prompt_seed import resolve_supply_chain_expert_prompt
+from app.supply_chain_online import discover_online_supply_chains
 from app.models import (
     ModelConfig,
+    SourceConfig,
     SupplyChainCase,
+    SupplyChainDiscoveryCandidate,
     SupplyChainEntity,
     SupplyChainEvidence,
     SupplyChainInvestigation,
@@ -26,9 +32,34 @@ from app.models import (
 
 router = APIRouter(prefix="/api/v1/supply-chain", tags=["supply-chain"])
 
+SUPPLY_CHAIN_MCP_TOOLS = [
+    "resolve_supply_chain_entity",
+    "search_supply_chain_contracts",
+    "search_supply_chain_trade_records",
+    "deep_search_china_trade_records",
+    "search_supply_chain_part_numbers",
+    "verify_supply_chain_end_use",
+]
+
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def _configured_supply_chain_search_sources(db: Session) -> list[SourceConfig]:
+    sources: list[SourceConfig] = []
+    provider_types: set[str] = set()
+    for source_id in ("baidu-search", "tavily", "tavily-search"):
+        source = db.get(SourceConfig, source_id)
+        if not source or not source.is_active:
+            continue
+        collector = TavilyCollector(source)
+        provider_type = str(collector.search_type or source_id)
+        if not collector.api_key or provider_type in provider_types:
+            continue
+        sources = [*sources, source]
+        provider_types = {*provider_types, provider_type}
+    return sources
 
 
 def _parse_date(value: str | None):
@@ -38,8 +69,33 @@ def _parse_date(value: str | None):
     return parsed.replace(tzinfo=parsed.tzinfo or timezone.utc)
 
 
+def _parse_online_date(value: str | None):
+    """Ignore an unparseable model date instead of failing the whole discovery run."""
+    try:
+        return _parse_date(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _norm(value: str | None) -> str:
     return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (value or "").casefold())
+
+
+def _identity_matches(left: str | None, right: str | None) -> bool:
+    """Match legal names/products across bilingual and punctuation variants."""
+    a, b = _norm(left), _norm(right)
+    if not a or not b:
+        return False
+    return a == b or (min(len(a), len(b)) >= 5 and (a in b or b in a))
+
+
+def _chain_signature_matches(
+    importer: str | None,
+    product: str | None,
+    existing_importer: str | None,
+    existing_product: str | None,
+) -> bool:
+    return _identity_matches(importer, existing_importer) and _identity_matches(product, existing_product)
 
 
 def _dump(row, fields: list[str]) -> dict:
@@ -75,6 +131,12 @@ OPEN_SOURCE_EVIDENCE_FIELDS = [
 REPORT_FIELDS = [
     "id", "country", "title", "case_ids", "evidence_ids", "model_id", "status",
     "content", "summary", "error_log", "generated_at", "created_at",
+]
+CANDIDATE_FIELDS = [
+    "id", "country", "case_id", "shipment_id", "supplier_entity_id", "title",
+    "target_program", "exporter_name", "importer_name", "product", "score",
+    "evidence_grade", "verified_facts", "status", "review_note",
+    "investigation_id", "created_at", "reviewed_at",
 ]
 INVESTIGATION_FIELDS = [
     "id", "country", "name", "description", "status", "entity_ids", "case_ids",
@@ -433,6 +495,29 @@ class AnalyzeInput(BaseModel):
     investigation_id: str | None = None
 
 
+class ExpertDiscoveryInput(BaseModel):
+    countries: list[str] = Field(
+        default_factory=lambda: ["United States", "India", "Japan", "Taiwan"]
+    )
+    minimum_score: int = Field(default=60, ge=0, le=100)
+    max_candidates: int = Field(default=20, ge=1, le=100)
+    mcp_tools: list[str] = Field(default_factory=lambda: list(SUPPLY_CHAIN_MCP_TOOLS))
+    model_id: str | None = None
+    research_rounds: int = Field(default=3, ge=1, le=6)
+    import_record_window_days: Literal[90, 180, 365] = 365
+
+
+class SupplyChainMCPInput(BaseModel):
+    case_id: str
+    shipment_id: str
+    tools: list[str] = Field(default_factory=lambda: list(SUPPLY_CHAIN_MCP_TOOLS))
+
+
+class CandidateReviewInput(BaseModel):
+    action: str = Field(pattern="^(approve|reject)$")
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class ReportInput(BaseModel):
     case_ids: list[str] = Field(default_factory=list)
     model_id: str | None = None
@@ -691,6 +776,140 @@ def _score_pair(case: SupplyChainCase, shipment: SupplyChainShipment, direct: bo
     return score, grade, facts
 
 
+def _build_discovery_candidates(
+    cases: list[SupplyChainCase],
+    shipments: list[SupplyChainShipment],
+    entities: list[SupplyChainEntity],
+    minimum_score: int,
+    enabled_tools: list[str] | None = None,
+) -> list[dict]:
+    """Find China-origin imports crossing a named defence supplier.
+
+    Discovery deliberately stops at candidate status. A match identifies a
+    research direction; it does not claim that the shipment entered the
+    military programme.
+    """
+    enabled = set(enabled_tools if enabled_tools is not None else SUPPLY_CHAIN_MCP_TOOLS)
+    entity_by_id = {entity.id: entity for entity in entities}
+    children_by_parent: dict[str, set[str]] = {}
+    for entity in entities:
+        if entity.parent_id:
+            children_by_parent.setdefault(entity.parent_id, set()).add(entity.id)
+
+    candidates: list[dict] = []
+    for case in cases:
+        if not case.supplier_entity_id:
+            continue
+        related_ids = {case.supplier_entity_id}
+        supplier = entity_by_id.get(case.supplier_entity_id)
+        if supplier and supplier.parent_id:
+            related_ids.add(supplier.parent_id)
+        for entity_id in tuple(related_ids):
+            related_ids.update(children_by_parent.get(entity_id, set()))
+        related_names = {
+            _norm(name)
+            for entity_id in related_ids
+            for entity in [entity_by_id.get(entity_id)]
+            if entity
+            for name in [entity.name, entity.name_zh, *(entity.aliases or [])]
+            if name
+        }
+
+        for shipment in shipments:
+            china_origin = (
+                shipment.origin_country or shipment.exporter_country
+            ) == "China"
+            direct = (
+                shipment.importer_entity_id in related_ids
+                or _norm(shipment.importer_name) in related_names
+            )
+            if not china_origin or not direct:
+                continue
+            score, _, facts = _score_pair(case, shipment, direct=True)
+            supplier_entity = entity_by_id.get(case.supplier_entity_id)
+            mcp_checks = _evaluate_mcp_evidence(
+                case, shipment, supplier_entity, enabled,
+            )
+            score = _apply_mcp_score_gates(score, mcp_checks)
+            grade = "A" if score >= 85 else "B" if score >= 60 else "C"
+            facts["mcp_checks"] = mcp_checks
+            if score < minimum_score:
+                continue
+            candidates.append({
+                "case_id": case.id,
+                "shipment_id": shipment.id,
+                "country": case.country,
+                "supplier_entity_id": case.supplier_entity_id,
+                "title": case.title,
+                "target_program": case.target_program,
+                "exporter_name": shipment.exporter_name,
+                "importer_name": shipment.importer_name,
+                "product": shipment.product,
+                "score": score,
+                "evidence_grade": grade,
+                "verified_facts": facts,
+            })
+    return sorted(candidates, key=lambda item: item["score"], reverse=True)
+
+
+def _part_numbers(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {
+        token.upper()
+        for token in re.findall(r"\b(?=[A-Z0-9-]{5,}\b)(?=[A-Z0-9-]*\d)[A-Z0-9]+(?:-[A-Z0-9]+)+\b", value.upper())
+    }
+
+
+def _evaluate_mcp_evidence(
+    case: SupplyChainCase,
+    shipment: SupplyChainShipment,
+    supplier: SupplyChainEntity | None,
+    enabled_tools: set[str],
+) -> dict:
+    case_parts = _part_numbers(" ".join(filter(None, [case.title, case.product, case.target_program, case.source_excerpt])))
+    shipment_parts = _part_numbers(shipment.product)
+    return {
+        "entity_resolved": (
+            "resolve_supply_chain_entity" in enabled_tools
+            and bool(shipment.importer_entity_id and supplier and supplier.id == shipment.importer_entity_id)
+        ),
+        "contract_source_verified": (
+            "search_supply_chain_contracts" in enabled_tools
+            and bool(case.procurement_reference and case.source_url)
+        ),
+        "trade_batch_verified": (
+            "search_supply_chain_trade_records" in enabled_tools
+            and bool(shipment.bill_no and shipment.source_url)
+        ),
+        "part_number_match": (
+            "search_supply_chain_part_numbers" in enabled_tools
+            and bool(case_parts & shipment_parts)
+        ),
+        "matched_part_numbers": sorted(case_parts & shipment_parts),
+        "end_use_verified": (
+            "verify_supply_chain_end_use" in enabled_tools
+            and bool(case.target_program and case.source_url and case.source_excerpt)
+        ),
+        "enabled_tools": sorted(enabled_tools),
+    }
+
+
+def _apply_mcp_score_gates(score: int, checks: dict) -> int:
+    gated = score
+    if not checks["entity_resolved"]:
+        gated = min(gated, 69)
+    if not checks["contract_source_verified"]:
+        gated = min(gated, 74)
+    if not checks["trade_batch_verified"]:
+        gated = min(gated, 79)
+    if not checks["part_number_match"]:
+        gated = min(gated, 84)
+    if checks["end_use_verified"] and checks["part_number_match"]:
+        gated = min(100, gated + 5)
+    return gated
+
+
 async def _model_review(
     model: ModelConfig, case: SupplyChainCase, shipment: SupplyChainShipment,
     grade: str, score: int, facts: dict,
@@ -726,6 +945,458 @@ B级表示企业、产品和时间高度关联；C级表示仅构成待核线索
     review = json.loads(match.group(0))
     review["narrative"] = content
     return review
+
+
+@router.post("/experts/discover")
+async def discover_supply_chains(data: ExpertDiscoveryInput, db: Session = Depends(get_db)):
+    model = db.get(ModelConfig, data.model_id) if data.model_id else get_default_model(db)
+    if not model:
+        raise HTTPException(400, "请先配置默认研究模型，联网供应链发现需要模型完成证据交叉核验")
+    if not model.is_active:
+        raise HTTPException(400, "所选研究模型未启用")
+    expert_prompt, prompt_template_id = resolve_supply_chain_expert_prompt(db)
+    online = await discover_online_supply_chains(
+        data.countries, data.mcp_tools, model, data.max_candidates,
+        research_rounds=data.research_rounds,
+        import_record_window_days=data.import_record_window_days,
+        expert_prompt=expert_prompt,
+        prompt_template_id=prompt_template_id,
+        search_configs=_configured_supply_chain_search_sources(db),
+    )
+    existing_rows = db.query(SupplyChainDiscoveryCandidate).all()
+    existing_by_pair = {}
+    for row in existing_rows:
+        originals = (row.verified_facts or {}).get("original_fields") or {}
+        pair = (
+            row.country,
+            _norm(originals.get("importer_name") or row.importer_name),
+            _norm(originals.get("product") or row.product),
+        )
+        existing_by_pair[pair] = row
+    existing_chain_signatures = [
+        (row.destination_country, row.importer_name, row.product)
+        for row in db.query(SupplyChainShipment).all()
+    ]
+    for case in db.query(SupplyChainCase).all():
+        supplier = db.get(SupplyChainEntity, case.supplier_entity_id) if case.supplier_entity_id else None
+        if supplier:
+            existing_chain_signatures.append((case.country, supplier.name, case.product))
+            existing_chain_signatures.extend(
+                (case.country, alias, case.product) for alias in (supplier.aliases or [])
+            )
+    existing_evidence_urls = {
+        url for (url,) in db.query(SupplyChainOpenSourceEvidence.source_url).filter(
+            SupplyChainOpenSourceEvidence.source_url.isnot(None)
+        ).all() if url
+    }
+    existing_evidence_urls.update(
+        url for (url,) in db.query(SupplyChainCase.source_url).filter(
+            SupplyChainCase.source_url.isnot(None)
+        ).all() if url
+    )
+    duplicates_skipped = 0
+    created: list[SupplyChainDiscoveryCandidate] = []
+    for item in online["candidates"]:
+        originals = item.get("original_fields") or {}
+        pair = (
+            item["country"],
+            _norm(originals.get("importer_name") or item["importer_name"]),
+            _norm(originals.get("product") or item["product"]),
+        )
+        evidence_status = item.get("evidence_status") or "closed"
+        score = min(95, max(60, int(item.get("confidence_score", 0))))
+        if evidence_status != "closed":
+            score = min(score, 74)
+        if score < data.minimum_score:
+            continue
+        existing = existing_by_pair.get(pair)
+        if existing:
+            duplicates_skipped += 1
+            if existing.status == "rejected":
+                continue
+            facts = dict(existing.verified_facts or {})
+            prior_validation = facts.get("evidence_validation") or {}
+            prior_trade_valid = bool((prior_validation.get("trade") or {}).get("valid"))
+            contract_url = facts.get("contract_evidence_url") or item.get("contract_evidence_url")
+            trade_url = (
+                facts.get("trade_evidence_url") if prior_trade_valid
+                else None
+            ) or item.get("trade_evidence_url")
+            combined_status = "closed" if contract_url and trade_url else (
+                "contract_only" if contract_url else "trade_only"
+            )
+            facts.update({
+                "contract_evidence_url": contract_url,
+                "trade_evidence_url": trade_url,
+                "evidence_status": combined_status,
+                "evidence_gap": (
+                    "" if combined_status == "closed"
+                    else item.get("evidence_gap") or "待补所选时间范围内的中国进口记录、提单或中国供应商证据" if combined_status == "contract_only"
+                    else "待补军工合同、采购项目或最终用途证据"
+                ),
+                "supporting_urls": list(dict.fromkeys([
+                    *(facts.get("supporting_urls") or []), *(item.get("supporting_urls") or []),
+                ])),
+                "limitations": item.get("limitations") or facts.get("limitations") or [],
+                "evidence_validation": item.get("evidence_validation") or facts.get("evidence_validation") or {},
+                "contract_date": item.get("contract_date") or facts.get("contract_date"),
+                "trade_date": item.get("trade_date") or facts.get("trade_date"),
+                "import_record_window_days": data.import_record_window_days,
+                "research_trace": online.get("research_trace") or {},
+            })
+            existing.verified_facts = facts
+            existing.score = max(existing.score or 0, score if combined_status != "closed" else max(75, score))
+            existing.evidence_grade = "B" if combined_status == "closed" else "C"
+            existing.title = item["contract_title"]
+            existing.importer_name = item["importer_name"]
+            existing.exporter_name = item["exporter_name"]
+            existing.product = item["product"]
+            entity = db.get(SupplyChainEntity, existing.supplier_entity_id)
+            if entity:
+                entity.name = item["importer_name"]
+                entity.source_url = contract_url or trade_url or entity.source_url
+            if item.get("contract_evidence_url"):
+                case = db.get(SupplyChainCase, existing.case_id)
+                if case:
+                    case.title = item["contract_title"]
+                    case.procurement_agency = item.get("contracting_agency") or case.procurement_agency
+                    case.procurement_reference = item.get("contract_reference") or case.procurement_reference
+                    case.procurement_date = _parse_online_date(item.get("contract_date")) or case.procurement_date
+                    case.product = item["product"]
+                    case.target_program = item.get("target_program") or case.target_program
+                    case.source_url = item["contract_evidence_url"]
+                    case.source_excerpt = item.get("contract_excerpt") or case.source_excerpt
+                has_contract_evidence = db.query(SupplyChainOpenSourceEvidence.id).filter(
+                    SupplyChainOpenSourceEvidence.case_id == existing.case_id,
+                    SupplyChainOpenSourceEvidence.source_type == "official_contract",
+                ).first()
+                if not has_contract_evidence:
+                    db.add(SupplyChainOpenSourceEvidence(
+                        id=f"ose-online-contract-{uuid4().hex[:12]}",
+                        case_id=existing.case_id,
+                        title="国防合同或官方项目证据",
+                        source_type="official_contract",
+                        source_url=item["contract_evidence_url"],
+                        source_excerpt=item.get("contract_excerpt"),
+                        verified_facts=[item["contract_title"]],
+                        evidence_grade="B", status="follow_up",
+                        limitations=item.get("limitations") or [],
+                    ))
+            if item.get("trade_evidence_url"):
+                shipment = db.get(SupplyChainShipment, existing.shipment_id)
+                if shipment:
+                    shipment.source_url = item["trade_evidence_url"]
+                    shipment.bill_no = item.get("trade_reference") or shipment.bill_no
+                    shipment.exporter_name = item["exporter_name"]
+                    shipment.importer_name = item["importer_name"]
+                    shipment.product = item["product"]
+                    shipment.shipment_date = _parse_online_date(item.get("trade_date")) or shipment.shipment_date
+                    shipment.raw_record = {
+                        **(shipment.raw_record or {}),
+                        "excerpt": item.get("trade_excerpt"),
+                        "trade_date_basis": item.get("trade_date_basis"),
+                        "evidence_validation": item.get("evidence_validation") or {},
+                    }
+                existing.exporter_name = item["exporter_name"]
+                has_trade_evidence = db.query(SupplyChainOpenSourceEvidence.id).filter(
+                    SupplyChainOpenSourceEvidence.case_id == existing.case_id,
+                    SupplyChainOpenSourceEvidence.source_type == "trade_record",
+                ).first()
+                if not has_trade_evidence:
+                    db.add(SupplyChainOpenSourceEvidence(
+                        id=f"ose-online-trade-{uuid4().hex[:12]}",
+                        case_id=existing.case_id,
+                        title="中国来源进口或贸易证据",
+                        source_type="trade_record",
+                        source_url=item["trade_evidence_url"],
+                        source_excerpt=item.get("trade_excerpt"),
+                        verified_facts=[item["exporter_name"], item["product"]],
+                        evidence_grade="B", status="follow_up",
+                        limitations=item.get("limitations") or [],
+                    ))
+            continue
+        original_importer = originals.get("importer_name") or item["importer_name"]
+        original_product = originals.get("product") or item["product"]
+        duplicate_chain = any(
+            country == item["country"] and _chain_signature_matches(
+                original_importer, original_product, known_importer, known_product,
+            )
+            for country, known_importer, known_product in existing_chain_signatures
+        )
+        incoming_urls = {
+            item.get("contract_evidence_url"), item.get("trade_evidence_url"),
+        } - {None, ""}
+        if duplicate_chain or bool(incoming_urls & existing_evidence_urls):
+            duplicates_skipped += 1
+            continue
+        token = uuid4().hex[:12]
+        primary_url = item.get("contract_evidence_url") or item.get("trade_evidence_url")
+        entity = SupplyChainEntity(
+            id=f"ent-online-{token}", name=item["importer_name"], country=item["country"],
+            entity_type="defense_supplier", source_url=primary_url,
+            notes="联网供应链专家发现，待人工审核。",
+        )
+        db.add(entity)
+        db.flush()
+        case = SupplyChainCase(
+            id=f"case-online-{token}", country=item["country"], title=item["contract_title"],
+            procurement_agency=item.get("contracting_agency"),
+            procurement_reference=item.get("contract_reference"), supplier_entity_id=entity.id,
+            product=item["product"], target_program=item.get("target_program"),
+            procurement_date=_parse_online_date(item.get("contract_date")),
+            source_url=item.get("contract_evidence_url"), source_excerpt=item.get("contract_excerpt"),
+            status="needs_review",
+        )
+        shipment = SupplyChainShipment(
+            id=f"shp-online-{token}", exporter_name=item["exporter_name"], exporter_country="China",
+            importer_entity_id=entity.id, importer_name=item["importer_name"], product=item["product"],
+            origin_country="China", destination_country=item["country"],
+            shipment_date=_parse_online_date(item.get("trade_date")),
+            bill_no=item.get("trade_reference"), source_name="联网公开来源",
+            source_url=item.get("trade_evidence_url"), raw_record={
+                "excerpt": item.get("trade_excerpt"),
+                "trade_date_basis": item.get("trade_date_basis"),
+                "evidence_validation": item.get("evidence_validation") or {},
+            },
+        )
+        db.add_all([case, shipment])
+        db.flush()
+        source_rows = [
+            SupplyChainOpenSourceEvidence(
+                id=f"ose-online-contract-{token}", case_id=case.id, title="国防合同或官方项目证据",
+                source_type="official_contract", source_url=item["contract_evidence_url"],
+                source_excerpt=item.get("contract_excerpt"), verified_facts=[item["contract_title"]],
+                evidence_grade="B", status="follow_up", limitations=item.get("limitations") or [],
+            ),
+            SupplyChainOpenSourceEvidence(
+                id=f"ose-online-trade-{token}", case_id=case.id, title="中国来源进口或贸易证据",
+                source_type="trade_record", source_url=item["trade_evidence_url"],
+                source_excerpt=item.get("trade_excerpt"), verified_facts=[item["exporter_name"], item["product"]],
+                evidence_grade="B", status="follow_up", limitations=item.get("limitations") or [],
+            ),
+        ]
+        source_rows = [row for row in source_rows if row.source_url]
+        facts = {
+            "online_research": True, "evidence_status": evidence_status,
+            "evidence_gap": item.get("evidence_gap") or "",
+            "contract_evidence_url": item.get("contract_evidence_url"),
+            "trade_evidence_url": item.get("trade_evidence_url"),
+            "supporting_urls": item.get("supporting_urls") or [], "limitations": item.get("limitations") or [],
+            "evidence_validation": item.get("evidence_validation") or {},
+            "contract_date": item.get("contract_date"), "trade_date": item.get("trade_date"),
+            "trade_date_basis": item.get("trade_date_basis"),
+            "import_record_window_days": data.import_record_window_days,
+            "original_fields": item.get("original_fields") or {},
+            "research_trace": online.get("research_trace") or {},
+        }
+        candidate = SupplyChainDiscoveryCandidate(
+            id=f"candidate-online-{token}", country=item["country"], case_id=case.id,
+            shipment_id=shipment.id, supplier_entity_id=entity.id, title=item["contract_title"],
+            target_program=item.get("target_program"), exporter_name=item["exporter_name"],
+            importer_name=item["importer_name"], product=item["product"], score=score,
+            evidence_grade=("C" if evidence_status != "closed" else "A" if score >= 85 else "B"),
+            verified_facts=facts, status="pending",
+        )
+        db.add_all([*source_rows, candidate])
+        created.append(candidate)
+        existing_by_pair[pair] = candidate
+    db.commit()
+    return {
+        "cases_scanned": online["sources_found"], "shipments_scanned": online["sources_read"],
+        "candidates_matched": len(online["candidates"]), "candidates_created": len(created),
+        "duplicates_skipped": duplicates_skipped,
+        "discoveries": [_dump(row, CANDIDATE_FIELDS) for row in created],
+        "search_errors": online["errors"],
+        "research_trace": online.get("research_trace") or {},
+    }
+
+
+@router.get("/experts/mcp-tools")
+def list_supply_chain_mcp_tools():
+    labels = {
+        "resolve_supply_chain_entity": ("企业身份消歧", "核验进口主体与军工供应商的法定主体关系"),
+        "search_supply_chain_contracts": ("军工合同检索", "核验合同号、采购机关与官方原始来源"),
+        "search_supply_chain_trade_records": ("贸易记录检索", "核验提单号、批次与贸易原始来源"),
+        "deep_search_china_trade_records": ("中国进口与提单深度检索", "按企业别名、地址、产品和时间定向穿透专业贸易数据索引"),
+        "search_supply_chain_part_numbers": ("精确料号检索", "匹配P/N、NSN、图号与具体型号"),
+        "verify_supply_chain_end_use": ("最终用途核验", "核验目标平台、合同用途与原始文件"),
+    }
+    return [
+        {"id": tool, "name": labels[tool][0], "description": labels[tool][1], "is_active": True}
+        for tool in SUPPLY_CHAIN_MCP_TOOLS
+    ]
+
+
+@router.post("/mcp/evaluate")
+def evaluate_supply_chain_pair(data: SupplyChainMCPInput, db: Session = Depends(get_db)):
+    case = db.get(SupplyChainCase, data.case_id)
+    shipment = db.get(SupplyChainShipment, data.shipment_id)
+    if not case or not shipment:
+        raise HTTPException(404, "采购项目或贸易记录不存在")
+    supplier = db.get(SupplyChainEntity, case.supplier_entity_id) if case.supplier_entity_id else None
+    tools = {tool for tool in data.tools if tool in SUPPLY_CHAIN_MCP_TOOLS}
+    direct = bool(
+        shipment.importer_entity_id == case.supplier_entity_id
+        or (supplier and _norm(shipment.importer_name) in {
+            _norm(name) for name in [supplier.name, supplier.name_zh, *(supplier.aliases or [])] if name
+        })
+    )
+    base_score, _, facts = _score_pair(case, shipment, direct)
+    checks = _evaluate_mcp_evidence(case, shipment, supplier, tools)
+    score = _apply_mcp_score_gates(base_score, checks)
+    return {
+        "case_id": case.id,
+        "shipment_id": shipment.id,
+        "base_score": base_score,
+        "score": score,
+        "evidence_grade": "A" if score >= 85 else "B" if score >= 60 else "C",
+        "checks": checks,
+        "facts": facts,
+    }
+
+
+@router.get("/experts/candidates")
+def list_discovery_candidates(
+    status: str | None = None, db: Session = Depends(get_db),
+):
+    query = db.query(SupplyChainDiscoveryCandidate)
+    if status:
+        query = query.filter(SupplyChainDiscoveryCandidate.status == status)
+    rows = query.order_by(SupplyChainDiscoveryCandidate.created_at.desc()).all()
+    return [_dump(row, CANDIDATE_FIELDS) for row in rows]
+
+
+@router.post("/experts/candidates/{candidate_id}/review")
+def review_discovery_candidate(
+    candidate_id: str, data: CandidateReviewInput, db: Session = Depends(get_db),
+):
+    candidate = db.get(SupplyChainDiscoveryCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(404, "候选链不存在")
+    if candidate.status != "pending":
+        raise HTTPException(409, "该候选链已经审核")
+    candidate.review_note = data.note
+    candidate.reviewed_at = _now()
+    if data.action == "reject":
+        candidate.status = "rejected"
+        db.commit()
+        return _dump(candidate, CANDIDATE_FIELDS)
+
+    investigation_id = f"inv-expert-{uuid4().hex[:12]}"
+    evidence_id = f"evd-{uuid4().hex[:12]}"
+    open_source_ids = [
+        row[0] for row in db.query(SupplyChainOpenSourceEvidence.id).filter(
+            SupplyChainOpenSourceEvidence.case_id == candidate.case_id
+        ).all()
+    ]
+    case = db.get(SupplyChainCase, candidate.case_id)
+    importer = db.get(SupplyChainEntity, candidate.supplier_entity_id) if candidate.supplier_entity_id else None
+    facts = candidate.verified_facts or {}
+    contract_url = facts.get("contract_evidence_url") or (case.source_url if case else None)
+    shipment = db.get(SupplyChainShipment, candidate.shipment_id)
+    trade_url = facts.get("trade_evidence_url") or (shipment.source_url if shipment else None)
+
+    exporter = db.query(SupplyChainEntity).filter(
+        SupplyChainEntity.country == "China",
+        SupplyChainEntity.name == candidate.exporter_name,
+    ).first()
+    if not exporter:
+        exporter = SupplyChainEntity(
+            id=f"ent-expert-exporter-{uuid4().hex[:12]}", name=candidate.exporter_name,
+            country="China", entity_type="china_exporter", source_url=trade_url,
+            defense_roles=[f"向{candidate.importer_name}供应{candidate.product}"],
+            notes="由联网贸易证据识别的中国上游供应节点，待进一步核验法定主体。",
+        )
+        db.add(exporter)
+    elif candidate.product not in (exporter.defense_roles or []):
+        exporter.defense_roles = [*(exporter.defense_roles or []), candidate.product]
+
+    if importer:
+        importer.entity_type = "defense_supplier"
+        importer.defense_roles = list(dict.fromkeys([
+            *(importer.defense_roles or []),
+            *(filter(None, [case.target_program if case else None, case.product if case else None])),
+        ]))
+
+    agency = None
+    if case and case.procurement_agency:
+        agency = db.query(SupplyChainEntity).filter(
+            SupplyChainEntity.country == candidate.country,
+            SupplyChainEntity.name == case.procurement_agency,
+        ).first()
+        if not agency:
+            agency = SupplyChainEntity(
+                id=f"ent-expert-agency-{uuid4().hex[:12]}", name=case.procurement_agency,
+                country=candidate.country, entity_type="government_agency", source_url=contract_url,
+                defense_roles=[case.target_program or case.title],
+                notes="合同或官方项目来源中识别的采购/最终应用机关。",
+            )
+            db.add(agency)
+
+    entity_ids = list(dict.fromkeys([
+        *(filter(None, [candidate.supplier_entity_id, exporter.id, agency.id if agency else None])),
+    ]))
+    report_id = f"scr-expert-{uuid4().hex[:12]}"
+    report = SupplyChainReport(
+        id=report_id, country=candidate.country,
+        title=f"{candidate.importer_name}中国来源供应链初核报告",
+        case_ids=[candidate.case_id], evidence_ids=[evidence_id], model_id="supply-chain-online-expert",
+        status="needs_review",
+        summary=f"联网证据显示{candidate.exporter_name}向{candidate.importer_name}供应{candidate.product}；同时存在与{candidate.title}相关的合同或官方项目来源。",
+        content=(
+            f"# {candidate.importer_name}中国来源供应链初核\n\n"
+            f"- 中国上游：{candidate.exporter_name}\n"
+            f"- 进口/军工企业：{candidate.importer_name}\n"
+            f"- 产品：{candidate.product}\n"
+            f"- 合同或项目：{candidate.title}\n"
+            f"- 应用方向：{candidate.target_program or '待进一步核验'}\n\n"
+            f"## 证据来源\n\n"
+            f"- [合同或官方项目证据]({contract_url})\n"
+            f"- [中国进口或贸易证据]({trade_url})\n\n"
+            "## 证据边界\n\n本报告为审核通过后的初始归档，不代表已证明具体进口批次进入最终装备；仍需核验料号、BOM、批次和最终用途。"
+        ),
+        generated_at=_now(),
+    )
+    direction = COUNTRY_NAMES.get(candidate.country, candidate.country)
+    investigation = SupplyChainInvestigation(
+        id=investigation_id,
+        country=candidate.country,
+        name=f"{direction}·{candidate.importer_name}中国供应线索",
+        description=(
+            f"审核通过的专家候选：{candidate.exporter_name}向"
+            f"{candidate.importer_name}供应{candidate.product}，并与"
+            f"“{candidate.title}”形成企业级交叉。尚需核验精确料号、"
+            "批次、BOM和最终用途。"
+        ),
+        status="researching",
+        entity_ids=entity_ids,
+        case_ids=[candidate.case_id],
+        shipment_ids=[candidate.shipment_id],
+        evidence_ids=[evidence_id],
+        open_source_evidence_ids=open_source_ids,
+        report_ids=[report_id],
+    )
+    evidence = SupplyChainEvidence(
+        id=evidence_id,
+        case_id=candidate.case_id,
+        shipment_id=candidate.shipment_id,
+        relation_type="possible_supply",
+        evidence_grade=candidate.evidence_grade,
+        score=candidate.score,
+        status="needs_review",
+        reasoning=(
+            "候选链已通过人工初审并进入供应链穿透模块。该结果仍不能证明"
+            "货物已进入具体军工项目，需继续补充精确料号、批次和最终用途证据。"
+        ),
+        verified_facts=candidate.verified_facts,
+        model_review={"source": "supply_chain_expert", "human_approved": True},
+        is_reportable=False,
+    )
+    candidate.status = "approved"
+    candidate.investigation_id = investigation_id
+    db.add_all([investigation, evidence, report])
+    db.commit()
+    return _dump(candidate, CANDIDATE_FIELDS)
 
 
 @router.post("/analyze")
