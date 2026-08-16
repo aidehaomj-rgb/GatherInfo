@@ -17,7 +17,6 @@ from app.collection_policy import evaluate_collection_policy
 from app.llm_client import call_llm
 from app.language_quality import is_substantially_chinese
 from app.models import CollectedItem, ModelConfig
-from app.tag_taxonomy import normalize_category
 from app.services.item_service import purge_item_references
 from sqlalchemy.orm import Session
 
@@ -321,7 +320,7 @@ async def _review_batch(
 拒绝以下内容：标签页、栏目页、搜索结果页、广告/博彩/导流页、多个标题或链接堆叠页、无法辨认原始来源的转载拼贴、正文过短、不能说明主体/行为/对象/时间或影响的片段。不得根据常识补充原文没有的事实。
 
 对每条候选仅返回 JSON：
-{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"china_customs_score":0-100,"transmission_evidence_score":0-100,"executable_check_score":0-100,"foreign_enforcement_only":false,"china_customs_stage":"中国进境|中国出境|中外陆路边境|中国港口与舱单|保税监管|中国出口管制|中国检验检疫|跨境电商|无直接落点","transmission_chain":"境外事件→供需/价差/物流/政策变化→具体对华贸易路线或主体→中国海关监管风险","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类（仅从以下受控分类中选一个：贸易政策/关税税则/法规与合规/技术性贸易措施/出口管制/执法与缉私/市场与商品/能源/军工采购/综合）","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","facts":"仅依据原文概括的事实","customs_risk":"明确落在中国海关监管环节的风险，使用可能、或等研判措辞","data_checks":"至少包括数据表或单证、商品/国别/路线范围、异常指标和下一步核查动作","risk_level":"高|中高|中"}]}。
+{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"china_customs_score":0-100,"transmission_evidence_score":0-100,"executable_check_score":0-100,"foreign_enforcement_only":false,"china_customs_stage":"中国进境|中国出境|中外陆路边境|中国港口与舱单|保税监管|中国出口管制|中国检验检疫|跨境电商|无直接落点","transmission_chain":"境外事件→供需/价差/物流/政策变化→具体对华贸易路线或主体→中国海关监管风险","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","facts":"仅依据原文概括的事实","customs_risk":"明确落在中国海关监管环节的风险，使用可能、或等研判措辞","data_checks":"至少包括数据表或单证、商品/国别/路线范围、异常指标和下一步核查动作","risk_level":"高|中高|中"}]}。
 
 只有在 independence_score、completeness_score 均不低于70，且能写出不臆测的完整中文整理稿时才允许 approve。对于"涉进出口时政热点"主题另须同时满足：customs_value_score、topic_relevance_score、china_customs_score、transmission_evidence_score、executable_check_score均不低于75；china_customs_stage不能是"无直接落点"；transmission_chain必须说明风险如何落到中国进境、出境、陆路边境、港口舱单、保税、出口管制、检验检疫或跨境电商监管；data_checks必须明确数据表或单证、商品/国别/路线范围、异常指标及下一步动作。原文不必出现中国，但从境外事件到中国海关风险的传导必须有贸易方向、地理邻接、价差、现有航线、管制对象或供应依赖等客观依据。仅影响外国海关征税、外国贸易救济、外国市场准入或外国进口商合规，foreign_enforcement_only应为true并必须拒绝；不得把一般性的"可能影响中国"作为入选理由。整理稿必须区分原文事实与分析推演。整理稿须区分页面发布日期与主事件日期：时间线、综述、月度汇编等页面用 artifact_type=timeline/roundup，并把该条情报所述核心事件真实发生日期写入 primary_event_date；不得把页面更新时间当成旧事件的新发生日期。只输出 JSON，不要 Markdown。
 
@@ -427,8 +426,9 @@ def _curate_approved_item(
             _score(decision, "publishability"),
         ]
     quality = min(quality_scores) / 100
-    raw_category = decision_profile.get("business_category") or item.category
-    business_category = normalize_category(raw_category) or raw_category
+    # business_category 保留大模型判断（自由分类），标签浓缩统一在采集引擎
+    # 打标签阶段（engine._apply_suggested_tags）归一化到受控分类，此处不再重复归一化。
+    business_category = decision_profile.get("business_category") or item.category
     entities = _merge_profile_entities(item.entities, decision_profile)
     china_relevance = decision_profile.get("china_relevance")
     relevance_score = (
