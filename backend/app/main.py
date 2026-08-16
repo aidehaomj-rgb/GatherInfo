@@ -124,8 +124,10 @@ def _operator_write_rejection(
         return "Missing or expired operator session token"
     if origin and origin not in allowed_origins:
         return "Untrusted request origin"
-    if fetch_site == "cross-site":
-        return "Cross-site write request blocked"
+    # 注意：不再依据 Sec-Fetch-Site 拒绝写入。该头在 localhost 与 127.0.0.1 混用、
+    # 局域网 IP 访问、反向代理等合法场景下会误报 cross-site，导致用户正常的编辑操作
+    # （如修改主题名称）被拦截。CSRF 防护已由上面的 HMAC operator token（仅同源签发）
+    # 与 Origin 白名单共同兜底，跨站攻击无法获取合法 token，安全性不因此降低。
     return None
 
 async def rate_limit_middleware(request: Request, call_next):

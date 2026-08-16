@@ -100,11 +100,15 @@ def list_batches(
         run_outs: list[BatchRunOut] = []
         for r in runs:
             src = db.query(SourceConfig).filter(SourceConfig.id == r.source_id).first()
+            duplicate_items = getattr(r, "duplicate_items", None) or []
             run_outs.append(BatchRunOut(
                 id=r.id, source_id=r.source_id,
                 topic_id=r.topic_id, status=r.status if r.status else "unknown",
                 items_new=r.items_new or 0, items_found=r.items_found or 0,
                 items_failed=r.items_failed or 0,
+                items_duplicate=len(duplicate_items) if duplicate_items else (r.items_updated or 0),
+                duplicate_items=duplicate_items,
+                source_verdict=getattr(r, "source_verdict", None),
                 started_at=r.started_at.isoformat() if r.started_at else None,
                 completed_at=r.completed_at.isoformat() if r.completed_at else None,
                 duration_ms=r.duration_ms,
@@ -518,6 +522,11 @@ async def quality_review_items(
     model = get_default_model(db)
     return await review_persisted_items(
         db, model, item_ids=data.item_ids or None, limit=data.limit,
+        topic_id=data.topic_id,
+        source_id=data.source_id,
+        category=data.category,
+        language=data.language,
+        q=data.q,
     )
 
 

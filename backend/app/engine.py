@@ -21,6 +21,7 @@ from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
 from app.collection_policy import evaluate_collection_policy
 from app.content_parser import parse_fetch_item
 from app.model_defaults import get_default_model
+from app.tag_taxonomy import CATEGORY_LABEL, normalize_category
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     ItemTopicMembership, JobStatus, ModelConfig, SourceConfig, Tag, Topic,
@@ -293,17 +294,17 @@ class CollectionEngine:
         window_items, window_rejected = _filter_items_by_window(
             result.items, window_start, window_end
         )
-        existing_skipped = 0
+        early_duplicates: list[dict] = []
         if topic_id == "weekly-enforcement-intelligence":
-            window_items, existing_skipped = (
+            window_items, early_duplicates = (
                 self._exclude_existing_enforcement_candidates(window_items)
             )
-            if existing_skipped:
+            if early_duplicates:
                 self._record_progress(
                     run,
                     "deduplicated",
-                    f"审核前已排除 {existing_skipped} 条数据库已有案例，避免重复占用模型额度",
-                    detail={"existing_skipped": existing_skipped},
+                    f"审核前已排除 {len(early_duplicates)} 条数据库已有案例，避免重复占用模型额度",
+                    detail={"existing_skipped": len(early_duplicates)},
                 )
         if topic_id == "weekly-enforcement-intelligence":
             from app.enforcement_review import prioritize_enforcement_candidates
@@ -455,17 +456,40 @@ class CollectionEngine:
                 ]
             result.items_new = len(result.items)
             run.items_new = result.items_new
-        persisted_count = self._persist_items(
+        persisted_count, duplicates = self._persist_items(
             result.items, source.id, run.id, topic_id, window_start, window_end, keywords
         )
         result.items_new = persisted_count
         _sync_run_result_metrics(run, result, persisted_count)
-        duplicate_count = max(0, len(result.items) - persisted_count)
+        all_duplicates = [*early_duplicates, *duplicates]
+        duplicate_count = len(all_duplicates)
+        run.duplicate_items = all_duplicates or None
+        run.items_updated = duplicate_count
+        run.source_verdict = self._build_source_verdict(
+            source, result, persisted_count, duplicate_count,
+        )
+        # 将本次采集结论回写到信息源配置，供「信息源管理」页面直接呈现
+        source.last_verdict = run.source_verdict
+        source.last_collected_at = utc_now()
+        source.health_status = "healthy" if run.source_verdict.get("connectable") else "unreachable"
+        source.health_checked_at = utc_now()
+        source.last_error = None if run.source_verdict.get("connectable") else (
+            run.source_verdict.get("summary") or "采集未完成连接"
+        )
         self._record_progress(
             run, "persisted",
             f"已入库 {persisted_count} 条新信息，识别并跳过 {duplicate_count} 条重复或已存在信息",
             detail={"items_new": persisted_count, "duplicates_or_existing": duplicate_count},
         )
+        for dup in all_duplicates[:MAX_ITEM_PROGRESS_EVENTS]:
+            self._record_progress(
+                run, "duplicate",
+                f"重复信息：《{dup['title'] or '未命名信息'}》已存在，不重复入库",
+                item_title=dup["title"] or None,
+                detail={"existing_item_id": dup["existing_item_id"], "matched_by": dup["matched_by"]},
+                commit=False,
+            )
+        self.db.commit()
         self._update_source(source, persisted_count)
         self.db.commit()
         if result.items:
@@ -499,28 +523,40 @@ class CollectionEngine:
 
     def _exclude_existing_enforcement_candidates(
         self, items: list[FetchItem],
-    ) -> tuple[list[FetchItem], int]:
-        """Remove known cases before costly model review."""
+    ) -> tuple[list[FetchItem], list[dict]]:
+        """Remove known cases before costly model review.
+
+        Returns (retained, duplicates) — 被排除的重复项保留标题/链接，
+        供任务查看按“重复/新增”分类展示。
+        """
         existing = self.db.query(
+            CollectedItem.id,
             CollectedItem.url,
             CollectedItem.title,
             CollectedItem.content,
         ).filter(
             CollectedItem.topic_id == "weekly-enforcement-intelligence",
         ).all()
-        existing_keys = {
-            _dedupe_fingerprint(row.url, row.title or "", row.content)
+        existing_keys: dict[str, str] = {
+            _dedupe_fingerprint(row.url, row.title or "", row.content): row.id
             for row in existing
         }
         retained: list[FetchItem] = []
+        duplicates: list[dict] = []
         seen: set[str] = set()
         for item in items:
             key = _dedupe_fingerprint(item.url, item.title, item.content)
             if key in existing_keys or key in seen:
+                duplicates.append({
+                    "title": (item.title or "").strip(),
+                    "url": item.url or "",
+                    "existing_item_id": existing_keys.get(key),
+                    "matched_by": "enforcement_dedupe",
+                })
                 continue
             seen.add(key)
             retained.append(item)
-        return retained, len(items) - len(retained)
+        return retained, duplicates
 
     def _enforcement_jurisdiction_counts(
         self, window_start: datetime | None,
@@ -800,12 +836,20 @@ class CollectionEngine:
             for rule in rules:
                 if rule.get("keyword", "").lower() in text:
                     tag_id = rule.get("tag", "")
-                    if tag_id:
-                        ns = tag_id.split(":", 1)[0] if ":" in tag_id else "general"
-                        val = tag_id.split(":", 1)[1] if ":" in tag_id else tag_id
-                        self.ensure_tag(tag_id, ns, val)
-                        if self.tag_item(item.id, tag_id):
-                            applied += 1
+                    if not tag_id:
+                        continue
+                    if ":" in tag_id:
+                        ns, val = tag_id.split(":", 1)
+                    else:
+                        # 无命名空间的自由标签统一归一化到受控分类，避免标签爆炸
+                        val = normalize_category(tag_id)
+                        if not val:
+                            continue
+                        ns = "category"
+                        tag_id = f"category:{val}"
+                    self.ensure_tag(tag_id, ns, val, CATEGORY_LABEL.get(val) if ns == "category" else None)
+                    if self.tag_item(item.id, tag_id):
+                        applied += 1
         self.db.commit()
         return applied
 
@@ -832,14 +876,24 @@ class CollectionEngine:
             for tag_id in unique_suggested:
                 parts = tag_id.split(":", 1)
                 ns, val = (parts[0], parts[1]) if len(parts) == 2 else ("general", parts[0])
-                self.ensure_tag(tag_id, ns, val)
+                # 无命名空间或非受控分类的自由标签，统一归一化到受控分类
+                if ns == "general":
+                    norm = normalize_category(val)
+                    if not norm:
+                        continue
+                    ns, val, tag_id = "category", norm, f"category:{norm}"
+                self.ensure_tag(tag_id, ns, val, CATEGORY_LABEL.get(val) if ns == "category" else None)
                 self.tag_item(item.id, tag_id)
 
-            # Always apply a category tag if item has a category
+            # Always apply a category tag if item has a category（归一化到受控分类）
             if item.category:
-                tag_id = f"category:{item.category}"
-                self.ensure_tag(tag_id, "category", item.category)
-                self.tag_item(item.id, tag_id)
+                normalized = normalize_category(item.category)
+                if normalized:
+                    if normalized != item.category:
+                        item.category = normalized
+                    tag_id = f"category:{normalized}"
+                    self.ensure_tag(tag_id, "category", normalized, CATEGORY_LABEL.get(normalized))
+                    self.tag_item(item.id, tag_id)
         self.db.commit()
 
     # ── Internals ───────────────────────────────────────────────────────
@@ -897,6 +951,7 @@ class CollectionEngine:
                        window_end: "datetime | None" = None,
                        keywords: list[str] | None = None):
         persisted_count = 0
+        duplicates: list[dict] = []
         self._source_cache = getattr(self, "_source_cache", {})
         _source_obj = self._source_cache.get(source_id)
         if _source_obj is None:
@@ -964,11 +1019,21 @@ class CollectionEngine:
             content_hash = _hash(_dedupe_fingerprint(fi.url, fi.title, parsed.content))
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
+                matched_by = "url" if existing else None
                 if not existing:
                     existing = self.db.query(CollectedItem).filter(
                         CollectedItem.content_hash == content_hash,
                     ).first()
+                    if existing:
+                        matched_by = "content_hash"
                 if existing:
+                    # 与本地库比对命中已有条目 → 记录为“重复”，保留标题供任务查看展示
+                    duplicates.append({
+                        "title": (fi.title or "").strip(),
+                        "url": fi.url or "",
+                        "existing_item_id": existing.id,
+                        "matched_by": matched_by or "unknown",
+                    })
                     if fi.title.strip() and fi.title.strip() != existing.title:
                         existing.title = fi.title.strip()
                     if parsed.content and parsed.content != existing.content:
@@ -1026,7 +1091,7 @@ class CollectionEngine:
             except Exception:
                 self.db.rollback()
         self.db.commit()
-        return persisted_count
+        return persisted_count, duplicates
 
     def _select_enforcement_portfolio(
         self,
@@ -1136,6 +1201,76 @@ class CollectionEngine:
             if len(selected) >= slots:
                 break
         return selected, max(0, len(items) - len(selected))
+
+    def _build_source_verdict(
+        self,
+        source: SourceConfig,
+        result: CollectResult,
+        persisted_count: int,
+        duplicate_count: int,
+    ) -> dict:
+        """为一次已完成的信息源采集生成明确结论。
+
+        结论维度：可连接 / 可爬取 / 可下载 / 语言类型。
+        - 可连接：连接器创建成功且完成抓取（能走到本方法即已连接）。
+        - 可爬取：源返回了可读取的候选项（页面/API 内容可解析）。
+        - 可下载：成功获取到正文或摘要（内容真正落地）。
+
+        数量口径（自洽）：
+        - ``items_found`` = 符合采集标准的信息数 = 新增 + 重复（真正进入本地库比对）。
+        - ``items_candidates`` = 审核后保留的候选数（进入 LLM 审核前的数量，供参考）。
+        """
+        items = result.items or []
+        matched = persisted_count + duplicate_count
+        with_content = sum(1 for item in items if (item.content or "").strip())
+        with_summary = sum(1 for item in items if (item.summary or "").strip())
+
+        languages: list[str] = list(dict.fromkeys(
+            item.language for item in items if item.language
+        ))
+        if not languages:
+            languages = self._infer_languages(items)
+        if not languages and getattr(source, "languages", None):
+            languages = list(source.languages)
+
+        # 能走到本方法说明连接器创建成功且抓取流程已完成
+        connectable = True
+        crawlable = matched > 0 or len(items) > 0
+        downloadable = with_content > 0 or with_summary > 0
+
+        parts: list[str] = []
+        parts.append("可连接" if connectable else "不可连接")
+        parts.append("可爬取" if crawlable else "未爬取到内容")
+        parts.append("可下载" if downloadable else "未获取到正文")
+        if languages:
+            lang_label = "、".join(_language_label(lang) for lang in languages)
+            parts.append(f"语言：{lang_label}")
+
+        return {
+            "connectable": bool(connectable),
+            "crawlable": bool(crawlable),
+            "downloadable": bool(downloadable),
+            "languages": languages,
+            "channel": _channel_value(source),
+            "items_found": matched,
+            "items_candidates": len(items),
+            "items_new": persisted_count,
+            "items_duplicate": duplicate_count,
+            "summary": "；".join(parts),
+        }
+
+    @staticmethod
+    def _infer_languages(items: list[FetchItem]) -> list[str]:
+        langs: list[str] = []
+        for item in items:
+            text = f"{item.title or ''} {item.content or ''} {item.summary or ''}"
+            if re.search(r"[\u4e00-\u9fff]", text):
+                if "zh" not in langs:
+                    langs.append("zh")
+            if re.search(r"[a-zA-Z]{3,}", text):
+                if "en" not in langs:
+                    langs.append("en")
+        return langs
 
     def _update_source(self, source: SourceConfig, items_found: int):
         source.last_sync_at = utc_now()
@@ -1484,6 +1619,23 @@ def _topic_review_context(
 
 def _channel_value(source: SourceConfig) -> str:
     return str(getattr(source.channel, "value", source.channel))
+
+
+_LANGUAGE_LABELS = {
+    "zh": "中文",
+    "en": "英文",
+    "ja": "日文",
+    "ko": "韩文",
+    "fr": "法文",
+    "de": "德文",
+    "es": "西班牙文",
+    "ru": "俄文",
+    "ar": "阿拉伯文",
+}
+
+
+def _language_label(code: str) -> str:
+    return _LANGUAGE_LABELS.get(str(code).lower(), str(code))
 
 
 def _as_aware_utc(value: datetime | None) -> datetime | None:

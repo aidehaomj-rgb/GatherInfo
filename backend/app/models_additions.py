@@ -83,6 +83,14 @@ def migrate_schema(engine):
                 conn.execute(text(
                     "ALTER TABLE source_configs ADD COLUMN health_detail TEXT"
                 ))
+            if "last_verdict" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN last_verdict JSON"
+                ))
+            if "last_collected_at" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN last_collected_at TIMESTAMP"
+                ))
             # Public URL sources imported before readiness checks were introduced
             # already have all credentials they need. Only mark them ready when
             # an actual collection address is present.
@@ -173,6 +181,10 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN window_end TIMESTAMP"))
             if "progress_events" not in cols:
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN progress_events JSON"))
+            if "duplicate_items" not in cols:
+                conn.execute(text("ALTER TABLE collection_runs ADD COLUMN duplicate_items JSON"))
+            if "source_verdict" not in cols:
+                conn.execute(text("ALTER TABLE collection_runs ADD COLUMN source_verdict JSON"))
             conn.commit()
 
     with engine.connect() as conn:

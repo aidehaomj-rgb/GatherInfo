@@ -66,6 +66,10 @@ class SourceConfig(Base):
     health_checked_at = Column(DateTime(timezone=True), nullable=True)
     health_detail = Column(Text, nullable=True)
 
+    # 最近一次采集结论（可连接/可爬取/可下载/语言 + 新增/重复/发现数）
+    last_verdict = Column(JSON, nullable=True)
+    last_collected_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=_utc_now)
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 

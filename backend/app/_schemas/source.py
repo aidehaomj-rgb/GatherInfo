@@ -104,6 +104,8 @@ class SourceOut(BaseModel):
     health_status: str = "unknown"
     health_checked_at: IsoDT = None
     health_detail: str | None = None
+    last_verdict: dict | None = None
+    last_collected_at: IsoDT = None
     created_at: IsoDT = None
     updated_at: IsoDT = None
     is_configured: bool = False

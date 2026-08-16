@@ -1,12 +1,42 @@
 """Item business logic — queries, filtering, batch operations."""
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from fastapi import HTTPException
 
 from app.models import CollectedItem, CollectionRun, Tag
 
 logger = logging.getLogger(__name__)
+
+
+# research 系列表直接引用 collected_items.id 且未声明 ON DELETE CASCADE。
+# SQLite 连接启用了 PRAGMA foreign_keys=ON，删除条目前必须先清理这些引用，
+# 否则会触发 FOREIGN KEY constraint failed。
+_ITEM_REF_TABLES = (
+    ("research_evidence", "item_id"),
+    ("research_case_entities", "source_item_id"),
+    ("research_cases", "primary_item_id"),
+)
+
+
+def purge_item_references(db: Session, item_ids: list[str]) -> None:
+    """删除 research 相关表对目标 item 的外键引用，避免删除条目时外键失败。
+
+    item_tags / item_topic_memberships 已声明 ON DELETE CASCADE，由数据库层
+    自动级联，无需在此处理。
+    """
+    if not item_ids:
+        return
+    chunk = 200
+    for table, column in _ITEM_REF_TABLES:
+        for i in range(0, len(item_ids), chunk):
+            ids = item_ids[i:i + chunk]
+            placeholders = ", ".join(f":id_{j}" for j in range(len(ids)))
+            params = {f"id_{j}": ids[j] for j in range(len(ids))}
+            db.execute(
+                text(f"DELETE FROM {table} WHERE {column} IN ({placeholders})"),
+                params,
+            )
 
 
 def build_item_query(
@@ -71,6 +101,9 @@ def get_item_ids(db: Session, **filters) -> tuple[list[str], int]:
 
 def batch_delete_items(db: Session, item_ids: list[str]) -> int:
     """Delete items by ID list. Returns count of deleted items."""
+    if not item_ids:
+        return 0
+    purge_item_references(db, item_ids)
     deleted = 0
     for item_id in item_ids:
         item = db.query(CollectedItem).filter(CollectedItem.id == item_id).first()

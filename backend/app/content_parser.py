@@ -39,7 +39,96 @@ NAV_KEYWORDS = {
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    # Government / agency site chrome (navigation, boilerplate, footer)
+    "travel", "border security", "border patrol", "careers", "employee resources",
+    "newsroom", "media releases", "accountability", "transparency",
+    "stats and summaries", "documents library", "publications catalog",
+    "about cbp", "who we are", "learn about", "mobile apps", "mobile apps directory",
+    "congressional resources", "biometrics", "trusted traveler", "visa waiver",
+    "global entry", "nexus", "sentri", "fast", "general aviation", "international visitors",
+    "media contacts", "office of public affairs", "information center",
+    "social media directory", "youtube channel", "video", "multimedia libraries",
+    "legal notices", "site policies", "freedom of information", "no fear",
+    "vulnerability disclosure", "the white house", "usa.gov", "dhs components",
+    "section 508", "inspector general", "comunicados de prensa",
+    "freedom 250", "office of trade", "office of field operations",
+    "air and marine operations", "ports of entry", "cargo security",
+    "career paths", "applicant categories", "benefits", "retirement",
+    "work-life balance", "new employee resources", "email updates", "social icons",
+    "official website of the united states government", "official websites use",
+    "secure .gov websites use https", "here's how you know",
+    "share sensitive information only on official",
+    "selected to participate in a brief survey", "survey about your experience",
 }
+
+# ── Markdown / boilerplate noise stripping ───────────────────────────────────
+# ![alt](url) — image alt text and URLs are pure navigation/decorative noise
+_MD_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+# []() — empty anchor (decorative)
+_MD_EMPTY_LINK_PATTERN = re.compile(r"\[\]\([^)]*\)")
+# Numeric breadcrumb trail: "1 [Home](url) 2 [Newsroom](url) 3 [Title]"
+_NUMERIC_BREADCRUMB_PATTERN = re.compile(r"(?:\d{1,2}\s*\[[^\]]*\]\([^)]*\)\s*){2,}")
+# Markdown link [text](url) — keep anchor text, drop the URL
+_MD_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# Markdown bold/italic markers left behind after link stripping
+_MD_EMPHASIS_PATTERN = re.compile(r"\*{1,3}|_{1,3}")
+# Markdown heading markers (### Title) — at line start or inline after list text
+_MD_HEADING_PATTERN = re.compile(r"(?:^|\s)#{1,6}\s+")
+
+# Government/agency site boilerplate — deterministic chrome to strip outright.
+# Case-insensitive substring match; order from longest to shortest.
+BOILERPLATE_PHRASES = [
+    # English (.gov banner + survey invite)
+    "share sensitive information only on official, secure websites",
+    "a .gov website belongs to an official government organization",
+    "an official website of the united states government",
+    "you have been selected to participate in a brief survey about your experience today",
+    "official websites use .gov",
+    "secure .gov websites use https",
+    "here's how you know",
+    "a lock or https means you've safely connected",
+    # Chinese (.gov banner)
+    "仅在官方安全网站上共享敏感信息",
+    ".gov 网站属于美国的官方政府组织",
+    "官方网站使用 .gov",
+    "安全 .gov 网站使用 HTTPS",
+    "你是这样知道的",
+    "官方网站美国政府的信息",
+]
+
+
+def _strip_boilerplate(text: str) -> str:
+    """Remove known government-site banner/footer boilerplate.
+
+    Whitespace-insensitive so bold-marker splitting (``**A** **.gov**``) doesn't
+    defeat the match.
+    """
+    for phrase in BOILERPLATE_PHRASES:
+        pattern = re.compile(
+            r"\s+".join(re.escape(part) for part in phrase.split()),
+            re.IGNORECASE,
+        )
+        text = pattern.sub(" ", text)
+    return text
+
+
+def _strip_links(text: str) -> str:
+    """Convert markdown links to anchor text, dropping pure-navigation links.
+
+    A link whose anchor is a short navigation keyword (e.g. ``[Travel](url)``,
+    ``[Section 508](url)``) is dropped entirely; a meaningful inline link
+    (``[Centers of Excellence and Expertise](url)``) keeps its anchor text.
+    """
+    def _replacer(match: re.Match) -> str:
+        anchor = match.group(1)
+        anchor_clean = _MD_EMPHASIS_PATTERN.sub(" ", anchor).strip()
+        words = re.findall(r"[\w\u4e00-\u9fff]+", anchor_clean.lower())
+        if words and len(anchor_clean) <= 40:
+            nav_hits = sum(1 for word in words if word in NAV_KEYWORDS)
+            if nav_hits / len(words) >= 0.5:
+                return " "
+        return anchor
+    return _MD_LINK_PATTERN.sub(_replacer, text)
 
 # ── Patterns ─────────────────────────────────────────────────────────────────
 BREADCRUMB_PATTERN = re.compile(
@@ -111,6 +200,16 @@ def _normalize_text(value: str | None) -> str:
         return ""
     cleaned = re.sub(r"<[^>]+>", " ", str(value))
     cleaned = re.sub(r"[\x00-\x1f\x7f]+", " ", cleaned)
+
+    # 0. Strip markdown/boilerplate noise before any other processing:
+    #    images, empty links, breadcrumb trails, then inline links → anchor text.
+    cleaned = _MD_IMAGE_PATTERN.sub(" ", cleaned)
+    cleaned = _MD_EMPTY_LINK_PATTERN.sub(" ", cleaned)
+    cleaned = _NUMERIC_BREADCRUMB_PATTERN.sub(" ", cleaned)
+    cleaned = _strip_links(cleaned)
+    cleaned = _MD_EMPHASIS_PATTERN.sub(" ", cleaned)
+    cleaned = _MD_HEADING_PATTERN.sub(" ", cleaned)
+    cleaned = _strip_boilerplate(cleaned)
 
     # 1. Remove skip links and breadcrumb patterns
     cleaned = SKIP_NAV_PATTERN.sub(" ", cleaned)

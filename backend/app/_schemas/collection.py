@@ -99,6 +99,12 @@ class ItemTranslateRequest(BaseModel):
 class ItemQualityReviewRequest(BaseModel):
     item_ids: list[str] = Field(default_factory=list, max_length=500)
     limit: int = Field(default=100, ge=1, le=500)
+    # 范围过滤：按主题 / 来源 / 分类 / 语言 / 关键词搜索，全空则按最近采集倒序取 limit 条
+    topic_id: str | None = None
+    source_id: str | None = None
+    category: str | None = None
+    language: str | None = None
+    q: str | None = None
 
 
 class BatchRunOut(BaseModel):
@@ -109,6 +115,9 @@ class BatchRunOut(BaseModel):
     items_new: int = 0
     items_found: int = 0
     items_failed: int = 0
+    items_duplicate: int = 0
+    duplicate_items: list[dict] = Field(default_factory=list)
+    source_verdict: dict | None = None
     started_at: IsoDT = None
     completed_at: IsoDT = None
     duration_ms: int | None = None

@@ -100,6 +100,12 @@ class CollectionRun(Base):
     metadata_json = Column(JSON, nullable=True)
     progress_events = Column(JSON, nullable=True)
 
+    # 本次采集结果明细：
+    #   duplicate_items — 与本地库比对后判定为“重复”的信息（保留标题/链接，供任务查看展示）
+    #   source_verdict  — 信息源结论（可连接/可爬取/可下载/语言类型）
+    duplicate_items = Column(JSON, nullable=True)
+    source_verdict = Column(JSON, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=_utc_now)
 
     # Relationships
