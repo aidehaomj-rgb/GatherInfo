@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -29,6 +30,12 @@ TOOLS = [
     {"name": "multilingual_news_search", "description": "并行搜索Google News与Bing News RSS；输入不同语种查询以发现地方媒体和官方公告", "inputSchema": {"type": "object", "required": ["queries"], "properties": {"queries": {"type": "array", "items": {"type": "string"}, "maxItems": 20}, "max_items": {"type": "integer", "default": 30, "maximum": 100}}}},
     {"name": "case_image_search", "description": "搜索案件图片及来源页，返回原图和缩略图地址，可用于查找集装箱号、车牌和运输工具", "inputSchema": {"type": "object", "required": ["queries"], "properties": {"queries": {"type": "array", "items": {"type": "string"}, "maxItems": 20}, "max_items": {"type": "integer", "default": 20, "maximum": 100}}}},
     {"name": "official_pdf_search", "description": "定向发现PDF公告、扣押清单、司法文书和执法附件", "inputSchema": {"type": "object", "required": ["queries"], "properties": {"queries": {"type": "array", "items": {"type": "string"}, "maxItems": 20}, "max_items": {"type": "integer", "default": 30, "maximum": 100}}}},
+    {"name": "resolve_supply_chain_entity", "description": "核验供应链候选中的进口主体与军工供应商是否为同一或关联法定主体", "inputSchema": {"type": "object", "required": ["case_id", "shipment_id"], "properties": {"case_id": {"type": "string"}, "shipment_id": {"type": "string"}}}},
+    {"name": "search_supply_chain_contracts", "description": "定向搜索军工合同号、采购机关、承包商与官方PDF原始来源", "inputSchema": {"type": "object", "required": ["company"], "properties": {"company": {"type": "string"}, "program": {"type": "string"}, "reference": {"type": "string"}, "max_items": {"type": "integer", "default": 20, "maximum": 50}}}},
+    {"name": "search_supply_chain_trade_records", "description": "搜索出口商、进口商、产品、提单号和贸易批次证据", "inputSchema": {"type": "object", "required": ["importer"], "properties": {"importer": {"type": "string"}, "exporter": {"type": "string"}, "product": {"type": "string"}, "bill_no": {"type": "string"}, "max_items": {"type": "integer", "default": 20, "maximum": 50}}}},
+    {"name": "deep_search_china_trade_records", "description": "深度检索目标企业从中国进口的提单、供应商、产品、地址与贸易批次，优先检索2026年及专业贸易数据索引", "inputSchema": {"type": "object", "required": ["importer"], "properties": {"importer": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}}, "addresses": {"type": "array", "items": {"type": "string"}}, "products": {"type": "array", "items": {"type": "string"}}, "year": {"type": "integer", "default": 2026}, "max_items": {"type": "integer", "default": 40, "maximum": 100}}}},
+    {"name": "search_supply_chain_part_numbers", "description": "搜索并核对P/N、NSN、图号、型号及替代料号", "inputSchema": {"type": "object", "required": ["part_numbers"], "properties": {"part_numbers": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20}, "company": {"type": "string"}, "max_items": {"type": "integer", "default": 20, "maximum": 50}}}},
+    {"name": "verify_supply_chain_end_use", "description": "检索军售案、BOM、交付文件和最终用户，核验候选链最终用途", "inputSchema": {"type": "object", "required": ["company", "program"], "properties": {"company": {"type": "string"}, "program": {"type": "string"}, "product": {"type": "string"}, "max_items": {"type": "integer", "default": 20, "maximum": 50}}}},
 ]
 
 
@@ -64,6 +71,57 @@ def call_tool(name: str, args: dict) -> Any:
     if name in {"broad_web_search", "multilingual_news_search", "case_image_search", "official_pdf_search"}:
         mode = {"broad_web_search": "web", "multilingual_news_search": "news", "case_image_search": "images", "official_pdf_search": "pdf"}[name]
         return request("POST", "/research/discovery/search", {"queries": args["queries"], "mode": mode, "max_items": args.get("max_items", 30)})
+    if name == "resolve_supply_chain_entity":
+        return request("POST", "/supply-chain/mcp/evaluate", {"case_id": args["case_id"], "shipment_id": args["shipment_id"], "tools": [name]})
+    if name == "search_supply_chain_contracts":
+        query = " ".join(filter(None, [args["company"], args.get("program"), args.get("reference"), "contract award official filetype:pdf"]))
+        return request("POST", "/research/discovery/search", {"queries": [query], "mode": "pdf", "max_items": args.get("max_items", 20)})
+    if name == "search_supply_chain_trade_records":
+        query = " ".join(filter(None, [args.get("exporter"), args["importer"], args.get("product"), args.get("bill_no"), "shipment bill of lading import"]))
+        return request("POST", "/research/discovery/search", {"queries": [query], "mode": "web", "max_items": args.get("max_items", 20)})
+    if name == "deep_search_china_trade_records":
+        importer = args["importer"]
+        year = args.get("year", 2026)
+        names = [importer, *(args.get("aliases") or [])][:5]
+        products = (args.get("products") or [""])[:5]
+        addresses = (args.get("addresses") or [])[:3]
+        queries = []
+        for company in names:
+            queries.extend([
+                f'"{company}" {year} China supplier shipment bill of lading',
+                f'"{company}" imports from China customs trade data',
+                f'site:importyeti.com "{company}" supplier',
+                f'site:panjiva.com "{company}" shipment',
+                f'site:importgenius.com "{company}" imports',
+                f'site:volza.com "{company}" import',
+            ])
+            queries.extend(f'"{company}" "{product}" China shipment' for product in products if product)
+        queries.extend(f'"{address}" importer China shipment' for address in addresses)
+        limit = args.get("max_items", 40)
+        web = request("POST", "/research/discovery/search", {"queries": queries[:30], "mode": "web", "max_items": limit})
+        news = request("POST", "/research/discovery/search", {"queries": queries[:30], "mode": "news", "max_items": limit})
+        raw_items = {item.get("url"): item for item in [*(web.get("items") or []), *(news.get("items") or [])] if item.get("url")}
+        name_tokens = {
+            token.casefold() for company in names
+            for token in re.findall(r"[A-Za-z0-9]{4,}", company)
+        }
+        trade_terms = ("import", "shipment", "bill of lading", "supplier", "customs", "export")
+        trade_hosts = ("importyeti.", "panjiva.", "importgenius.", "volza.")
+        verified = []
+        for item in raw_items.values():
+            text = f"{item.get('title', '')} {item.get('summary', '')}".casefold()
+            url = str(item.get("url") or "").casefold()
+            company_match = any(token in text or token in url for token in name_tokens)
+            trade_match = any(term in text for term in trade_terms) or any(host in url for host in trade_hosts)
+            if company_match and trade_match:
+                verified.append({**item, "match_basis": {"company": True, "trade_signal": True}})
+        return {"tool": name, "queries": queries[:30], "raw_count": len(raw_items), "count": len(verified), "items": verified, "errors": [*(web.get("errors") or []), *(news.get("errors") or [])]}
+    if name == "search_supply_chain_part_numbers":
+        queries = [" ".join(filter(None, [part, args.get("company"), "part number NSN application"])) for part in args["part_numbers"]]
+        return request("POST", "/research/discovery/search", {"queries": queries, "mode": "web", "max_items": args.get("max_items", 20)})
+    if name == "verify_supply_chain_end_use":
+        query = " ".join(filter(None, [args["company"], args["program"], args.get("product"), "end user delivery contract BOM filetype:pdf"]))
+        return request("POST", "/research/discovery/search", {"queries": [query], "mode": "pdf", "max_items": args.get("max_items", 20)})
     if name == "search_items":
         params = urllib.parse.urlencode({k: v for k, v in {"q": args.get("query"), "topic_id": args.get("topic_id"), "page_size": args.get("page_size", 20)}.items() if v})
         return request("GET", "/items?" + params)
@@ -92,7 +150,7 @@ def main() -> None:
             continue
         req_id, method = msg["id"], msg.get("method")
         try:
-            if method == "initialize": result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "gatherinfo", "version": "1.0.0"}}
+            if method == "initialize": result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "gatherinfo", "version": "0.9.0"}}
             elif method == "tools/list": result = {"tools": TOOLS}
             elif method == "tools/call":
                 value = call_tool(msg["params"]["name"], msg["params"].get("arguments", {}))

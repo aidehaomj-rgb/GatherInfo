@@ -1,5 +1,6 @@
 """Tag business logic — query, merge, stats, ensure."""
 import logging
+import re
 from typing import Optional
 
 from sqlalchemy import func
@@ -9,6 +10,31 @@ from fastapi import HTTPException
 from app.models import Tag, item_tags
 
 logger = logging.getLogger(__name__)
+
+_MOJIBAKE_QUESTION_MARKS = re.compile(r"\?{2,}")
+_DATE_WITH_QUESTION_MARKS = re.compile(r"^\d{4}-\d{2}-\d{2}\?+$")
+_PLAIN_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_valid_tag_value(value: object) -> bool:
+    """Return whether a value is meaningful enough to be stored as a tag."""
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip()
+    if len(normalized) < 2:
+        return False
+    return not (
+        _MOJIBAKE_QUESTION_MARKS.search(normalized)
+        or _DATE_WITH_QUESTION_MARKS.fullmatch(normalized)
+        or _PLAIN_DATE.fullmatch(normalized)
+        or "\ufffd" in normalized
+    )
+
+
+def _require_valid_tag_value(value: object) -> str:
+    if not is_valid_tag_value(value):
+        raise HTTPException(422, "标签内容无效或包含乱码")
+    return str(value).strip()
 
 
 def refresh_tag_counts(db: Session, tag_ids: list[str] | None = None) -> None:
@@ -48,6 +74,7 @@ def list_tags(
 
 def ensure_tag(db: Session, namespace: str, value: str, color: Optional[str] = None) -> Tag:
     """Get or create a tag. Atomically updates item_count on existing tags."""
+    value = _require_valid_tag_value(value)
     tag_id = f"tag-{namespace}-{value}".lower().replace(" ", "-")[:80]
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
@@ -62,6 +89,10 @@ def update_tag(db: Session, tag_id: str, data: dict) -> Tag:
     t = db.query(Tag).filter(Tag.id == tag_id).first()
     if not t:
         raise HTTPException(404, f"Tag not found: {tag_id}")
+    if "value" in data:
+        data = {**data, "value": _require_valid_tag_value(data["value"])}
+    if "label" in data and data["label"] is not None:
+        data = {**data, "label": _require_valid_tag_value(data["label"])}
     for k, v in data.items():
         setattr(t, k, v)
     db.commit()

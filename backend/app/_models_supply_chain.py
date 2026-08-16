@@ -146,3 +146,26 @@ class SupplyChainReport(Base):
     error_log = Column(Text, nullable=True)
     generated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utc_now)
+
+
+class SupplyChainDiscoveryCandidate(Base):
+    __tablename__ = "supply_chain_discovery_candidates"
+
+    id = Column(String(80), primary_key=True)
+    country = Column(String(80), nullable=False, index=True)
+    case_id = Column(String(80), ForeignKey("supply_chain_cases.id"), nullable=False, index=True)
+    shipment_id = Column(String(80), ForeignKey("supply_chain_shipments.id"), nullable=False, index=True)
+    supplier_entity_id = Column(String(80), ForeignKey("supply_chain_entities.id"), nullable=True)
+    title = Column(String(500), nullable=False)
+    target_program = Column(String(500), nullable=True)
+    exporter_name = Column(String(300), nullable=False)
+    importer_name = Column(String(300), nullable=False)
+    product = Column(String(500), nullable=False)
+    score = Column(Integer, nullable=False, default=0)
+    evidence_grade = Column(String(10), nullable=False, default="C")
+    verified_facts = Column(JSON, nullable=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    review_note = Column(Text, nullable=True)
+    investigation_id = Column(String(80), ForeignKey("supply_chain_investigations.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)

@@ -11,6 +11,21 @@ from app.connectors.base import (
     register_collector,
 )
 from app.models import JobStatus, SourceConfig
+from app.connectors.broad_web_search import (
+    _query_context,
+    _relevant_result,
+    _unwrap_duckduckgo_url,
+    _unwrap_yahoo_url,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_connector_registry():
+    """Keep registry-focused tests from leaking temporary collectors to API tests."""
+    original = ConnectorRegistry._collectors
+    ConnectorRegistry._collectors = {**original}
+    yield
+    ConnectorRegistry._collectors = original
 
 
 def _run_async(coro):
@@ -53,6 +68,36 @@ class TestFetchItem:
         assert item.url is None
         assert item.quality_score == 0.0
         assert item.suggested_tags == []
+
+
+class TestPublicSearchFiltering:
+    def test_locale_prefix_is_kept_out_of_query_text(self):
+        assert _query_context('ja-JP||"川崎重工業" 中国から輸入') == (
+            '"川崎重工業" 中国から輸入', "ja-JP",
+        )
+
+    def test_unrelated_regional_search_pollution_is_rejected(self):
+        assert not _relevant_result(
+            "法医秦明电视剧全集免费在线观看",
+            '"Ultralife Corporation" "ABLE New Energy" shipment',
+        )
+        assert _relevant_result(
+            "Ultralife Corporation imports from Able New Energy based in China",
+            '"Ultralife Corporation" "ABLE New Energy" shipment',
+        )
+
+    def test_duckduckgo_redirect_is_unwrapped(self):
+        value = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.importgenius.com%2Fimporters%2Fultralife-corporation"
+        assert _unwrap_duckduckgo_url(value) == "https://www.importgenius.com/importers/ultralife-corporation"
+
+    def test_yahoo_redirect_is_unwrapped(self):
+        value = (
+            "https://r.search.yahoo.com/_ylt=test/RU=https%3a%2f%2finvestor."
+            "ultralifecorporation.com%2fnews%2farmy-contract/RK=2/RS=test"
+        )
+        assert _unwrap_yahoo_url(value) == (
+            "https://investor.ultralifecorporation.com/news/army-contract"
+        )
 
 
 class TestCollectResult:

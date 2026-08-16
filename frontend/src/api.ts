@@ -354,6 +354,13 @@ export const analyzeSupplyChain = (data: { case_id?: string; model_id?: string; 
   post<{ evidence_created: number; cases_scanned: number; shipments_scanned: number }>(
     "/supply-chain/analyze", data,
   );
+export const discoverSupplyChains = (data: {
+  countries: string[]; minimum_score: number; max_candidates: number; mcp_tools: string[]; model_id?: string; research_rounds?: number; import_record_window_days?: 90 | 180 | 365;
+}) => post<import("./types").SupplyChainDiscoveryResult>("/supply-chain/experts/discover", data);
+export const fetchSupplyChainCandidates = (status = "pending") =>
+  get<import("./types").SupplyChainDiscovery[]>("/supply-chain/experts/candidates", { status });
+export const reviewSupplyChainCandidate = (id: string, action: "approve" | "reject", note?: string) =>
+  post<import("./types").SupplyChainDiscovery>(`/supply-chain/experts/candidates/${id}/review`, { action, note });
 export const fetchSupplyChainReports = (country = "United States", investigation_id?: string) =>
   get<import("./types").SupplyChainReport[]>("/supply-chain/reports", { country, investigation_id });
 export const generateSupplyChainReport = (data: {

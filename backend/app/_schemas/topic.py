@@ -139,6 +139,7 @@ class PromptTemplateOut(BaseModel):
     content: str
     is_active: bool = True
     topic_count: int = 0
+    linked_experts: list[str] = Field(default_factory=list)
     created_at: IsoDT = None
     updated_at: IsoDT = None
     model_config = {"from_attributes": True}

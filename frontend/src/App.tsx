@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen, Wrench,
+  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen, Wrench, Bot,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -10,7 +10,6 @@ import { AppLogo } from "./components/AppLogo";
 import { CommandPalette } from "./components/CommandPalette";
 import { ToastProvider, useToast } from "./components/ToastProvider";
 import { CollectionActivityIndicator } from "./components/CollectionActivityIndicator";
-import { getBeijingHour } from "./utils/date";
 
 // Lazy-loaded page components (code-split per view)
 const DashboardPage = lazy(() => import("./components/DashboardPage").then(m => ({ default: m.DashboardPage })));
@@ -27,6 +26,7 @@ const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m =
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 const SupplyChainPage = lazy(() => import("./components/SupplyChainPage").then(m => ({ default: m.SupplyChainPage })));
+const IntelligenceExpertsPage = lazy(() => import("./components/IntelligenceExpertsPage").then(m => ({ default: m.IntelligenceExpertsPage })));
 const PromptTemplatesPage = lazy(() => import("./components/PromptTemplatesPage").then(m => ({ default: m.PromptTemplatesPage })));
 const MCPToolsPage = lazy(() => import("./components/MCPToolsPage").then(m => ({ default: m.MCPToolsPage })));
 
@@ -41,7 +41,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "home" | "dashboard" | "mcp-tools" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "supply-chain" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "mcp-tools" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "experts" | "supply-chain" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -56,6 +56,7 @@ const views: ViewDef[] = [
   { id: "topics", label: "主题管理", icon: BarChart3 },
   { id: "prompts", label: "提示词库", icon: FileCode2 },
   { id: "sources", label: "信息源", icon: Globe },
+  { id: "experts", label: "情报专家", icon: Bot },
   { id: "mcp-tools", label: "MCP工具", icon: Wrench },
   { id: "items", label: "采集条目", icon: Database },
   { id: "tags", label: "标签系统", icon: Tags },
@@ -67,14 +68,6 @@ const views: ViewDef[] = [
   { id: "notifications", label: "通知管理", icon: Bell },
   { id: "settings", label: "系统配置", icon: Settings },
 ];
-
-function greeting(): string {
-  const h = getBeijingHour();
-  if (h < 6) return "夜深了";
-  if (h < 12) return "上午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
-}
 
 function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
@@ -137,6 +130,7 @@ function AppInner() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [expertDetailOpen, setExpertDetailOpen] = useState(false);
   const [collectionPanelOpen, setCollectionPanelOpen] = useState(false);
   const { success } = useToast();
 
@@ -209,8 +203,6 @@ function AppInner() {
     window.addEventListener("navigate-view", onNavigate);
     return () => window.removeEventListener("navigate-view", onNavigate);
   }, []);
-
-  const itemsToday = dashData?.summary?.items_today ?? 0;
   const activeView = views.find((item) => item.id === view) || views[0];
 
   return (
@@ -262,7 +254,6 @@ function AppInner() {
             <span className="header-context__eyebrow">GLOBAL RISK INTELLIGENCE / {activeView.label}</span>
             <div className="header-greeting">
               <strong className="header-view-title">{activeView.label}</strong>
-              <span className="greeting-text">{greeting()}，今日已采集 <strong>{itemsToday.toLocaleString()}</strong> 条新情报</span>
             </div>
           </div>
           <div className="header-actions">
@@ -284,15 +275,6 @@ function AppInner() {
             >
               <Keyboard size={18} />
             </button>
-            <button
-              type="button"
-              className="btn-icon header-action-btn"
-              title="刷新仪表盘"
-              aria-label="前往仪表盘"
-              onClick={() => { setView("dashboard"); }}
-            >
-              <LayoutDashboard size={18} />
-            </button>
           </div>
         </header>
         <section className="view-frame" data-view={view}>
@@ -309,6 +291,11 @@ function AppInner() {
                 {view === "items" && <ItemsPage />}
                 {view === "tags" && <TagsPage />}
                 {view === "reports" && <ReportsPage />}
+                {view === "experts" && <IntelligenceExpertsPage
+                  detailOpen={expertDetailOpen}
+                  onDetailOpenChange={setExpertDetailOpen}
+                  onOpenSupplyChain={() => setView("supply-chain")}
+                />}
                 {view === "supply-chain" && <SupplyChainPage />}
                 {view === "models" && <ModelConfigPage />}
                 {view === "history" && <HistoryPage />}

@@ -11,7 +11,12 @@ from app.database import SessionLocal, init_db
 from app.engine import _topic_collection_prompt
 from app.main import create_app
 from app.models import PromptTemplate, Topic
-from app.prompt_seed import AFRICA_CUSTOMS_RISK_PROMPT_ID, ensure_builtin_prompt_templates
+from app.prompt_seed import (
+    AFRICA_CUSTOMS_RISK_PROMPT_ID,
+    SUPPLY_CHAIN_EXPERT_PROMPT_ID,
+    ensure_builtin_prompt_templates,
+    resolve_supply_chain_expert_prompt,
+)
 
 client = TestClient(create_app())
 
@@ -97,3 +102,29 @@ def test_builtin_prompt_is_named_and_attached_to_enforcement_topic():
         assert AFRICA_CUSTOMS_RISK_PROMPT_ID in topic.prompt_template_ids
     finally:
         db.close()
+
+
+def test_supply_chain_expert_prompt_is_seeded_linked_and_runtime_editable():
+    db = SessionLocal()
+    try:
+        ensure_builtin_prompt_templates(db)
+        prompt = db.query(PromptTemplate).filter(
+            PromptTemplate.id == SUPPLY_CHAIN_EXPERT_PROMPT_ID,
+        ).one()
+        assert prompt.name == "供应链专家深度采集与证据链审核"
+        assert "中国出口商 → 目标国家进口企业" in prompt.content
+
+        original = prompt.content
+        prompt.content = "供应链专家用户自定义运行指令"
+        db.commit()
+        content, prompt_id = resolve_supply_chain_expert_prompt(db)
+        assert content == "供应链专家用户自定义运行指令"
+        assert prompt_id == SUPPLY_CHAIN_EXPERT_PROMPT_ID
+        prompt.content = original
+        db.commit()
+    finally:
+        db.close()
+
+    listed = client.get("/api/v1/prompt-templates")
+    row = next(item for item in listed.json() if item["id"] == SUPPLY_CHAIN_EXPERT_PROMPT_ID)
+    assert row["linked_experts"] == ["供应链专家"]

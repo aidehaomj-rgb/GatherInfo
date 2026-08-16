@@ -804,7 +804,12 @@ class CollectionEngine:
 
     # ── Tag system ──────────────────────────────────────────────────────
 
-    def ensure_tag(self, tag_id: str, namespace: str, value: str, label: str | None = None) -> Tag:
+    def ensure_tag(self, tag_id: str, namespace: str, value: str, label: str | None = None) -> Tag | None:
+        from app.services.tag_service import is_valid_tag_value
+
+        if not is_valid_tag_value(value) or (label is not None and not is_valid_tag_value(label)):
+            logger.warning("Skipping invalid tag: %r", tag_id)
+            return None
         tag = self.db.query(Tag).filter(Tag.id == tag_id).first()
         if not tag:
             tag = Tag(id=tag_id, namespace=namespace, value=value, label=label or value)

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.collection_schemas import PromptTemplateCreate, PromptTemplateOut, PromptTemplateUpdate
 from app.database import get_db
 from app.models import PromptTemplate, Topic
+from app.prompt_seed import SUPPLY_CHAIN_EXPERT_PROMPT_ID
 
 router = APIRouter(prefix="/api/v1/prompt-templates", tags=["prompt-templates"])
 
@@ -20,7 +21,11 @@ def _topic_count(db: Session, prompt_id: str) -> int:
 
 def _out(db: Session, prompt: PromptTemplate) -> PromptTemplateOut:
     data = PromptTemplateOut.model_validate(prompt)
-    return data.model_copy(update={"topic_count": _topic_count(db, prompt.id)})
+    linked_experts = ["供应链专家"] if prompt.id == SUPPLY_CHAIN_EXPERT_PROMPT_ID else []
+    return data.model_copy(update={
+        "topic_count": _topic_count(db, prompt.id),
+        "linked_experts": linked_experts,
+    })
 
 
 @router.get("", response_model=list[PromptTemplateOut])

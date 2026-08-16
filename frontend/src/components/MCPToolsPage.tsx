@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bot, Braces, Database, FileSearch, Globe2, Images, Languages,
-  Network, RefreshCw, Search, ServerCog, Workflow, Wrench,
+  Network, RefreshCw, Search, Workflow, Wrench,
 } from "lucide-react";
 import { fetchMCPToolCatalog } from "../api";
 import type { MCPToolCatalog, MCPToolCatalogItem } from "../types";
@@ -10,7 +10,8 @@ const categoryIcons: Record<string, typeof Wrench> = {
   "任务管理": Workflow, "任务编排": Workflow, "数据读取": Database,
   "实体研究": Network, "多模态解析": FileSearch, "智能研究": Bot,
   "案件图谱": Network, "广泛搜索": Globe2, "多语种搜索": Languages,
-  "多模态搜索": Images, "附件搜索": FileSearch, "搜索提供商": ServerCog,
+  "多模态搜索": Images, "附件搜索": FileSearch,
+  "供应链核验": Network,
 };
 
 function ToolCard({ tool }: { tool: MCPToolCatalogItem }) {
@@ -50,35 +51,25 @@ export function MCPToolsPage() {
   const [data, setData] = useState<MCPToolCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"mcp" | "provider">("mcp");
   const load = () => {
     setLoading(true);
     fetchMCPToolCatalog().then(setData).finally(() => setLoading(false));
   };
   useEffect(load, []);
   const items = useMemo(() => {
-    const source = tab === "mcp" ? data?.mcp_tools || [] : data?.providers || [];
+    const source = data?.mcp_tools || [];
     const needle = query.trim().toLowerCase();
     return needle ? source.filter((item) => `${item.name} ${item.id} ${item.description} ${item.category}`.toLowerCase().includes(needle)) : source;
-  }, [data, query, tab]);
+  }, [data, query]);
 
   return (
     <div className="mcp-tools-page">
       <div className="page-header mcp-tools-heading">
-        <div><h2>MCP工具中心</h2><p>统一展示智能检索可调用工具与底层搜索提供商</p></div>
+        <div><h2>工具</h2></div>
         <button className="icon-btn" type="button" onClick={load} title="刷新工具目录"><RefreshCw size={17} /></button>
       </div>
-      <section className="mcp-summary-strip">
-        <div><strong>{data?.summary.mcp_count ?? 0}</strong><span>MCP工具</span></div>
-        <div><strong>{data?.summary.provider_count ?? 0}</strong><span>搜索提供商</span></div>
-        <div><strong>{data?.summary.active_provider_count ?? 0}</strong><span>已启用提供商</span></div>
-        <div><strong>11</strong><span>支持语言</span></div>
-      </section>
       <div className="mcp-tools-toolbar">
-        <div className="segmented-control">
-          <button className={tab === "mcp" ? "active" : ""} onClick={() => setTab("mcp")}>MCP工具</button>
-          <button className={tab === "provider" ? "active" : ""} onClick={() => setTab("provider")}>搜索提供商</button>
-        </div>
+        <strong>MCP工具 <span>{items.length}</span></strong>
         <label className="mcp-tool-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索工具" /></label>
       </div>
       {loading ? <div className="empty-state">正在读取工具目录...</div> : (

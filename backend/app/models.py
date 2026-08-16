@@ -48,6 +48,7 @@ from app._models_supply_chain import (
     SupplyChainEvidence,
     SupplyChainOpenSourceEvidence,
     SupplyChainReport,
+    SupplyChainDiscoveryCandidate,
 )
 
 __all__ = [
@@ -83,4 +84,5 @@ __all__ = [
     "SupplyChainEvidence",
     "SupplyChainOpenSourceEvidence",
     "SupplyChainReport",
+    "SupplyChainDiscoveryCandidate",
 ]

@@ -1,0 +1,131 @@
+[
+  {
+    "id": "broad-web-search",
+    "name": "??????",
+    "tool_type": "broad_web",
+    "is_active": true,
+    "config_json": {
+      "provider": "bing_public",
+      "max_results": 30,
+      "requires_api_key": false,
+      "capabilities": [
+        "web",
+        "multilingual",
+        "official_domains"
+      ]
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "case-image-search",
+    "name": "???????????",
+    "tool_type": "image_search",
+    "is_active": true,
+    "config_json": {
+      "provider": "bing_images",
+      "max_results": 20,
+      "return_source_page": true,
+      "return_original_image": true,
+      "ocr_when_available": true,
+      "requires_api_key": false
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "gdelt-global-news",
+    "name": "GDELT??????",
+    "tool_type": "gdelt",
+    "is_active": true,
+    "config_json": {
+      "requires_api_key": false,
+      "multilingual": true,
+      "max_results": 50
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "multilingual-news-search",
+    "name": "???????",
+    "tool_type": "news_rss",
+    "is_active": true,
+    "config_json": {
+      "providers": [
+        "google_news_rss"
+      ],
+      "languages": [
+        "zh",
+        "en",
+        "es",
+        "pt",
+        "ja",
+        "ko",
+        "fr",
+        "de",
+        "it",
+        "th",
+        "id"
+      ],
+      "requires_api_key": false
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "official-enforcement-index",
+    "name": "??????????",
+    "tool_type": "official_enforcement",
+    "is_active": true,
+    "config_json": {
+      "requires_api_key": false,
+      "priority": "high"
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "official-pdf-search",
+    "name": "??PDF???????",
+    "tool_type": "pdf_search",
+    "is_active": true,
+    "config_json": {
+      "provider": "bing_public",
+      "filetype": "pdf",
+      "requires_api_key": false
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "rss-feeds",
+    "name": "RSS 新闻订阅",
+    "tool_type": "rss",
+    "is_active": true,
+    "config_json": {
+      "timeout": 30,
+      "max_items_per_feed": 20,
+      "feeds": []
+    },
+    "api_key_ref": null,
+    "is_default": false
+  },
+  {
+    "id": "tavily-search",
+    "name": "Tavily Web Search",
+    "tool_type": "tavily",
+    "is_active": true,
+    "config_json": {
+      "rate_limit": 0.5,
+      "max_results": 10,
+      "include_answer": true,
+      "languages": [
+        "zh",
+        "en"
+      ]
+    },
+    "api_key_ref": "TAVILY_API_KEY",
+    "is_default": true
+  }
+]

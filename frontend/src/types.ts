@@ -425,6 +425,7 @@ export interface PromptTemplate {
   content: string;
   is_active: boolean;
   topic_count: number;
+  linked_experts: string[];
   created_at: string | null;
   updated_at: string | null;
 }
@@ -560,6 +561,37 @@ export interface SearchToolConfig {
   is_default: boolean;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface SupplyChainDiscovery {
+  id: string;
+  investigation_id: string | null;
+  status: string;
+  country: string;
+  case_id: string;
+  shipment_id: string;
+  title: string;
+  target_program: string | null;
+  exporter_name: string;
+  importer_name: string;
+  product: string;
+  score: number;
+  evidence_grade: string;
+  verified_facts: Record<string, unknown> | null;
+  review_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface SupplyChainDiscoveryResult {
+  cases_scanned: number;
+  shipments_scanned: number;
+  candidates_matched: number;
+  candidates_created: number;
+  duplicates_skipped?: number;
+  discoveries: SupplyChainDiscovery[];
+  search_errors?: string[];
+  research_trace?: Record<string, unknown>;
 }
 
 export interface MCPToolCatalogItem {

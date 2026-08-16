@@ -1,5 +1,5 @@
 """
-TradeRadar — 全球贸易风险情报中枢 v0.8.0
+TradeRadar — 全球贸易风险情报中枢 v0.9.0
 
 后端优化版本：
 - 完善的 OpenAPI 文档
@@ -197,11 +197,13 @@ async def log_requests(request: Request, call_next):
 # ── Exception handlers ───────────────────────────────────────────────
 
 async def validation_exception_handler(request: Request, exc):
+    errors = exc.errors() if callable(getattr(exc, "errors", None)) else None
+    detail = getattr(exc, "detail", "Validation error")
     return JSONResponse(
         status_code=422,
         content={
-            "detail": "Validation error",
-            "errors": exc.errors(),
+            "detail": detail,
+            "errors": errors,
         },
     )
 
@@ -230,9 +232,15 @@ async def lifespan(app: FastAPI):
 
     init_db()
     from app.database import SessionLocal
+    from app.models import SearchToolConfig
     from app.prompt_seed import ensure_builtin_prompt_templates
+    from app.routes._seed_data import _default_search_tools
     with SessionLocal() as seed_db:
         ensure_builtin_prompt_templates(seed_db)
+        for config in _default_search_tools():
+            if not seed_db.get(SearchToolConfig, config["id"]):
+                seed_db.add(SearchToolConfig(**config))
+        seed_db.commit()
     
     try:
         from app.scheduler import CollectionScheduler
@@ -254,7 +262,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TradeRadar",
-        version="0.8.0",
+        version="0.9.0",
         description="全球贸易风险情报中枢 — 主题驱动的多源采集、标签结构化入库、统计与分析。",
         contact={
             "name": "TradeRadar Team",
@@ -324,7 +332,7 @@ def create_app() -> FastAPI:
         health = {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "0.8.0",
+            "version": "0.9.0",
             "environment": os.getenv("ENV", "production"),
             "components": {},
         }
