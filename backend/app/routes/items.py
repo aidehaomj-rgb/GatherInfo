@@ -21,7 +21,7 @@ from app.models import (
 
 from ._helpers import _item_tags
 from app.translation_service import item_translation_fields, translate_existing_items
-from app.engine import _web_translation_model
+from app.engine import _web_translation_model, request_batch_stop
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
@@ -296,21 +296,35 @@ def stop_run(run_id: str, db: Session = Depends(get_db)):
     run = db.query(CollectionRun).filter(CollectionRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.status not in (JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"):
-        return {"id": run.id, "status": run.status, "message": "Run is not active"}
+
+    # 停止语义：停止该 run 及其同批次仍在执行的信息源 run。
+    # 已入库的采集条目一律保留，仅把活跃 run 标记为失败结束。
+    request_batch_stop(getattr(run, "batch_id", None))
+    target_ids = {run_id}
+    if getattr(run, "batch_id", None):
+        siblings = db.query(CollectionRun).filter(
+            CollectionRun.batch_id == run.batch_id,
+            CollectionRun.status.in_([JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"]),
+        ).all()
+        target_ids.update(sibling.id for sibling in siblings)
 
     now = datetime.now(timezone.utc)
-    started = run.started_at
-    if started and getattr(started, "tzinfo", None) is None:
-        started = started.replace(tzinfo=timezone.utc)
-    run.status = JobStatus.FAILED
-    run.completed_at = now
-    run.duration_ms = int((now - started).total_seconds() * 1000) if started else None
-    errors = list(run.error_log or [])
-    errors.append("Stopped manually from UI; previous collection did not complete.")
-    run.error_log = errors
+    stopped: list[str] = []
+    for target in db.query(CollectionRun).filter(CollectionRun.id.in_(target_ids)).all():
+        if target.status not in (JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"):
+            continue
+        started = target.started_at
+        if started and getattr(started, "tzinfo", None) is None:
+            started = started.replace(tzinfo=timezone.utc)
+        target.status = JobStatus.FAILED
+        target.completed_at = now
+        target.duration_ms = int((now - started).total_seconds() * 1000) if started else None
+        errors = list(target.error_log or [])
+        errors.append("Stopped manually from UI; previously collected items are kept.")
+        target.error_log = errors
+        stopped.append(target.id)
     db.commit()
-    return {"id": run.id, "status": run.status, "message": "Run stopped"}
+    return {"id": run.id, "status": "failed", "message": "Run stopped", "stopped": stopped}
 
 
 # ── Items ───────────────────────────────────────────────────────────────

@@ -29,6 +29,10 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 _translation_lock = asyncio.Lock()
+# 进程内「停止采集」标记：手动停止后，同批次的后续信息源不再启动。
+# 已入库的采集条目不受影响（保留），仅阻止尚未开始的信息源继续执行。
+_stopped_batches: set[str] = set()
+
 SEMANTIC_SEARCH_CHANNELS = frozenset({"ai_research", "api_search"})
 MAX_PROGRESS_EVENTS = 120
 MAX_ITEM_PROGRESS_EVENTS = 40
@@ -50,6 +54,16 @@ ENFORCEMENT_DISCOVERY_KEYWORDS = (
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def request_batch_stop(batch_id: str | None) -> None:
+    """Mark a collection batch as stopped so its remaining sources are skipped."""
+    if batch_id:
+        _stopped_batches.add(batch_id)
+
+
+def is_batch_stopped(batch_id: str | None) -> bool:
+    return bool(batch_id and batch_id in _stopped_batches)
 
 
 def _topic_collection_keywords(topic: Topic) -> list[str]:
@@ -705,7 +719,17 @@ class CollectionEngine:
         semaphore = asyncio.Semaphore(SOURCE_COLLECTION_CONCURRENCY)
 
         async def collect_one(index: int, source: SourceConfig) -> CollectResult:
+            if is_batch_stopped(batch_id):
+                return CollectResult(
+                    run_id="", source_id=source.id, status=JobStatus.FAILED,
+                    items=[], error_log=["Collection stopped manually from UI"],
+                )
             async with semaphore:
+                if is_batch_stopped(batch_id):
+                    return CollectResult(
+                        run_id="", source_id=source.id, status=JobStatus.FAILED,
+                        items=[], error_log=["Collection stopped manually from UI"],
+                    )
                 return await self.collect_from_source(
                     source.id,
                     semantic_queries if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS and semantic_queries else keywords,
@@ -777,6 +801,7 @@ class CollectionEngine:
             )
         except Exception as exc:
             logger.warning("Notification after collection failed: %s", exc)
+        _stopped_batches.discard(batch_id)
         return final
 
     # ── Scheduled collection ────────────────────────────────────────────

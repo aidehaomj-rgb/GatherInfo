@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity, AlertTriangle, CheckCircle2, ChevronRight, CircleDot, Clock3,
   FileSearch, Languages, ListTree, Search, ShieldCheck, X,
@@ -290,7 +291,7 @@ export function CollectionActivityIndicator({ open, onOpenChange }: ActivityIndi
           </button>
         </div>
       )}
-      {open && (
+      {open && createPortal(
         <aside className="collection-drawer" role="region" aria-label="实时采集进度">
           <header className="collection-drawer__header">
             <div>
@@ -305,15 +306,17 @@ export function CollectionActivityIndicator({ open, onOpenChange }: ActivityIndi
               <><TaskOverview runs={displayedRuns} active={runs.length > 0} onOpenFailures={(batchIds) => void openFailures(batchIds)} />{displayedRuns.map((run) => <RunProgress key={run.id} run={run} />)}</>
             ) : <div className="collection-drawer__empty">当前没有正在进行的采集任务。</div>}
           </div>
-        </aside>
+        </aside>,
+        document.body,
       )}
-      {failures && (
+      {failures && createPortal(
         <FailureDiagnosticsDialog
           failures={failures}
           loading={loadingFailures}
           error={failureError}
           onClose={() => setFailures(null)}
-        />
+        />,
+        document.body,
       )}
     </>
   );

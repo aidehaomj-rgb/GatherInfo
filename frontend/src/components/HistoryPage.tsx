@@ -210,6 +210,9 @@ export function HistoryPage() {
     try {
       await stopRun(runId);
       await load();
+      // 停止后立即同步全局统计：情报主页的今日/本周采集数、仪表盘与采集条目
+      window.dispatchEvent(new CustomEvent("collection-data-updated"));
+      window.dispatchEvent(new CustomEvent("collection-finished"));
     } catch (e) {
       alert(e instanceof Error ? e.message : "停止任务失败");
     }
