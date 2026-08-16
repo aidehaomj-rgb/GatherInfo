@@ -731,18 +731,20 @@ def test_source_homepage_url_roundtrip() -> None:
 # ── collect_window_days default + update ────────────────────────────
 
 def test_topic_collect_window_days() -> None:
-    # Default value is 7
+    # 使用固定 id 并在测试前后清理，避免向真实数据库泄漏 "Window Topic" 占位主题。
+    tid = "collect-window-days-test-topic"
+    client.delete(f"/api/v1/topics/{tid}")
     resp = client.post("/api/v1/topics", json={
-        "name": "Window Topic", "keywords": ["w"],
+        "id": tid, "name": "Window Topic", "keywords": ["w"],
     })
     assert resp.status_code in (200, 201)
     data = resp.json()
-    tid = data["id"]
     assert data["collect_window_days"] == 7
     # Update to a custom window
     upd = client.put(f"/api/v1/topics/{tid}", json={"collect_window_days": 30})
     assert upd.status_code == 200
     assert upd.json()["collect_window_days"] == 30
+    client.delete(f"/api/v1/topics/{tid}")
 
 
 def test_topic_focus_languages_can_be_updated() -> None:

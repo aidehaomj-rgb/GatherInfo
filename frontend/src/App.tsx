@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense, lazy, useCallback } from "react";
 import {
-  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, FolderTree, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen, Wrench, Bot,
+  Activity, LayoutDashboard, Globe, Tags, Database, Clock, BarChart3, Cpu, FileText, Settings, Bell, History, Newspaper, Keyboard, Network, FileCode2, PanelLeftClose, PanelLeftOpen, Wrench, Bot,
 } from "lucide-react";
 
 import { fetchDashboard } from "./api";
@@ -22,7 +22,6 @@ const SchedulesPage = lazy(() => import("./components/SchedulesPage").then(m => 
 const ModelConfigPage = lazy(() => import("./components/ModelConfigPage").then(m => ({ default: m.ModelConfigPage })));
 const SettingsPage = lazy(() => import("./components/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const HistoryPage = lazy(() => import("./components/HistoryPage").then(m => ({ default: m.HistoryPage })));
-const CategoriesPage = lazy(() => import("./components/CategoriesPage").then(m => ({ default: m.CategoriesPage })));
 const ReportsPage = lazy(() => import("./components/ReportsPage").then(m => ({ default: m.ReportsPage })));
 const NotificationsPage = lazy(() => import("./components/NotificationsPage").then(m => ({ default: m.NotificationsPage })));
 const SupplyChainPage = lazy(() => import("./components/SupplyChainPage").then(m => ({ default: m.SupplyChainPage })));
@@ -41,7 +40,7 @@ function PageLoader() {
   );
 }
 
-type ViewId = "home" | "dashboard" | "mcp-tools" | "categories" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "experts" | "supply-chain" | "history" | "settings" | "notifications";
+type ViewId = "home" | "dashboard" | "mcp-tools" | "topics" | "prompts" | "sources" | "items" | "tags" | "schedules" | "models" | "reports" | "experts" | "supply-chain" | "history" | "settings" | "notifications";
 
 interface ViewDef {
   id: ViewId;
@@ -52,7 +51,6 @@ interface ViewDef {
 const views: ViewDef[] = [
   { id: "home", label: "情报主页", icon: Newspaper },
   { id: "dashboard", label: "仪表盘", icon: LayoutDashboard },
-  { id: "categories", label: "采集类别", icon: FolderTree },
   { id: "topics", label: "主题管理", icon: BarChart3 },
   { id: "prompts", label: "提示词库", icon: FileCode2 },
   { id: "sources", label: "信息源", icon: Globe },
@@ -284,7 +282,6 @@ function AppInner() {
                 {view === "home" && <IntelligenceHomePage />}
                 {view === "dashboard" && <DashboardPage />}
                 {view === "mcp-tools" && <MCPToolsPage />}
-                {view === "categories" && <CategoriesPage />}
                 {view === "topics" && <TopicsPage />}
                 {view === "prompts" && <PromptTemplatesPage />}
                 {view === "sources" && <SourcesPage />}

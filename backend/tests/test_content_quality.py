@@ -84,7 +84,9 @@ def test_quality_gate_keeps_only_model_approved_complete_article(monkeypatch) ->
     assert not rejected
     assert len(approved) == 1
     assert approved[0].language == "zh"
-    assert approved[0].title == "美国更新电池材料关税排除措施"
+    # 源文件原文保留在 title/content，中文整理稿存入 translation_zh
+    assert approved[0].title == "USTR updates tariff exclusions for battery materials"
+    assert approved[0].raw_metadata["translation_zh"]["title_zh"] == "美国更新电池材料关税排除措施"
     assert approved[0].raw_metadata["quality_review"]["method"] == "llm"
     assert approved[0].raw_metadata["translation_zh"]["content_zh"].startswith("美国贸易代表办公室")
 

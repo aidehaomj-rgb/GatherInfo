@@ -51,6 +51,7 @@ class ItemOut(BaseModel):
     enforcement_review: dict | None = None
     quality_review: dict | None = None
     category: str | None = None
+    featured_image_url: str | None = None
     tags: list[dict] = []
     entities: dict | None = None
     quality_score: float = 0.0
@@ -105,6 +106,10 @@ class ItemQualityReviewRequest(BaseModel):
     category: str | None = None
     language: str | None = None
     q: str | None = None
+
+
+class FeaturedImageResolveRequest(BaseModel):
+    item_ids: list[str] | None = None
 
 
 class BatchRunOut(BaseModel):

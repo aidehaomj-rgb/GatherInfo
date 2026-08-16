@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Download, Upload, AlertTriangle, CheckCircle, X, Save, FolderOpen, Folder, Check } from "lucide-react";
-import { exportConfig, importConfig, fetchSettings, updateSettings } from "../api";
+import { exportConfig, importConfig, importConfigApply, fetchSettings, updateSettings } from "../api";
 import type { SystemConfig } from "../types";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { Modal } from "./shared/Modal";
@@ -21,7 +21,9 @@ export function SettingsPage() {
   const [importing, setImporting] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<any[]>([]);
-  const [importMode, setImportMode] = useState("skip");
+  const [importMode, setImportMode] = useState<"append" | "overwrite" | "confirm">("confirm");
+  const [pendingData, setPendingData] = useState<any | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, "append" | "overwrite" | "skip">>({});
   const [showConflictDetail, setShowConflictDetail] = useState<any | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -105,19 +107,57 @@ export function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+    setResultMsg(null);
+    setConflicts([]);
+    setPendingData(null);
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      data.mode = importMode;
-      const result = await importConfig(data);
-      const total = Object.values(result.imported).reduce((s: number, v: any) => s + (v as number), 0);
-      setResultMsg(`Imported: ${total} items. Conflicts: ${result.conflict_count}`);
-      setConflicts(result.conflicts || []);
-    } catch (e) {
-      setResultMsg(`Import failed: ${e instanceof Error ? e.message : "Invalid JSON"}`);
+
+      if (importMode === "confirm") {
+        // 逐项确认：先预检冲突，不写库
+        const preview = await importConfig({ ...data, mode: "confirm" });
+        setConflicts(preview.conflicts || []);
+        setPendingData(data);
+        setDecisions({});
+        setResultMsg(
+          preview.conflict_count > 0
+            ? `发现 ${preview.conflict_count} 个重复项，请逐项确认处理方式。`
+            : "没有重复项，可直接导入。",
+        );
+      } else {
+        // 追加 / 覆盖：直接执行
+        const result = await importConfig({ ...data, mode: importMode });
+        const total = Object.values(result.imported).reduce((s: number, v: any) => s + (v as number), 0);
+        setResultMsg(`导入完成：共 ${total} 项。跳过 ${result.conflict_count} 个重复项。`);
+        setConflicts(result.conflicts || []);
+      }
+    } catch (err) {
+      setResultMsg(`导入失败：${err instanceof Error ? err.message : "无效的 JSON 文件"}`);
     }
     setImporting(false);
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const setDecision = (id: string, value: "append" | "overwrite" | "skip") => {
+    setDecisions((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const applyDecisions = async () => {
+    if (!pendingData) return;
+    setImporting(true);
+    setResultMsg(null);
+    try {
+      const result = await importConfigApply(pendingData, decisions);
+      const total = Object.values(result.imported).reduce((s: number, v: any) => s + (v as number), 0);
+      setResultMsg(`导入完成：共 ${total} 项。跳过 ${result.conflict_count} 个重复项。`);
+      setConflicts([]);
+      setPendingData(null);
+      setDecisions({});
+    } catch (err) {
+      setResultMsg(`导入失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
+    setImporting(false);
   };
 
   return (
@@ -146,11 +186,11 @@ export function SettingsPage() {
           <Upload size={14} /> {importing ? "导入中..." : "导入配置"}
         </button>
         <label className="text-muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          冲突:
-          <select value={importMode} onChange={(e) => setImportMode(e.target.value)} style={{ background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "4px 8px", fontSize: "0.8rem" }}>
-            <option value="skip">跳过</option>
-            <option value="overwrite">覆盖</option>
+          重复处理:
+          <select value={importMode} onChange={(e) => setImportMode(e.target.value as "append" | "overwrite" | "confirm")} style={{ background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: "4px 8px", fontSize: "0.8rem" }}>
+            <option value="confirm">逐项确认</option>
             <option value="append">追加</option>
+            <option value="overwrite">覆盖</option>
           </select>
         </label>
       </div>
@@ -216,7 +256,19 @@ export function SettingsPage() {
       {/* Conflicts */}
       {conflicts.length > 0 && (
         <div className="panel" style={{ marginTop: 16 }}>
-          <h3>冲突项目 ({conflicts.length})</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ margin: 0 }}>重复项 ({conflicts.length})</h3>
+            {pendingData && (
+              <button type="button" className="btn btn-primary" onClick={() => void applyDecisions()} disabled={importing}>
+                <Check size={14} /> {importing ? "导入中..." : "确认导入"}
+              </button>
+            )}
+          </div>
+          {pendingData && (
+            <p className="text-muted small" style={{ marginBottom: 12 }}>
+              请为每个重复项选择处理方式：覆盖（用导入数据替换本地）、追加（以新 ID 保留本地并新增）、跳过（保留本地不动）。
+            </p>
+          )}
           <div className="tag-stats-table">
             <table>
               <thead>
@@ -224,19 +276,39 @@ export function SettingsPage() {
                   <th>ID</th>
                   <th>名称</th>
                   <th>状态</th>
-                  <th>操作</th>
+                  <th style={{ minWidth: 260 }}>处理方式</th>
                 </tr>
               </thead>
               <tbody>
-                {conflicts.slice(0, 20).map((c) => (
+                {conflicts.slice(0, 50).map((c) => (
                   <tr key={c.id}>
                     <td><code>{c.id}</code></td>
                     <td>{c.name}</td>
                     <td>{c.identical ? <span className="chip chip--green">完全相同</span> : <span className="chip chip--blue">不同</span>}</td>
                     <td>
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowConflictDetail(c)}>
-                        <AlertTriangle size={12} /> 查看差异
-                      </button>
+                      {pendingData ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          {(["overwrite", "append", "skip"] as const).map((mode) => (
+                            <label key={mode} style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "0.78rem" }}>
+                              <input
+                                type="radio"
+                                name={`conflict-${c.id}`}
+                                checked={(decisions[c.id] ?? "skip") === mode}
+                                onChange={() => setDecision(c.id, mode)}
+                                style={{ accentColor: "var(--accent)" }}
+                              />
+                              {mode === "overwrite" ? "覆盖" : mode === "append" ? "追加" : "跳过"}
+                            </label>
+                          ))}
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowConflictDetail(c)} title="查看差异">
+                            <AlertTriangle size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowConflictDetail(c)}>
+                          <AlertTriangle size={12} /> 查看差异
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

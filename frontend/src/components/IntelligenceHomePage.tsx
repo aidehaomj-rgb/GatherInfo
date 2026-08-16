@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { ArrowRight, BookOpenText, CalendarDays, FileText, Globe2, Newspaper } from "lucide-react";
-import { collectTopic, fetchDashboard, fetchFeaturedItems, fetchItem, fetchItems, fetchReports, fetchSources, fetchTopics } from "../api";
+import { collectTopic, fetchDashboard, fetchFeaturedItems, fetchItem, fetchItems, fetchReports, fetchSources, fetchTopics, resolveFeaturedImages } from "../api";
 import { useToast } from "./ToastProvider";
 import type { CollectedItem, DashboardData, Report, Source, Topic } from "../types";
 import { getDisplayTitle } from "../utils/title";
@@ -99,6 +99,24 @@ export function IntelligenceHomePage() {
       window.removeEventListener("collection-data-updated", handleUpdated);
     };
   }, []);
+
+  // 为重点信息解析真实配图：缺图时从源头页面抓图/网络兜底，每条只尝试一次
+  const imageResolveRequested = useRef(new Set<string>());
+  useEffect(() => {
+    const missing = featuredPool.filter(
+      (i) => !i.featured_image_url && !imageResolveRequested.current.has(i.id),
+    );
+    if (missing.length === 0) return;
+    const ids = missing.map((i) => i.id);
+    ids.forEach((id) => imageResolveRequested.current.add(id));
+    resolveFeaturedImages(ids)
+      .then(({ images }) => {
+        setFeaturedPool((prev) =>
+          prev.map((i) => (images[i.id] ? { ...i, featured_image_url: images[i.id] } : i)),
+        );
+      })
+      .catch(() => {});
+  }, [featuredPool]);
 
   const sourceMap = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
   const topicMap = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics]);
@@ -384,7 +402,10 @@ const FEATURE_IMAGE_POOL = [
 function assignFeatureImages(items: CollectedItem[]) {
   const used = new Set<string>();
   return items.map((item, index) => {
-    const candidates = pickFeatureImageCandidates(item);
+    // 优先使用从源头解析下载的真实配图；缺图时退回按主题关键词的图池兜底
+    const candidates = item.featured_image_url
+      ? [item.featured_image_url]
+      : pickFeatureImageCandidates(item);
     const imageUrl = candidates.find((url) => !used.has(url))
       || FEATURE_IMAGE_POOL.find((url) => !used.has(url))
       || FEATURE_IMAGE_POOL[index % FEATURE_IMAGE_POOL.length];

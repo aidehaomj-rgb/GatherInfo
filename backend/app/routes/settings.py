@@ -1,6 +1,7 @@
 """Stats, System Settings, Config Export/Import."""
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ from app.collection_schemas import (
 )
 from app.database import get_db
 from app.models import (
-    CollectedItem, CollectionRun, ModelConfig,
+    CollectedItem, CollectionRun, ModelConfig, PromptTemplate,
     ScheduleConfig, SearchToolConfig, SourceConfig,
     SystemConfig, Tag, Topic,
 )
@@ -110,6 +111,108 @@ class ImportConflict(BaseModel):
     identical: bool = False
 
 
+# 可备份/导入的数据分区：key → (模型类, 名称字段)
+_IMPORT_SECTIONS = [
+    ("sources", SourceConfig, "name"),
+    ("topics", Topic, "name"),
+    ("prompt_templates", PromptTemplate, "name"),
+    ("models", ModelConfig, "name"),
+    ("tags", Tag, "value"),
+    ("schedules", ScheduleConfig, "name"),
+    ("search_tools", SearchToolConfig, "name"),
+]
+
+_VALID_IMPORT_MODES = {"append", "overwrite", "skip", "confirm"}
+
+
+def _prepare_source_item(item: dict) -> dict:
+    """导入信息源时剥离凭据与运行时状态，并归一化业务分类。"""
+    item = {
+        **item,
+        "api_key_ref": None,
+        "verification_status": "unverified",
+        "discovery_urls": None,
+        "robots_status": "unverified",
+        "terms_status": "unverified",
+        "llm_ingest_allowed": False,
+        "origin_resolution_required": True,
+        "verified_at": None,
+    }
+    source_group = item.get("source_group") or determine_source_group(item)
+    if source_group not in SOURCE_GROUP_INPUT_CODES:
+        raise HTTPException(400, f"未知的信息源业务分类: {source_group}")
+    item["source_group"] = source_group
+    return item
+
+
+def _prepare_item(section_key: str, item: dict) -> dict:
+    if section_key == "sources":
+        return _prepare_source_item(item)
+    return dict(item)
+
+
+def _iter_conflicts(db: Session, section_key: str, model_cls, name_field: str, items: list[dict]) -> list[ImportConflict]:
+    conflicts: list[ImportConflict] = []
+    for item in items:
+        existing = db.get(model_cls, item["id"])
+        if existing is None:
+            continue
+        existing_name = getattr(existing, name_field, None)
+        incoming_name = item.get(name_field)
+        conflicts.append(ImportConflict(
+            id=item["id"],
+            name=incoming_name or item["id"],
+            existing={name_field: existing_name},
+            incoming=item,
+            identical=existing_name == incoming_name,
+        ))
+    return conflicts
+
+
+def _apply_import(db: Session, data: dict, default_mode: str, decisions: dict | None) -> dict:
+    imported = {key: 0 for key, _, _ in _IMPORT_SECTIONS}
+    conflicts: list[ImportConflict] = []
+
+    for section_key, model_cls, name_field in _IMPORT_SECTIONS:
+        for raw in data.get(section_key, []):
+            item = _prepare_item(section_key, raw)
+            item_id = item["id"]
+            existing = db.get(model_cls, item_id)
+
+            if existing is None:
+                db.add(model_cls(**{k: v for k, v in item.items() if hasattr(model_cls, k)}))
+                imported[section_key] += 1
+                continue
+
+            # 冲突：decisions（逐项确认）优先，其次全局 mode
+            decision = (decisions or {}).get(item_id) if decisions else default_mode
+            if decision == "overwrite":
+                for k, v in item.items():
+                    if hasattr(existing, k) and k != "id":
+                        setattr(existing, k, v)
+                imported[section_key] += 1
+            elif decision == "append":
+                new_id = f"{item_id}-import-{uuid4().hex[:6]}"
+                db.add(model_cls(**{
+                    **{k: v for k, v in item.items() if hasattr(model_cls, k)},
+                    "id": new_id,
+                }))
+                imported[section_key] += 1
+            else:  # skip
+                conflicts.append(ImportConflict(
+                    id=item_id,
+                    name=item.get(name_field) or item_id,
+                    existing={name_field: getattr(existing, name_field, None)},
+                    incoming=item,
+                    identical=getattr(existing, name_field, None) == item.get(name_field),
+                ))
+
+    from app.model_defaults import reconcile_default_model
+    reconcile_default_model(db)
+    db.commit()
+    return {"imported": imported, "conflicts": conflicts, "conflict_count": len(conflicts)}
+
+
 @router.get("/config/export")
 def export_config(db: Session = Depends(get_db)):
     sources = [
@@ -146,6 +249,12 @@ def export_config(db: Session = Depends(get_db)):
               "weekly_digest_part_size": t.weekly_digest_part_size,
               "weekly_digest_min_items": t.weekly_digest_min_items}
         topics_data.append(td)
+    prompt_templates_data = [
+        {"id": p.id, "name": p.name, "description": p.description,
+         "content": p.content, "kind": getattr(p, "kind", "prompt"),
+         "is_active": p.is_active}
+        for p in db.query(PromptTemplate).all()
+    ]
     models_data = [
         {"id": m.id, "name": m.name, "provider": m.provider, "base_url": m.base_url,
          "model_name": m.model_name, "temperature": m.temperature,
@@ -174,6 +283,7 @@ def export_config(db: Session = Depends(get_db)):
         "version": "1.0",
         "exported_at": _now().isoformat(),
         "sources": sources, "topics": topics_data,
+        "prompt_templates": prompt_templates_data,
         "models": models_data, "tags": tags_data,
         "schedules": schedules_data, "search_tools": tools_data,
     }
@@ -181,117 +291,30 @@ def export_config(db: Session = Depends(get_db)):
 
 @router.post("/config/import")
 def import_config(data: dict, db: Session = Depends(get_db)):
-    imported = {"sources": 0, "topics": 0, "models": 0, "tags": 0, "schedules": 0, "search_tools": 0}
-    conflicts = []
+    """导入备份数据。
+
+    mode:
+      - ``skip``      直接执行，冲突项跳过并记录
+      - ``overwrite`` 直接执行，冲突项覆盖
+      - ``append``    直接执行，冲突项以新 id 追加
+      - ``confirm``   预检：不写库，返回冲突清单供前端逐项确认
+    """
     mode = data.get("mode", "skip")
+    if mode not in _VALID_IMPORT_MODES:
+        raise HTTPException(400, f"未知的导入模式: {mode}")
 
-    for item in data.get("sources", []):
-        item = {
-            **item,
-            "api_key_ref": None,
-            "verification_status": "unverified",
-            "discovery_urls": None,
-            "robots_status": "unverified",
-            "terms_status": "unverified",
-            "llm_ingest_allowed": False,
-            "origin_resolution_required": True,
-            "verified_at": None,
-        }
-        source_group = item.get("source_group") or determine_source_group(item)
-        if source_group not in SOURCE_GROUP_INPUT_CODES:
-            raise HTTPException(400, f"未知的信息源业务分类: {source_group}")
-        item["source_group"] = source_group
-        existing = db.query(SourceConfig).filter(SourceConfig.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["name"],
-                    existing={"name": existing.name}, incoming=item,
-                    identical=existing.name == item.get("name")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            db.add(SourceConfig(**{k: v for k, v in item.items() if hasattr(SourceConfig, k)}))
-        imported["sources"] += 1
+    if mode == "confirm":
+        conflicts: list[ImportConflict] = []
+        for section_key, model_cls, name_field in _IMPORT_SECTIONS:
+            items = [_prepare_item(section_key, raw) for raw in data.get(section_key, [])]
+            conflicts.extend(_iter_conflicts(db, section_key, model_cls, name_field, items))
+        return {"dry_run": True, "conflicts": conflicts, "conflict_count": len(conflicts)}
 
-    for item in data.get("topics", []):
-        existing = db.query(Topic).filter(Topic.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["name"],
-                    existing={"name": existing.name}, incoming=item,
-                    identical=existing.name == item.get("name")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            t = Topic(**{k: v for k, v in item.items() if hasattr(Topic, k)})
-            db.add(t)
-        imported["topics"] += 1
+    return _apply_import(db, data, mode, None)
 
-    for item in data.get("models", []):
-        existing = db.query(ModelConfig).filter(ModelConfig.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["name"],
-                    existing={"name": existing.name}, incoming=item,
-                    identical=existing.name == item.get("name")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            db.add(ModelConfig(**{k: v for k, v in item.items() if hasattr(ModelConfig, k)}))
-        imported["models"] += 1
 
-    for item in data.get("tags", []):
-        existing = db.query(Tag).filter(Tag.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["value"],
-                    existing={"value": existing.value}, incoming=item,
-                    identical=existing.value == item.get("value")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            db.add(Tag(**{k: v for k, v in item.items() if hasattr(Tag, k)}))
-        imported["tags"] += 1
-
-    for item in data.get("schedules", []):
-        existing = db.query(ScheduleConfig).filter(ScheduleConfig.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["name"],
-                    existing={"name": existing.name}, incoming=item,
-                    identical=existing.name == item.get("name")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            db.add(ScheduleConfig(**{k: v for k, v in item.items() if hasattr(ScheduleConfig, k)}))
-        imported["schedules"] += 1
-
-    for item in data.get("search_tools", []):
-        existing = db.query(SearchToolConfig).filter(SearchToolConfig.id == item["id"]).first()
-        if existing:
-            if mode == "skip":
-                conflicts.append(ImportConflict(id=item["id"], name=item["name"],
-                    existing={"name": existing.name}, incoming=item,
-                    identical=existing.name == item.get("name")))
-                continue
-            elif mode == "overwrite":
-                for k, v in item.items():
-                    if hasattr(existing, k): setattr(existing, k, v)
-        else:
-            db.add(SearchToolConfig(**{k: v for k, v in item.items() if hasattr(SearchToolConfig, k)}))
-        imported["search_tools"] += 1
-
-    from app.model_defaults import reconcile_default_model
-    reconcile_default_model(db)
-    db.commit()
-    return {"imported": imported, "conflicts": conflicts, "conflict_count": len(conflicts)}
+@router.post("/config/import/apply")
+def apply_import_config(data: dict, db: Session = Depends(get_db)):
+    """逐项确认后执行导入。body 为完整备份数据 + ``decisions``（{id: append|overwrite|skip}）。"""
+    decisions = data.get("decisions") or {}
+    return _apply_import(db, data, "skip", decisions)

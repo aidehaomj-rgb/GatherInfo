@@ -20,10 +20,12 @@ from app._schemas.topic import (
     ScheduleCreate, ScheduleOut,
     CategoryCreate, CategoryUpdate, CategoryOut,
     PromptTemplateCreate, PromptTemplateUpdate, PromptTemplateOut,
+    PromptTemplateImportRequest, PromptTemplateImportItem, PromptTemplateExportOut,
 )
 from app._schemas.collection import (
     CollectRequest, RunOut, CollectResultOut,
     ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest, ItemQualityReviewRequest,
+    FeaturedImageResolveRequest,
     InventoryRowOut, ItemInventoryOut,
     BatchRunOut, BatchOut, ActiveRunOut, RunFailureOut,
 )
@@ -56,6 +58,7 @@ __all__ = [
     "ScheduleCreate", "ScheduleOut",
     "CategoryCreate", "CategoryUpdate", "CategoryOut",
     "PromptTemplateCreate", "PromptTemplateUpdate", "PromptTemplateOut",
+    "PromptTemplateImportRequest", "PromptTemplateImportItem", "PromptTemplateExportOut",
     # collection
     "CollectRequest", "RunOut", "CollectResultOut",
     "ItemOut", "ItemListOut", "ItemDeleteRequest", "ItemTranslateRequest", "ItemQualityReviewRequest",

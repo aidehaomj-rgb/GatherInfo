@@ -3,7 +3,7 @@ import type {
   Source, Topic, Schedule, Tag, TagStats, Stats,
   DashboardData, CollectedItem, ItemList, NotificationConfig,
   CollectResult, ConnectorInfo, CollectRun, RunFailure,
-  ItemInventory, PromptTemplate,
+  ItemInventory, PromptTemplate, PromptTemplateExport,
   ResearchJob,
 } from "./types";
 
@@ -128,7 +128,7 @@ export const validateSource = (id: string) =>
 export const reconcileSourceReadiness = () =>
   post<{ updated: number; configured: number }>("/sources/reconcile-readiness");
 export const healthCheckSources = (sourceId?: string) =>
-  post<{ total: number; healthy: number; degraded: number; failed: number; unreachable: number; unknown?: number }>(
+  post<import("./types").HealthCheckReport>(
     `/sources/health-check${sourceId ? `?source_id=${sourceId}` : ""}`,
   );
 export const fetchHealthSummary = () =>
@@ -174,12 +174,17 @@ export const resumeResearchJob = (id: string) => post<ResearchJob>(`/research/jo
 
 // ── Prompt templates ───────────────────────────────────────────────────
 
-export const fetchPromptTemplates = () => get<PromptTemplate[]>("/prompt-templates");
+export const fetchPromptTemplates = (kind?: "prompt" | "playbook") =>
+  get<PromptTemplate[]>(kind ? `/prompt-templates?kind=${kind}` : "/prompt-templates");
 export const createPromptTemplate = (data: Partial<PromptTemplate> & { name: string; content: string }) =>
   post<PromptTemplate>("/prompt-templates", data);
 export const updatePromptTemplate = (id: string, data: Partial<PromptTemplate>) =>
   put<PromptTemplate>(`/prompt-templates/${id}`, data);
 export const deletePromptTemplate = (id: string) => del(`/prompt-templates/${id}`);
+export const exportPromptTemplates = (kind?: "prompt" | "playbook") =>
+  get<PromptTemplateExport>(kind ? `/prompt-templates/export?kind=${kind}` : "/prompt-templates/export");
+export const importPromptTemplates = (prompts: Partial<PromptTemplate>[]) =>
+  post<{ ok: boolean; created: number; updated: number }>("/prompt-templates/import", { prompts });
 
 // ── Categories ──────────────────────────────────────────────────────────
 
@@ -262,6 +267,12 @@ export const fetchItems = (filters: ItemFilters = {}) =>
   } as Record<string, string>);
 export const fetchItemInventory = () => get<ItemInventory>("/items/inventory");
 export const fetchFeaturedItems = () => get<CollectedItem[]>("/items/featured");
+
+export const resolveFeaturedImages = (itemIds?: string[]) =>
+  post<{ images: Record<string, string | null> }>(
+    "/items/featured/resolve-images",
+    { item_ids: itemIds ?? null },
+  );
 export const fetchItem = (id: string) => get<CollectedItem>(`/items/${id}`);
 export const translateItems = (itemIds: string[]) =>
   post<{ requested: number; translated: number; items: string[]; errors?: string[] }>(
@@ -497,7 +508,9 @@ export const autoDiscoverModels = () =>
 // ── Configuration Export / Import ────────────────────────────────────
 
 export const exportConfig = () => get<any>("/config/export");
-export const importConfig = (data: any) => post<{imported: Record<string, number>; conflicts: any[]; conflict_count: number}>("/config/import", data);
+export const importConfig = (data: any) => post<{imported: Record<string, number>; conflicts: any[]; conflict_count: number; dry_run?: boolean}>("/config/import", data);
+export const importConfigApply = (data: any, decisions: Record<string, "append" | "overwrite" | "skip">) =>
+  post<{imported: Record<string, number>; conflicts: any[]; conflict_count: number}>("/config/import/apply", { ...data, decisions });
 
 // ── FTS Search ──────────────────────────────────────────────────────
 
@@ -547,6 +560,11 @@ export const testNotification = (id: string) =>
 
 export const pruneNotifications = () =>
   post<{ deleted: number }>("/notifications/prune");
+
+export const fetchNotificationHistory = () =>
+  get<import("./types").NotificationBatch[]>("/notifications/history");
+export const deleteNotificationHistory = (id: string) =>
+  del(`/notifications/history/${id}`);
 
 
 // ── YMG-Deep integration ───────────────────────────────────────────────

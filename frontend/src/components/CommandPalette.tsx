@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   Search, Command, FileText, Database, Globe, BarChart3,
   Zap, ArrowRight, History as HistoryIcon, Newspaper, LayoutDashboard,
-  FolderTree, Clock, Cpu, Tags, Settings, Bell,
+  Clock, Cpu, Tags, Settings, Bell,
 } from "lucide-react";
 
 type ViewId =
   | "home"
   | "dashboard"
-  | "categories"
   | "topics"
   | "sources"
   | "items"
@@ -81,7 +80,6 @@ function fuzzyScore(query: string, text: string): number {
 const VIEW_ICON: Record<ViewId, React.ReactNode> = {
   home: <Newspaper size={16} />,
   dashboard: <LayoutDashboard size={16} />,
-  categories: <FolderTree size={16} />,
   topics: <BarChart3 size={16} />,
   sources: <Globe size={16} />,
   items: <Database size={16} />,
@@ -97,7 +95,6 @@ const VIEW_ICON: Record<ViewId, React.ReactNode> = {
 const VIEW_LABEL: Record<ViewId, string> = {
   home: "情报主页",
   dashboard: "仪表盘",
-  categories: "采集类别",
   topics: "主题管理",
   sources: "信息源",
   items: "采集条目",
@@ -130,7 +127,7 @@ export function CommandPalette({ open, onClose, onSelectView }: CommandPalettePr
     const list: PaletteItem[] = [];
 
     const navs: ViewId[] = [
-      "home", "dashboard", "categories", "topics", "sources",
+      "home", "dashboard", "topics", "sources",
       "items", "tags", "reports", "history", "settings",
     ];
     for (const v of navs) {

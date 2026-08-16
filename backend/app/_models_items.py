@@ -161,6 +161,9 @@ class CollectedItem(Base):
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
     raw_metadata = Column(JSON, nullable=True)
 
+    # 重点信息配图：从信息源头页面解析下载的本地图片 URL（/static/featured-images/...）
+    featured_image_url = Column(String(2000), nullable=True)
+
     # Compliance
     authorization_level = Column(String(20), default="public")
 

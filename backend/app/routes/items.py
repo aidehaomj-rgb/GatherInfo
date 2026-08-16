@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.collection_schemas import (
     ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut, ItemInventoryOut,
     ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
-    RunOut,
+    FeaturedImageResolveRequest, RunOut,
 )
 from app.connectors.base import FetchItem
 from app.database import get_db
@@ -451,6 +451,30 @@ def list_featured_items(db: Session = Depends(get_db)):
     return [_item_out(item) for item in get_featured_items(db)]
 
 
+@router.post("/items/featured/resolve-images")
+def resolve_featured_images_endpoint(
+    data: FeaturedImageResolveRequest,
+    db: Session = Depends(get_db),
+):
+    """为重点信息解析配图：从源头页面抓图，无图则网络兜底搜图。
+
+    请求体: {"item_ids": ["..."]}，缺省时用当前重点信息。
+    返回: {"images": {item_id: url | null}}
+    """
+    from app.services.featured_image import resolve_featured_images
+
+    item_ids = data.item_ids
+    if item_ids:
+        items = db.query(CollectedItem).filter(CollectedItem.id.in_(item_ids)).all()
+        id_map = {item.id: item for item in items}
+        items = [id_map[i] for i in item_ids if i in id_map]
+    else:
+        from app.services.featured_intelligence import get_featured_items
+        items = get_featured_items(db)
+
+    return {"images": resolve_featured_images(db, items)}
+
+
 def _item_out(it: CollectedItem) -> ItemOut:
     metadata = it.raw_metadata if isinstance(it.raw_metadata, dict) else {}
     enforcement_review = metadata.get("enforcement_review")
@@ -472,6 +496,7 @@ def _item_out(it: CollectedItem) -> ItemOut:
         enforcement_review=enforcement_review,
         quality_review=metadata.get("quality_review"),
         language=it.language, category=it.category, tags=_item_tags(it),
+        featured_image_url=getattr(it, "featured_image_url", None),
         entities=it.entities,
         quality_score=it.quality_score or 0,
         relevance_score=it.relevance_score or 0,

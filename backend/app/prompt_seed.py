@@ -1,5 +1,7 @@
 """Built-in reusable prompt templates."""
 
+from app.inforoute_prompts import INFOROUTE_PROMPTS, PLAYBOOK_PROMPT_IDS
+
 AFRICA_CUSTOMS_RISK_PROMPT_ID = "africa-customs-risk-watch"
 SUPPLY_CHAIN_EXPERT_PROMPT_ID = "supply-chain-expert-research"
 ENFORCEMENT_TOPIC_ID = "weekly-enforcement-intelligence"
@@ -84,6 +86,23 @@ def ensure_builtin_prompt_templates(db) -> None:
             content=SUPPLY_CHAIN_EXPERT_PROMPT,
             is_active=True,
         ))
+
+    # 融合自 InfoRoute 的 9 套证据化整理/研究提示词（缺失才插入，不覆盖已编辑版本）。
+    # 其中 3 套为「采集处理宝典」（采集方法指引），标注 kind=playbook 以独立呈现。
+    for prompt_id, name, description, content in INFOROUTE_PROMPTS:
+        kind = "playbook" if prompt_id in PLAYBOOK_PROMPT_IDS else "prompt"
+        existing = db.query(PromptTemplate).filter(PromptTemplate.id == prompt_id).first()
+        if not existing:
+            db.add(PromptTemplate(
+                id=prompt_id,
+                name=name,
+                description=description,
+                content=content,
+                kind=kind,
+                is_active=True,
+            ))
+        elif getattr(existing, "kind", "prompt") != kind:
+            existing.kind = kind
 
     topic = db.query(Topic).filter(Topic.id == ENFORCEMENT_TOPIC_ID).first()
     if topic and AFRICA_CUSTOMS_RISK_PROMPT_ID not in (topic.prompt_template_ids or []):

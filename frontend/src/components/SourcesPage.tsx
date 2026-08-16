@@ -1,8 +1,9 @@
 import { ConfirmDialog } from "./shared/ConfirmDialog";
+import { Modal } from "./shared/Modal";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List, Wrench, ShieldCheck, HeartPulse, Activity, Newspaper, ChartNoAxesCombined, ShieldAlert, MapPinned, Library, Landmark, MessagesSquare, Scale, Database, Route, BriefcaseBusiness } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors, reconcileSourceReadiness, healthCheckSources, fetchHealthSummary } from "../api";
-import type { Source, ConnectorInfo, SourceVerdict } from "../types";
+import type { Source, ConnectorInfo, SourceVerdict, HealthCheckReport } from "../types";
 import { getSourceGroupDefinition, OTHER_SOURCE_GROUP, SOURCE_GROUPS, type SourceGroupId } from "../sourceGroups";
 import { SourceComplianceReviewDialog } from "./SourceComplianceReviewDialog";
 
@@ -17,10 +18,13 @@ const CHANNEL_LABELS: Record<string, string> = {
   API_SEARCH: "搜索 API",
   WEB_SCRAPE: "网页抓取",
   RSS: "RSS 订阅",
+  OFFICIAL: "官方 API",
   OFFICIAL_API: "官方 API",
   GENERIC_JSON_API: "通用 JSON API",
+  JSON_API: "通用 JSON API",
   SOCIAL: "社交平台",
   MANUAL: "人工维护",
+  AI_RESEARCH: "AI 智能检索",
 };
 
 function channelLabel(channel: string) {
@@ -49,7 +53,7 @@ export function SourcesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
-  const [sourceTab, setSourceTab] = useState<"configured" | "standby" | "recent">("configured");
+  const [sourceTab, setSourceTab] = useState<"configured" | "pending" | "inactive" | "recent">("configured");
   const [sourceSearch, setSourceSearch] = useState("");
   const [businessGroup, setBusinessGroup] = useState<SourceGroupId | "all">("all");
   const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
@@ -60,8 +64,9 @@ export function SourcesPage() {
   const [healthChecking, setHealthChecking] = useState(false);
   const [healthSummary, setHealthSummary] = useState<{ healthy: number; degraded: number; failed: number; unreachable: number; unknown?: number } | null>(null);
   const [healthFilter, setHealthFilter] = useState<string | null>(null);
+  const [healthReport, setHealthReport] = useState<HealthCheckReport | null>(null);
 
-  const changeSourceTab = (tab: "configured" | "standby" | "recent") => {
+  const changeSourceTab = (tab: "configured" | "pending" | "inactive" | "recent") => {
     setSourceTab(tab);
     setBusinessGroup("all");
   };
@@ -126,6 +131,7 @@ export function SourcesPage() {
     try {
       const result = await healthCheckSources();
       setHealthSummary(result);
+      setHealthReport(result);
       setReadinessMessage(`健康检查完成：${result.healthy} 健康 / ${result.degraded} 降级 / ${result.failed} 失败 / ${result.unreachable} 不可达`);
       await load();
     } catch (e) {
@@ -136,8 +142,9 @@ export function SourcesPage() {
   };
 
   const sourcesForTab = sources.filter((s) => {
-    if (sourceTab === "configured") return s.is_configured;
-    if (sourceTab === "standby") return !s.is_configured;
+    if (sourceTab === "configured") return s.is_configured && s.is_active;
+    if (sourceTab === "pending") return !s.is_configured;
+    if (sourceTab === "inactive") return s.is_configured && !s.is_active;
     return s.last_verdict != null; // recent：最近采集过、有结论的信息源
   });
   const businessGroupCounts = useMemo(() => {
@@ -341,14 +348,21 @@ export function SourcesPage() {
           className={`seg-btn ${sourceTab === "configured" ? "seg-btn--active" : ""}`}
           onClick={() => changeSourceTab("configured")}
         >
-          <Zap size={12} /> 已配置可用 ({sources.filter(s => s.is_configured).length})
+          <Zap size={12} /> 已配置可用 ({sources.filter(s => s.is_configured && s.is_active).length})
         </button>
         <button
           type="button"
-          className={`seg-btn ${sourceTab === "standby" ? "seg-btn--active" : ""}`}
-          onClick={() => changeSourceTab("standby")}
+          className={`seg-btn ${sourceTab === "inactive" ? "seg-btn--active" : ""}`}
+          onClick={() => changeSourceTab("inactive")}
         >
-          <Settings size={12} /> 备用未配置 ({sources.filter(s => !s.is_configured).length})
+          <CheckCircle size={12} /> 已停用 ({sources.filter(s => s.is_configured && !s.is_active).length})
+        </button>
+        <button
+          type="button"
+          className={`seg-btn ${sourceTab === "pending" ? "seg-btn--active" : ""}`}
+          onClick={() => changeSourceTab("pending")}
+        >
+          <Settings size={12} /> 待配置 ({sources.filter(s => !s.is_configured).length})
         </button>
         <button
           type="button"
@@ -360,15 +374,23 @@ export function SourcesPage() {
       </div>
 
       {readinessMessage && <div className="toast" onClick={() => setReadinessMessage(null)}>{readinessMessage}</div>}
-      {sourceTab === "standby" && (
+      {sourceTab === "pending" && (
         <div className="source-readiness-notice">
           <div>
-            <strong>备用信息源的判定方式</strong>
-            <p>具有有效网站地址的公开网页、RSS 和官方渠道可直接采集；搜索 API 需要检索服务凭据。AI 模型用于语义规划、转译和审核，不替代可核验的网站原文。</p>
+            <strong>待配置信息源</strong>
+            <p>这些信息源尚未完成采集配置：搜索/数据 API 需要填写 API Key，其余渠道需补充采集地址。填写并验证后会自动转为「已配置可用」。</p>
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => void handleReconcileReadiness()} disabled={reconciling}>
             <Wrench size={14} /> {reconciling ? "检查中..." : "检查并启用可直接采集的网站"}
           </button>
+        </div>
+      )}
+      {sourceTab === "inactive" && (
+        <div className="source-readiness-notice">
+          <div>
+            <strong>信息源停用规则</strong>
+            <p>信息源因以下原因被停用：① 由历史文章链接归纳，尚未完成栏目入口与连通性验证；② 已被新的官方来源替代；③ 采集连续失败或站点入口已调整。停用仅表示「暂不自动采集」，不会删除历史数据。可在编辑表单中核验地址后重新启用。</p>
+          </div>
         </div>
       )}
 
@@ -506,7 +528,79 @@ export function SourcesPage() {
           onClose={() => setConfirmDelete(null)}
         />
       )}
+
+      <HealthCheckReportModal
+        report={healthReport}
+        onClose={() => setHealthReport(null)}
+      />
     </div>
+  );
+}
+
+const HEALTH_STATUS_META: Record<string, { label: string; color: string }> = {
+  degraded: { label: "降级", color: "#f59e0b" },
+  failed: { label: "失败", color: "var(--red)" },
+  unreachable: { label: "不可达", color: "var(--red)" },
+};
+
+function HealthCheckReportModal({ report, onClose }: { report: HealthCheckReport | null; onClose: () => void }) {
+  if (!report) return null;
+  const problemSources = report.sources ?? [];
+  const problemCount = report.degraded + report.failed + report.unreachable;
+
+  return (
+    <Modal open={true} onClose={onClose} title="信息源健康检查报告" width={680}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <span className="chip chip--green">健康 {report.healthy}</span>
+        <span className="chip chip--yellow">降级 {report.degraded}</span>
+        <span className="chip chip--red">失败 {report.failed}</span>
+        <span className="chip chip--red">不可达 {report.unreachable}</span>
+        <span className="chip chip--gray">合计 {report.total}</span>
+      </div>
+
+      {report.deleted.length > 0 && (
+        <div className="health-report-section">
+          <h4>已删除无价值不可达源（{report.deleted.length}）</h4>
+          <div className="health-report-list">
+            {report.deleted.map((d) => (
+              <div key={d.id} className="health-report-row health-report-row--deleted">
+                <span className="health-report-name">{d.name}</span>
+                <code className="health-report-id">{d.id}</code>
+                <span className="health-report-detail">{d.reason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="health-report-section">
+        <h4>异常信息源（{problemCount}）</h4>
+        {problemSources.length === 0 ? (
+          <p className="text-muted" style={{ margin: 0 }}>全部信息源均健康。</p>
+        ) : (
+          <div className="health-report-list">
+            {problemSources.map((s) => {
+              const meta = HEALTH_STATUS_META[s.status] ?? HEALTH_STATUS_META.failed;
+              return (
+                <div key={s.id} className="health-report-row">
+                  <span className="health-report-name">
+                    {s.name}
+                    <code className="health-report-id" style={{ marginLeft: 6 }}>{s.id}</code>
+                  </span>
+                  <span className="badge" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>{meta.label}</span>
+                  <span className="health-report-detail">{s.detail}</span>
+                  {s.url && <code className="health-report-url" title={s.url}>{s.url}</code>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <p className="text-muted" style={{ fontSize: 12, marginTop: 12 }}>
+        检查报告已存档到「通知管理」的历史通知事件中，可随时回看。
+      </p>
+    </Modal>
   );
 }
 

@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.database import init_db, engine
 from app.monitoring import (
@@ -379,6 +381,16 @@ def create_app() -> FastAPI:
             content=get_prometheus_metrics(),
             media_type="text/plain; version=0.0.4"
         )
+
+    # ── Static: featured intelligence images ────────────────────────
+    from app.database import DATA_DIR
+    _featured_image_dir = Path(DATA_DIR) / "featured_images"
+    _featured_image_dir.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/static/featured-images",
+        StaticFiles(directory=str(_featured_image_dir)),
+        name="featured-images",
+    )
 
     # ── Routers ──────────────────────────────────────────────────────
     app.include_router(sources_router)

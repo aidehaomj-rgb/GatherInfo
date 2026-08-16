@@ -9,7 +9,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.notification_models import NotificationConfig, NotificationSender
+from app.notification_models import NotificationBatch, NotificationConfig, NotificationSender
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
@@ -56,6 +56,29 @@ class NotificationOut(BaseModel):
     @field_validator('created_at', 'updated_at', 'last_sent_at', mode='before')
     @classmethod
     def coerce_datetime(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        return v.isoformat()
+
+
+class NotificationBatchOut(BaseModel):
+    id: str
+    topic_id: str | None = None
+    topic_name: str | None = None
+    batch_id: str | None = None
+    total_new: int = 0
+    source_count: int = 0
+    details: str | None = None
+    status: str = "completed"
+    created_at: str | None = None
+
+    model_config = {"from_attributes": True}
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def coerce_created_at(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
@@ -154,6 +177,26 @@ def prune_notifications(db: Session = Depends(get_db)):
     return {"deleted": count}
 
 
+@router.get("/history", response_model=list[NotificationBatchOut])
+def list_notification_history(db: Session = Depends(get_db)):
+    """列出历史通知事件（采集完成通知、信息源健康检查等）。"""
+    return (
+        db.query(NotificationBatch)
+        .order_by(NotificationBatch.created_at.desc())
+        .limit(200)
+        .all()
+    )
+
+
+@router.delete("/history/{batch_id}", response_model=dict)
+def delete_notification_history(batch_id: str, db: Session = Depends(get_db)):
+    """删除单个历史通知事件。"""
+    rec = db.query(NotificationBatch).filter(NotificationBatch.id == batch_id).first()
+    if not rec:
+        raise HTTPException(404, f"Notification history not found: {batch_id}")
+    db.delete(rec)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/test", response_model=TestNotificationResponse)

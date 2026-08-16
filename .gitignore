@@ -37,3 +37,10 @@ data/backups/
 
 # Temporary diagnostic scripts
 frontend/_test_*.mjs
+
+# 大型数据库文件与备份（超出 GitHub 100MB 限制，禁止入库）
+data.before-transfer-*/
+*.db
+*.db-shm
+*.db-wal
+*.db.bak

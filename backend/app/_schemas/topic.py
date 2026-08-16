@@ -122,6 +122,7 @@ class PromptTemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     content: str = Field(min_length=1, max_length=50000)
+    kind: str = Field(default="prompt", max_length=20)
     is_active: bool = True
 
 
@@ -129,6 +130,7 @@ class PromptTemplateUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     content: str | None = Field(default=None, min_length=1, max_length=50000)
+    kind: str | None = Field(default=None, max_length=20)
     is_active: bool | None = None
 
 
@@ -137,12 +139,33 @@ class PromptTemplateOut(BaseModel):
     name: str
     description: str | None = None
     content: str
+    kind: str = "prompt"
     is_active: bool = True
     topic_count: int = 0
     linked_experts: list[str] = Field(default_factory=list)
     created_at: IsoDT = None
     updated_at: IsoDT = None
     model_config = {"from_attributes": True}
+
+
+class PromptTemplateImportItem(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    content: str = Field(min_length=1, max_length=50000)
+    kind: str = Field(default="prompt", max_length=20)
+    is_active: bool = True
+
+
+class PromptTemplateImportRequest(BaseModel):
+    prompts: list[PromptTemplateImportItem] = Field(min_length=1, max_length=500)
+
+
+class PromptTemplateExportOut(BaseModel):
+    version: int = 1
+    exported_at: IsoDT = None
+    count: int = 0
+    prompts: list[PromptTemplateOut] = Field(default_factory=list)
 
 
 class ScheduleCreate(BaseModel):

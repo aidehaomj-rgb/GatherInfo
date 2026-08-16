@@ -147,6 +147,7 @@ export interface CollectedItem {
   enforcement_review: Record<string, unknown> | null;
   quality_review: Record<string, unknown> | null;
   category: string | null;
+  featured_image_url: string | null;
   tags: TagRef[];
   entities: Record<string, unknown> | null;
   quality_score: number;
@@ -423,11 +424,19 @@ export interface PromptTemplate {
   name: string;
   description: string | null;
   content: string;
+  kind: "prompt" | "playbook";
   is_active: boolean;
   topic_count: number;
   linked_experts: string[];
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface PromptTemplateExport {
+  version: number;
+  exported_at: string | null;
+  count: number;
+  prompts: PromptTemplate[];
 }
 
 export interface SupplyChainDashboard {
@@ -722,6 +731,46 @@ export interface NotificationConfig {
   last_sent_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface NotificationBatch {
+  id: string;
+  topic_id: string | null;
+  topic_name: string | null;
+  batch_id: string | null;
+  total_new: number;
+  source_count: number;
+  details: string | null;
+  status: string;
+  created_at: string | null;
+}
+
+// ── Source health check report ────────────────────────────────────────
+
+export interface HealthCheckSourceDetail {
+  id: string;
+  name: string;
+  channel: string;
+  url: string;
+  status: string;
+  detail: string;
+}
+
+export interface HealthCheckDeletedSource {
+  id: string;
+  name: string;
+  reason: string;
+}
+
+export interface HealthCheckReport {
+  total: number;
+  healthy: number;
+  degraded: number;
+  failed: number;
+  unreachable: number;
+  unknown?: number;
+  sources: HealthCheckSourceDetail[];
+  deleted: HealthCheckDeletedSource[];
 }
 
 

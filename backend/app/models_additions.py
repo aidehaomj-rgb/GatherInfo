@@ -187,6 +187,24 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN source_verdict JSON"))
             conn.commit()
 
+    if "collected_items" in existing_tables:
+        item_cols = {c["name"] for c in inspector.get_columns("collected_items")}
+        with engine.connect() as conn:
+            if "featured_image_url" not in item_cols:
+                conn.execute(text(
+                    "ALTER TABLE collected_items ADD COLUMN featured_image_url VARCHAR(2000)"
+                ))
+            conn.commit()
+
+    if "prompt_templates" in existing_tables:
+        prompt_cols = {c["name"] for c in inspector.get_columns("prompt_templates")}
+        with engine.connect() as conn:
+            if "kind" not in prompt_cols:
+                conn.execute(text(
+                    "ALTER TABLE prompt_templates ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'prompt'"
+                ))
+            conn.commit()
+
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS item_topic_memberships (

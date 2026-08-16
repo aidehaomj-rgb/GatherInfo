@@ -439,8 +439,10 @@ def _curate_approved_item(
             else float(item.relevance_score or 0)
         )
     )
+    # 保留源文件原文（title/summary/content），中文整理稿存入 translation_zh，
+    # 避免「源文件内容」与「中文译文」重复显示。language=zh 表示已有中文版本。
     return replace(
-        item, title=title, summary=summary, content=content, language="zh",
+        item, language="zh",
         category=business_category, entities=entities,
         quality_score=max(float(item.quality_score or 0), quality),
         relevance_score=relevance_score, raw_metadata=metadata,

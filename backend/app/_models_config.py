@@ -69,13 +69,19 @@ class Topic(Base):
 
 
 class PromptTemplate(Base):
-    """Reusable collection instruction that can be attached to topics."""
+    """Reusable collection instruction that can be attached to topics.
+
+    kind:
+      - ``prompt``   — 信息采集提示词（可挂载到主题，参与采集语义指令）
+      - ``playbook`` — 采集处理宝典（采集方法指引，不直接用于采集，仅作方法论参考）
+    """
     __tablename__ = "prompt_templates"
 
     id = Column(String(80), primary_key=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     content = Column(Text, nullable=False)
+    kind = Column(String(20), default="prompt", nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=_utc_now)
     updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)

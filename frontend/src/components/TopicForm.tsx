@@ -38,7 +38,6 @@ type TopicFormProps = {
   topic: Topic | null;
   sources: Source[];
   models: ModelConfig[];
-  categories: { id: string; name: string }[];
   promptTemplates: PromptTemplate[];
   onSave: (data: Partial<Topic>) => Promise<void>;
   onClose: () => void;
@@ -48,7 +47,6 @@ export function TopicForm({
   topic,
   sources,
   models,
-  categories,
   promptTemplates,
   onSave,
   onClose,
@@ -56,7 +54,6 @@ export function TopicForm({
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(topic?.name ?? "");
   const [desc, setDesc] = useState(topic?.description ?? "");
-  const [categoryId, setCategoryId] = useState(topic?.category_id ?? "");
   const [keywords, setKeywords] = useState(formatKeywordInput(topic?.keywords ?? []));
   const [keywordTags, setKeywordTags] = useState(
     ((topic as any)?.keyword_tags ?? [])
@@ -118,7 +115,7 @@ export function TopicForm({
     try {
       await onSave({
         name,
-        category_id: categoryId || null,
+        category_id: null,
         description: desc || null,
         keywords: parseKeywordInput(keywords),
         keyword_tags: keywordTags
@@ -203,20 +200,6 @@ export function TopicForm({
               placeholder="例如：中美贸易政策监控"
               autoFocus
             />
-          </label>
-          <label>
-            分类{" "}
-            <select
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-            >
-              <option value="">-- 无 --</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
           </label>
           <label className="span-2">
             <span className="field-label-row">关键词 <span className="required-mark" aria-hidden="true">*</span></span>
