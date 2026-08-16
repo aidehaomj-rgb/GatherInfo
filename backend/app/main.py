@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from app.database import init_db, engine
+from app.database import DATA_DIR, init_db, engine
 from app.monitoring import (
     performance_middleware, get_system_metrics, get_prometheus_metrics,
     record_collection_start, record_collection_success, record_collection_failure
@@ -61,10 +61,40 @@ _OPERATOR_HEADER = "X-Operator-Request"
 _OPERATOR_HEADER_VALUE = "RiskInfoRader"
 _OPERATOR_TOKEN_HEADER = "X-Operator-Token"
 _OPERATOR_TOKEN_TTL_SECONDS = 12 * 60 * 60
-_OPERATOR_SIGNING_SECRET = (
-    os.getenv("OPERATOR_SESSION_SECRET", "").encode("utf-8")
-    or secrets.token_bytes(32)
-)
+
+
+def _load_operator_signing_secret() -> bytes:
+    """Load or create a persistent HMAC signing secret.
+
+    Persisting the secret across backend restarts keeps previously-issued
+    operator tokens valid (otherwise every restart rotates the secret and
+    invalidates all in-flight tokens, surfacing as "expired operator token").
+    """
+    env_secret = os.getenv("OPERATOR_SESSION_SECRET", "")
+    if env_secret:
+        return env_secret.encode("utf-8")
+
+    secret_path = os.path.join(DATA_DIR, "operator_secret.key")
+    try:
+        if os.path.exists(secret_path):
+            with open(secret_path, "rb") as f:
+                secret = f.read()
+            if secret:
+                return secret
+    except OSError:
+        pass
+
+    secret = secrets.token_bytes(32)
+    try:
+        with open(secret_path, "wb") as f:
+            f.write(secret)
+        os.chmod(secret_path, 0o600)
+    except OSError:
+        logger.warning("Unable to persist operator signing secret to %s", secret_path)
+    return secret
+
+
+_OPERATOR_SIGNING_SECRET = _load_operator_signing_secret()
 
 
 def _issue_operator_token(now: int | None = None) -> str:

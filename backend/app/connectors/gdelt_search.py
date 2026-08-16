@@ -123,7 +123,14 @@ class GDELTSearchCollector(BaseCollector):
                 payload = response.json()
                 return payload if isinstance(payload, dict) else None
             except Exception as exc:
-                logger.warning("GDELT search request failed: %s", exc)
+                if attempt == 0:
+                    logger.warning(
+                        "GDELT search request failed (attempt %d), retrying: %s",
+                        attempt + 1, exc,
+                    )
+                    await asyncio.sleep(3.0)
+                    continue
+                logger.warning("GDELT search request failed after retries: %s", exc)
                 return None
         return None
 

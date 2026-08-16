@@ -16,6 +16,7 @@ _ALLOWED_TERMS_PREFIXES = (
     "linking_allowed",
     "open_government",
     "us_government",
+    "chinese_government",
     "cc_by",
 )
 

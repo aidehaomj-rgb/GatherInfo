@@ -97,6 +97,9 @@ export function TopicsPage() {
       setCollectMsg(`采集完成: ${total} 条新增${fails > 0 ? `, ${fails} 源失败` : ""}。详细进度和历史请在“任务查看”中查看。`);
       await load();
       window.dispatchEvent(new Event("dashboard-refresh"));
+      // 通知情报主页刷新今日/本周采集数与最新条目
+      window.dispatchEvent(new CustomEvent("collection-data-updated"));
+      window.dispatchEvent(new CustomEvent("collection-finished"));
     } catch (e) {
       setCollectMsg(`采集失败: ${e instanceof Error ? e.message : "未知错误"}`);
     }

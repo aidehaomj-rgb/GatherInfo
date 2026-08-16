@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2, FileText, Square, ExternalLink } from "lucide-react";
-import { fetchActiveRuns, fetchBatches, fetchReports, operatorWriteHeaders, stopRun } from "../api";
+import { fetchActiveRuns, fetchBatches, fetchReports, operatorWriteHeaders, stopRun, stopAllRuns } from "../api";
 import type { ActiveRunOut, BatchOut, BatchRunOut, Report } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
@@ -154,6 +154,7 @@ export function HistoryPage() {
   const [clearing, setClearing] = useState(false);
   const [taskCategory, setTaskCategory] = useState<TaskCategory>("all");
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+  const [stoppingAll, setStoppingAll] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -174,6 +175,19 @@ export function HistoryPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // 轮询活跃任务，实时反映「正在执行」状态（避免陈旧数据）。
+  // 当任务从有变为无（采集结束）时，自动重新加载批次与报告。
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      const ar = await fetchActiveRuns().catch(() => []);
+      setActiveRuns((prev) => {
+        if (prev.length > 0 && ar.length === 0) void load();
+        return ar;
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const handleClearHistory = async () => {
     setClearing(true);
@@ -217,6 +231,20 @@ export function HistoryPage() {
       alert(e instanceof Error ? e.message : "停止任务失败");
     }
     setStoppingRunId(null);
+  };
+
+  const handleStopAll = async () => {
+    setStoppingAll(true);
+    try {
+      await stopAllRuns();
+      await load();
+      // 停止后立即同步全局统计（已采集信息保留入库）
+      window.dispatchEvent(new CustomEvent("collection-data-updated"));
+      window.dispatchEvent(new CustomEvent("collection-finished"));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "一键停止失败");
+    }
+    setStoppingAll(false);
   };
 
   const activeReports = reports.filter((report) => report.status === "pending" || report.status === "generating");
@@ -277,7 +305,17 @@ export function HistoryPage() {
 
       {showCollections && activeRuns.length > 0 && (
         <div className="history-active-section" style={{ marginBottom: 20 }}>
-          <h3><span className="pulse-dot" /> 正在执行 ({activeRuns.length})</h3>
+          <h3 style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="pulse-dot" /> 正在执行 ({activeRuns.length})
+            <button
+              type="button"
+              className="btn btn-sm btn-danger"
+              onClick={() => void handleStopAll()}
+              disabled={stoppingAll}
+            >
+              <Square size={12} /> {stoppingAll ? "停止中..." : "一键停止全部"}
+            </button>
+          </h3>
           {activeRuns.map((run) => (
             <div key={run.id} className="active-run-card">
               <div className="run-info">

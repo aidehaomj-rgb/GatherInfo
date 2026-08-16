@@ -45,6 +45,8 @@ export function DashboardPage() {
       setCollectMsg(`采集完成：新增 ${total} 条${failed > 0 ? `，${failed} 个来源失败` : ""}`);
       await refresh();
       window.dispatchEvent(new Event("dashboard-refresh"));
+      // 通知情报主页刷新今日/本周采集数与最新条目
+      window.dispatchEvent(new CustomEvent("collection-data-updated"));
     } catch (err) {
       setCollectMsg(`采集失败：${err instanceof Error ? err.message : "未知错误"}`);
     }

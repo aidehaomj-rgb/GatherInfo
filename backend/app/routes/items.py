@@ -327,6 +327,41 @@ def stop_run(run_id: str, db: Session = Depends(get_db)):
     return {"id": run.id, "status": "failed", "message": "Run stopped", "stopped": stopped}
 
 
+@router.post("/runs/stop-all")
+def stop_all_runs(db: Session = Depends(get_db)):
+    """一键停止所有正在执行/待执行的采集任务。
+
+    已入库的采集条目一律保留（不删除），仅把活跃 run 标记为失败结束，
+    并阻止同批次尚未开始的信息源继续启动。
+    """
+    runs = db.query(CollectionRun).filter(
+        CollectionRun.status.in_([JobStatus.RUNNING, JobStatus.PENDING, "running", "pending"]),
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    stopped: list[str] = []
+    batches: set[str] = set()
+    for run in runs:
+        if getattr(run, "batch_id", None):
+            batches.add(run.batch_id)
+        started = run.started_at
+        if started and getattr(started, "tzinfo", None) is None:
+            started = started.replace(tzinfo=timezone.utc)
+        run.status = JobStatus.FAILED
+        run.completed_at = now
+        run.duration_ms = int((now - started).total_seconds() * 1000) if started else None
+        errors = list(run.error_log or [])
+        errors.append("Stopped manually from UI; previously collected items are kept.")
+        run.error_log = errors
+        stopped.append(run.id)
+
+    for batch_id in batches:
+        request_batch_stop(batch_id)
+
+    db.commit()
+    return {"count": len(stopped), "stopped": stopped}
+
+
 # ── Items ───────────────────────────────────────────────────────────────
 
 @router.get("/items", response_model=ItemListOut)

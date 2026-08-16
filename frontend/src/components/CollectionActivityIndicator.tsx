@@ -107,6 +107,9 @@ function TaskOverview({ runs, active, onOpenFailures }: {
   const failed = active
     ? batches.reduce((sum, run) => sum + (run.batch_failed_sources ?? 0), 0)
     : 0;
+  const activeSources = active
+    ? batches.reduce((sum, run) => sum + (run.batch_active_sources ?? 0), 0)
+    : 0;
   const remaining = Math.max(0, total - completed - failed);
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
   const tasks = [...new Set(runs.map((run) => run.topic_name || "即时采集任务"))];
@@ -133,9 +136,11 @@ function TaskOverview({ runs, active, onOpenFailures }: {
       <dl className="collection-task-overview__facts">
         <div><dt>采集关键词</dt><dd>{keywords.length ? keywords.slice(0, 8).join("、") : "按主题语义提示词采集"}</dd></div>
         <div><dt>当前采集渠道</dt><dd>{active ? channels.join("、") : "本轮渠道均已完成"}</dd></div>
+        <div><dt>采集模式</dt><dd>并行并发（同时处理多个信息源）</dd></div>
       </dl>
       <div className="collection-task-overview__counts">
         <div><strong>{total}</strong><span>信息源总数</span></div>
+        <div><strong>{activeSources}</strong><span>并行采集中</span></div>
         <div><strong>{completed}</strong><span>已采集</span></div>
         <div><strong>{remaining}</strong><span>待采集</span></div>
         <button

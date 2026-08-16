@@ -22,6 +22,7 @@ from app.collection_policy import evaluate_collection_policy
 from app.content_parser import parse_fetch_item
 from app.model_defaults import get_default_model
 from app.tag_taxonomy import CATEGORY_LABEL, normalize_category
+from app.trade_semantics import is_semantically_relevant
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
     ItemTopicMembership, JobStatus, ModelConfig, SourceConfig, Tag, Topic,
@@ -42,7 +43,7 @@ MAX_ENFORCEMENT_SEARCH_RESULTS_PER_SOURCE = 120
 DEFAULT_CANDIDATES_PER_SOURCE = 9
 MAX_CANDIDATES_PER_SOURCE = 160
 SOURCE_COLLECTION_CONCURRENCY = 4
-SOURCE_EXECUTION_TIMEOUT_SECONDS = 90
+SOURCE_EXECUTION_TIMEOUT_SECONDS = 45
 SEMANTIC_SOURCE_EXECUTION_TIMEOUT_SECONDS = 600
 ENFORCEMENT_DISCOVERY_KEYWORDS = (
     "seiz", "intercept", "apprehend", "arrest", "charg", "detain",
@@ -333,10 +334,8 @@ class CollectionEngine:
                 existing_counts=existing_counts,
             )
         else:
-            candidate_limit = MAX_CANDIDATES_PER_SOURCE
+            candidate_limit = _candidate_review_limit(source)
             retained_items = window_items[:candidate_limit]
-        candidate_limit = _candidate_review_limit(source)
-        retained_items = window_items[:candidate_limit]
         candidate_limited = max(0, len(window_items) - len(retained_items))
         result.items = retained_items
         result.items_failed += window_rejected + candidate_limited
@@ -402,15 +401,10 @@ class CollectionEngine:
             approved_items, rejected_items = await curate_article_candidates(
                 result.items,
                 model,
-                _topic_review_context(topic, semantic_prompt) if topic else None,
+                _topic_review_context(
+                    topic, semantic_prompt, window_start, window_end,
+                ) if topic else None,
             )
-        approved_items, rejected_items = await curate_article_candidates(
-            result.items,
-            model,
-            _topic_review_context(
-                topic, semantic_prompt, window_start, window_end,
-            ) if topic else None,
-        )
         result.items = approved_items
         result.items_failed += len(rejected_items)
         if rejected_items:
@@ -1044,7 +1038,11 @@ class CollectionEngine:
                 if required_matches is None:
                     required_matches = 2 if total_kw >= 3 else 1
                 if len(matched_kws) < required_matches:
-                    continue
+                    # 语义兜底：字面关键词未命中时，用受控政策工具词表判定语义相关性，
+                    # 避免中英措辞差异导致的漏采（如英文讲 third-country transshipment）。
+                    # 仅对绑定了语义画像的贸易类主题生效，关键矿产/军工主题不受影响。
+                    if not is_semantically_relevant(text, topic_id):
+                        continue
             item_id = fi.item_id(source_id)
             content_hash = _hash(_dedupe_fingerprint(fi.url, fi.title, parsed.content))
             try:

@@ -43,6 +43,56 @@ export async function operatorWriteHeaders(): Promise<Record<string, string>> {
   };
 }
 
+function invalidateOperatorToken(): void {
+  operatorTokenPromise = null;
+}
+
+function isOperatorTokenError(status: number, detail: string): boolean {
+  return status === 403 && /operator/i.test(detail);
+}
+
+// 统一写请求执行器：token 过期（后端重启/密钥轮换）时自动重取并重试一次。
+async function writeRequest(
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<Response> {
+  const attempt = async (): Promise<Response> => {
+    const operatorHeaders = await operatorWriteHeaders();
+    return fetch(`${BASE}${path}`, {
+      method,
+      headers: body !== undefined
+        ? { ...operatorHeaders, "Content-Type": "application/json" }
+        : operatorHeaders,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  };
+
+  let resp = await attempt();
+  if (isOperatorTokenError(resp.status, await extractDetail(resp))) {
+    invalidateOperatorToken();
+    resp = await attempt();
+  }
+  return resp;
+}
+
+async function extractDetail(resp: Response): Promise<string> {
+  try {
+    const body = (await resp.clone().json()) as { detail?: string };
+    return body.detail ?? resp.statusText;
+  } catch {
+    return resp.statusText;
+  }
+}
+
+async function throwIfError<T>(resp: Response): Promise<T> {
+  if (!resp.ok) {
+    const detail = await extractDetail(resp);
+    throw new Error(detail);
+  }
+  return resp.json() as Promise<T>;
+}
+
 async function get<T>(
   path: string,
   params?: Record<string, string | undefined | null>,
@@ -62,44 +112,18 @@ async function get<T>(
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const operatorHeaders = await operatorWriteHeaders();
-  const resp = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: body
-      ? { ...operatorHeaders, "Content-Type": "application/json" }
-      : operatorHeaders,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
-  }
-  return resp.json();
+  const resp = await writeRequest("POST", path, body);
+  return throwIfError<T>(resp);
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const operatorHeaders = await operatorWriteHeaders();
-  const resp = await fetch(`${BASE}${path}`, {
-    method: "PUT",
-    headers: { ...operatorHeaders, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
-  }
-  return resp.json();
+  const resp = await writeRequest("PUT", path, body);
+  return throwIfError<T>(resp);
 }
 
 async function del(path: string): Promise<void> {
-  const operatorHeaders = await operatorWriteHeaders();
-  const resp = await fetch(`${BASE}${path}`, {
-    method: "DELETE", headers: operatorHeaders,
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error((err as { detail?: string }).detail ?? resp.statusText);
-  }
+  const resp = await writeRequest("DELETE", path);
+  await throwIfError<unknown>(resp);
 }
 
 async function postCollection<T>(path: string, body?: unknown): Promise<T> {
@@ -228,6 +252,8 @@ export const fetchRunFailures = (batchIds: string[]) =>
   get<RunFailure[]>("/runs/failures", { batch_ids: batchIds.join(",") });
 export const stopRun = (runId: string) =>
   post<{ id: string; status: string; message: string }>(`/runs/${runId}/stop`);
+export const stopAllRuns = () =>
+  post<{ count: number; stopped: string[] }>("/runs/stop-all");
 
 export const fetchRuns = (topicId?: string, limit = 20) =>
   get<CollectRun[]>("/runs", {

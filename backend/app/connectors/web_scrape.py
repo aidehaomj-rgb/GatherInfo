@@ -45,13 +45,9 @@ class WebScrapeCollector(BaseCollector):
                 if len(items) >= max_items:
                     break
                 try:
-                    resp = await fetch_public_html(
-                        client, url, timeout_seconds=cfg.timeout_seconds,
-                        minimum_interval_seconds=_minimum_request_interval(cfg),
-                    )
-                    if resp is None:
+                    soup = await _fetch_list_soup(client, cfg, url)
+                    if soup is None:
                         raise ValueError("URL 非公网 HTML、重定向不安全或响应过大")
-                    soup = BeautifulSoup(resp.text, "lxml")
 
                     item_sel = ac.get("item_selector", "article, .news-item, .list-item, li, tr")
                     for el in soup.select(item_sel):
@@ -169,6 +165,51 @@ class WebScrapeCollector(BaseCollector):
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+async def _fetch_list_soup(client, cfg: SourceConfig, url: str):
+    """静态抓取列表页；空壳或解析不到条目时用 headless Chromium 渲染 JS 页面。
+
+    政府海关/边境机构的新闻页多为 JS 动态渲染，httpx 静态抓取只能拿到
+    空壳 HTML（无 <article>/<li> 等条目）。这里在静态结果不含条目时回退到
+    playwright 渲染，让这类站点也能真正采集到信息。
+    """
+    item_sel = (cfg.auth_config or {}).get(
+        "item_selector", "article, .news-item, .list-item, li, tr"
+    )
+    resp = await fetch_public_html(
+        client, url, timeout_seconds=cfg.timeout_seconds,
+        minimum_interval_seconds=_minimum_request_interval(cfg),
+    )
+    if resp is not None:
+        soup = BeautifulSoup(resp.text, "lxml")
+        if soup.select(item_sel):
+            return soup
+
+    # 静态抓取失败或解析不到条目 → 浏览器渲染 JS 页面
+    rendered = await _render_public_html(url)
+    if rendered:
+        return BeautifulSoup(rendered, "lxml")
+    return None
+
+
+async def _render_public_html(url: str) -> str | None:
+    """用 headless Chromium 渲染 JS 动态页面，返回渲染后的 HTML 字符串。"""
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(1500)
+                return await page.content()
+            finally:
+                await browser.close()
+    except Exception as exc:
+        logger.warning("Playwright render failed for %s: %s", url[:100], exc)
+        return None
+
 
 def _scrape_headers() -> dict:
     return {

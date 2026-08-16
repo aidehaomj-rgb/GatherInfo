@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+from app.trade_semantics import POLICY_INSTRUMENT_CATEGORY
+
 # 受控业务分类：value 使用稳定的英文 slug，label 为中文显示名。
 CONTROLLED_CATEGORIES: dict[str, str] = {
     "trade": "贸易政策",
@@ -94,6 +96,12 @@ def normalize_category(value: str | None) -> str:
     for slug in CONTROLLED_CATEGORIES:
         if lowered == slug:
             return slug
+    # 英文政策工具值对齐（InfoRoute policy_instrument → 受控分类）：
+    # 如 anti_dumping→tariff、countervailing→tariff、export_control→security、
+    # sps_tbt→technology、customs_procedure→trade 等。
+    policy_slug = lowered.replace(" ", "_").replace("-", "_")
+    if policy_slug in POLICY_INSTRUMENT_CATEGORY:
+        return POLICY_INSTRUMENT_CATEGORY[policy_slug]
     for slug, keywords in _NORMALIZE_RULES:
         if any(kw in v for kw in keywords):
             return slug

@@ -9,6 +9,12 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.llm_client import call_llm
 from app.models import ModelConfig, Topic
+from app.trade_semantics import (
+    POLICY_INSTRUMENTS,
+    TOPIC_SEMANTIC_PROFILES,
+    channel_terms,
+    instrument_terms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +177,8 @@ async def build_research_queries(
 
     keywords = topic.keywords if isinstance(topic.keywords, list) else []
     topic_desc = topic.description or ""
+    instrument_vocab = ", ".join(instrument_terms())
+    channel_vocab = ", ".join(channel_terms())
     system_prompt = f"""
 You are a customs risk intelligence search planner. Based on the request below,
 return at most {max_queries} high-quality public-web search queries as strict JSON:
@@ -187,6 +195,11 @@ Requirements:
 6. Treat the configured keywords as semantic intent. Do not require every literal keyword
    to appear in a result; use close concepts, synonyms, translations,
    authorities, conduct, goods and routes that express the same information direction.
+7. Prefer queries that express one of these trade-policy instruments as the
+   semantic direction (use their English terms, synonyms or translations):
+   {instrument_vocab}
+   and, where relevant, one of these trade-impact channels:
+   {channel_vocab}
 
 Topic: {topic.name}
 Topic description: {topic_desc}
@@ -310,6 +323,11 @@ def _fallback_queries(
         ]
         return queries[:max_queries]
 
+    # 贸易类主题：优先用受控政策工具词表生成语义检索式（替代散装关键词）
+    semantic = _trade_semantic_queries(topic, date_hint, max_queries)
+    if semantic:
+        return semantic
+
     keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]
     directions = keywords[:4] or [topic.name]
     query_suffixes = [
@@ -322,6 +340,47 @@ def _fallback_queries(
         f"{topic.name} {direction} {query_suffixes[index % len(query_suffixes)]} {date_hint}"
         for index, direction in enumerate(directions)
     ]
+    return list(dict.fromkeys(queries))[:max_queries]
+
+
+def _trade_semantic_queries(topic: Topic, date_hint: str, max_queries: int) -> list[str]:
+    """用主题绑定的政策工具词表生成确定性语义检索式（贸易类主题）。
+
+    未绑定语义画像的主题（关键矿产、军工采购等）返回空列表，走原关键词逻辑。
+    """
+    profile = TOPIC_SEMANTIC_PROFILES.get(topic.id)
+    if not profile:
+        return []
+
+    instrument_slugs = profile.get("policy_instruments", [])
+    if "all" in instrument_slugs:
+        instrument_slugs = list(POLICY_INSTRUMENTS.keys())
+    # 每个政策工具取代表性英文搜索词（词表已按具体度排序，首词即可用）
+    terms = [
+        POLICY_INSTRUMENTS[slug][0]
+        for slug in instrument_slugs
+        if slug in POLICY_INSTRUMENTS
+    ]
+    if not terms:
+        return []
+
+    # 主题的英文关键词作为种子（过滤中文关键词，避免中英混拼）
+    en_seeds = [
+        str(kw).strip()
+        for kw in (topic.keywords or [])
+        if kw and not re.search(r"[\u4e00-\u9fff]", str(kw))
+    ][:4]
+
+    queries: list[str] = []
+    # 单工具查询：种子 + 政策工具 + 官方/最新
+    for term in terms:
+        seed = en_seeds[0] if en_seeds else "trade policy"
+        queries.append(f"{seed} {term} official announcement latest {date_hint}"[:240])
+    # 组合查询：2~3 个工具词组合，覆盖更广
+    for index in range(0, len(terms), 3):
+        combo = " ".join(terms[index : index + 3])
+        seed = en_seeds[0] if en_seeds else "trade policy"
+        queries.append(f"{seed} {combo} regulation measure {date_hint}"[:240])
     return list(dict.fromkeys(queries))[:max_queries]
 
 
