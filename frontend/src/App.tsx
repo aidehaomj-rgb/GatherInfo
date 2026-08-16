@@ -59,7 +59,7 @@ const views: ViewDef[] = [
   { id: "mcp-tools", label: "MCP工具", icon: Wrench },
   { id: "items", label: "采集条目", icon: Database },
   { id: "tags", label: "标签系统", icon: Tags },
-  { id: "reports", label: "智能报告", icon: FileText },
+  { id: "reports", label: "智能整理", icon: FileText },
   { id: "supply-chain", label: "供应链穿透", icon: Network },
   { id: "models", label: "模型配置", icon: Cpu },
   { id: "schedules", label: "周期调度", icon: Clock },
@@ -105,6 +105,30 @@ function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void })
       </div>
     </div>
   );
+}
+
+const OVERLAY_SELECTOR = ".modal-overlay, .cp-overlay, .shortcut-help-overlay";
+
+/**
+ * 全局浮层滚动锁：任意浮层（弹窗/命令面板/快捷键帮助）出现时，
+ * 给 body 加 .modal-open，配合 CSS 锁定底层滚动容器 .workspace；
+ * 浮层关闭后自动恢复。覆盖本项目所有板块，无需逐组件接入。
+ */
+function ModalScrollLock() {
+  useEffect(() => {
+    const sync = () => {
+      const hasOverlay = document.querySelector(OVERLAY_SELECTOR) !== null;
+      document.body.classList.toggle("modal-open", hasOverlay);
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      document.body.classList.remove("modal-open");
+    };
+  }, []);
+  return null;
 }
 
 function AppInner() {
@@ -174,6 +198,16 @@ function AppInner() {
     onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // 跨页面导航：其他组件（如标签系统）通过该事件请求切换到指定视图
+  useEffect(() => {
+    function onNavigate(e: Event) {
+      const detail = (e as CustomEvent<{ view?: ViewId }>).detail;
+      if (detail?.view) setView(detail.view);
+    }
+    window.addEventListener("navigate-view", onNavigate);
+    return () => window.removeEventListener("navigate-view", onNavigate);
   }, []);
 
   const itemsToday = dashData?.summary?.items_today ?? 0;
@@ -296,6 +330,7 @@ function AppInner() {
         }}
       />
       <ShortcutHelp open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
+      <ModalScrollLock />
     </div>
   );
 }

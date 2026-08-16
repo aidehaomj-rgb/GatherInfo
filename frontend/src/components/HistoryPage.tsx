@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2, FileText, Square } from "lucide-react";
+import { Clock, RefreshCw, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Trash2, FileText, Square, ExternalLink } from "lucide-react";
 import { fetchActiveRuns, fetchBatches, fetchReports, operatorWriteHeaders, stopRun } from "../api";
-import type { ActiveRunOut, BatchOut, Report } from "../types";
+import type { ActiveRunOut, BatchOut, BatchRunOut, Report } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
@@ -13,6 +13,92 @@ type TaskCategory = "all" | "collection" | "report";
 function formatReportTime(report: Report): string {
   const timestamp = report.generated_at ?? report.created_at;
   return timestamp ? formatBeijingDateTime(timestamp) : "未记录时间";
+}
+
+const LANG_LABELS: Record<string, string> = {
+  zh: "中文", en: "英文", ja: "日文", ko: "韩文", fr: "法文",
+  de: "德文", es: "西班牙文", ru: "俄文", ar: "阿拉伯文",
+};
+function langLabel(code: string): string {
+  return LANG_LABELS[code] || code;
+}
+
+// 单个信息源 run 的完整结论：信息源结论 + 符合标准 = 新增 + 重复（自洽计数）
+function SourceRunDetail({ run }: { run: BatchRunOut }) {
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const verdict = run.source_verdict;
+  const duplicates = run.duplicate_items || [];
+  const newCount = run.items_new || 0;
+  // 重复数以 duplicate_items 实际条数为准（无明细时回退到 run.items_duplicate）
+  const dupCount = duplicates.length || run.items_duplicate || 0;
+  const matchedTotal = newCount + dupCount;
+
+  return (
+    <div className="source-run-detail">
+      {/* 信息源结论：可连接 / 可爬取 / 可下载 / 语言 */}
+      {verdict && (
+        <div className="source-verdict">
+          <span className={`verdict-pill ${verdict.connectable ? "verdict-ok" : "verdict-bad"}`}>
+            {verdict.connectable ? "可连接" : "不可连接"}
+          </span>
+          <span className={`verdict-pill ${verdict.crawlable ? "verdict-ok" : "verdict-bad"}`}>
+            {verdict.crawlable ? "可爬取" : "未爬取到内容"}
+          </span>
+          <span className={`verdict-pill ${verdict.downloadable ? "verdict-ok" : "verdict-bad"}`}>
+            {verdict.downloadable ? "可下载" : "未获取到正文"}
+          </span>
+          {verdict.languages && verdict.languages.length > 0 && (
+            <span className="verdict-pill verdict-lang">
+              语言：{verdict.languages.map(langLabel).join("、")}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* 符合标准 = 新增 + 重复（自洽） */}
+      <div className="source-run-counts">
+        {run.status === "completed" ? <CheckCircle size={12} style={{ color: "var(--green)" }} /> :
+         run.status === "failed" ? <AlertTriangle size={12} style={{ color: "var(--red)" }} /> : null}
+        <span className="count-total">符合标准 <b>{matchedTotal}</b> 条</span>
+        <span className="count-eq">=</span>
+        <span className="count-new">新增 {newCount}</span>
+        <span className="count-plus">+</span>
+        {dupCount > 0 ? (
+          <button
+            type="button"
+            className="duplicate-count-link"
+            title="点击展开重复信息（在新窗口打开原文）"
+            onClick={() => setShowDuplicates((v) => !v)}
+          >
+            重复 {dupCount}
+            <ChevronDown size={12} style={{ transform: showDuplicates ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.2s" }} />
+          </button>
+        ) : (
+          <span className="count-dup">重复 0</span>
+        )}
+        {run.duration_ms != null && <span className="count-dur">{(run.duration_ms / 1000).toFixed(1)}秒</span>}
+      </div>
+
+      {/* 重复信息列表：点击标题在新窗口打开原文 */}
+      {showDuplicates && dupCount > 0 && (
+        <div className="duplicates-block">
+          <ul className="duplicates-list">
+            {duplicates.map((d, i) => (
+              <li key={i}>
+                {d.url ? (
+                  <a href={d.url} target="_blank" rel="noopener noreferrer">
+                    {d.title || "未命名信息"} <ExternalLink size={11} />
+                  </a>
+                ) : (
+                  <span>{d.title || "未命名信息"}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded: boolean; onToggle: () => void }) {
@@ -44,13 +130,8 @@ function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded
           <div className="timeline-card-body">
             {batch.runs.map((r) => (
               <div key={r.id} className="timeline-source-row">
-                <span>{r.source_name || r.source_id}</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {r.status === "completed" ? <CheckCircle size={12} style={{ color: "var(--green)" }} /> :
-                   r.status === "failed" ? <AlertTriangle size={12} style={{ color: "var(--red)" }} /> : null}
-                  新增 {r.items_new} / 共 {r.items_found} 条
-                  {r.duration_ms != null && <> · {(r.duration_ms / 1000).toFixed(1)}秒</>}
-                </span>
+                <span className="source-name">{r.source_name || r.source_id}</span>
+                <SourceRunDetail run={r} />
               </div>
             ))}
           </div>
@@ -223,7 +304,7 @@ export function HistoryPage() {
           {activeReports.map((report) => (
             <div key={report.id} className="active-run-card">
               <div className="run-info">
-                <h4>{report.title || report.topic_name || "智能报告"}</h4>
+                <h4>{report.title || report.topic_name || "分析报告"}</h4>
                 <p>{report.topic_name || report.topic_id} · 报告生成时使用 {report.item_count} 条采集信息 · {report.created_at && `创建于 ${formatBeijingTime(report.created_at)}`}</p>
               </div>
               <div className="run-status"><StatusBadge status={report.status as any} /></div>
@@ -286,12 +367,7 @@ export function HistoryPage() {
                   {batch.runs.map((r) => (
                     <div key={r.id} className="batch-source-row">
                       <span className="source-name">{r.source_name || r.source_id}</span>
-                      <span className="source-stats">
-                        {r.status === "completed" ? <CheckCircle size={12} style={{ color: "var(--green)", verticalAlign: "middle", marginRight: 4 }} /> :
-                         r.status === "failed" ? <AlertTriangle size={12} style={{ color: "var(--red)", verticalAlign: "middle", marginRight: 4 }} /> : null}
-                        新增 {r.items_new} / 共 {r.items_found} 条
-                        {r.duration_ms != null && <> · {(r.duration_ms / 1000).toFixed(1)}秒</>}
-                      </span>
+                      <SourceRunDetail run={r} />
                     </div>
                   ))}
                 </div>

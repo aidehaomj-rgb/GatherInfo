@@ -7,7 +7,21 @@ import type {
   ResearchJob,
 } from "./types";
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+// 归一化 API 基础路径：无论 VITE_API_BASE_URL 传的是相对路径 (/api/v1)、
+// 完整地址 (http://127.0.0.1:8109/api/v1)，还是漏写后缀的裸后端地址
+// (http://127.0.0.1:8109)，都统一收敛到带 /api/v1 前缀的正确地址，避免 404。
+function resolveApiBase(): string {
+  const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (!raw) return "/api/v1";
+  const normalized = raw.replace(/\/+$/, "");
+  if (!normalized || normalized === "/api/v1") return "/api/v1";
+  if (/^https?:\/\//i.test(normalized) && !normalized.endsWith("/api/v1")) {
+    return `${normalized}/api/v1`;
+  }
+  return normalized;
+}
+
+const BASE = resolveApiBase();
 let operatorTokenPromise: Promise<string> | null = null;
 
 async function fetchOperatorToken(): Promise<string> {
@@ -258,6 +272,29 @@ export const reviewItemQuality = (itemIds: string[], limit = 100) =>
   post<{ reviewed: number; curated: number; deleted: number; retained: number }>(
     "/items/quality-review",
     { item_ids: itemIds, limit },
+  );
+
+export interface CurateScope {
+  topic_id?: string;
+  source_id?: string;
+  category?: string;
+  language?: string;
+  q?: string;
+  limit?: number;
+}
+
+export const reviewItemsInScope = (scope: CurateScope) =>
+  post<{ reviewed: number; curated: number; deleted: number; retained: number }>(
+    "/items/quality-review",
+    {
+      item_ids: [],
+      limit: scope.limit ?? 100,
+      topic_id: scope.topic_id || undefined,
+      source_id: scope.source_id || undefined,
+      category: scope.category || undefined,
+      language: scope.language || undefined,
+      q: scope.q || undefined,
+    },
   );
 export const fetchItemIds = (filters: ItemFilters) =>
   get<{ids: string[]; total: number; matching: number}>("/items/ids", {

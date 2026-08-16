@@ -38,6 +38,8 @@ export interface Source {
   health_status?: string;
   health_checked_at?: string | null;
   health_detail?: string | null;
+  last_verdict?: SourceVerdict | null;
+  last_collected_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -592,6 +594,26 @@ export interface ListModelsResult {
 
 // ── Collection Batch / History ──────────────────────────────────────────
 
+export interface DuplicateItem {
+  title: string;
+  url: string | null;
+  existing_item_id: string | null;
+  matched_by: string | null;
+}
+
+export interface SourceVerdict {
+  connectable: boolean;
+  crawlable: boolean;
+  downloadable: boolean;
+  languages: string[];
+  channel: string | null;
+  items_found: number;
+  items_candidates?: number;
+  items_new: number;
+  items_duplicate: number;
+  summary: string;
+}
+
 export interface BatchRunOut {
   id: string;
   source_id: string;
@@ -600,6 +622,9 @@ export interface BatchRunOut {
   items_new: number;
   items_found: number;
   items_failed: number;
+  items_duplicate: number;
+  duplicate_items: DuplicateItem[];
+  source_verdict: SourceVerdict | null;
   started_at: string | null;
   completed_at: string | null;
   duration_ms: number | null;

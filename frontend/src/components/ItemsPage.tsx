@@ -125,6 +125,22 @@ export function ItemsPage() {
     return () => window.removeEventListener("open-reading", handler);
   }, []);
 
+  // 从标签系统跳转：按标签快速命中信息合集
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tag?: string }>).detail;
+      if (!detail?.tag) return;
+      setFilterTag(detail.tag);
+      setFilterTopic("");
+      setFilterSource("");
+      setFilterBatch("");
+      setFilterCat("");
+      setPage(1);
+    };
+    window.addEventListener("filter-items-by-tag", handler);
+    return () => window.removeEventListener("filter-items-by-tag", handler);
+  }, []);
+
   useEffect(() => {
     if (readingItem) {
       document.body.style.overflow = "hidden";

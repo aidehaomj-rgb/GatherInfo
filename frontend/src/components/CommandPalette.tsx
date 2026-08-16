@@ -102,7 +102,7 @@ const VIEW_LABEL: Record<ViewId, string> = {
   sources: "信息源",
   items: "采集条目",
   tags: "标签系统",
-  reports: "智能报告",
+  reports: "智能整理",
   history: "采集历史",
   schedules: "周期调度",
   models: "模型配置",

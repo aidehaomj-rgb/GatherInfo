@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
-import { FileText, Trash2, Eye, Download, BrainCircuit, Send } from "lucide-react";
-import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, generateReport, generateWeeklyReports, deleteReport, fetchBatches, exportReport, downloadReportFile, listAvailableModels, pushReportToHaiSee } from "../api";
-import type { Report, Topic, ModelConfig } from "../types";
+import { FileText, Trash2, Eye, Download, BrainCircuit, Send, Wand2 } from "lucide-react";
+import { batchGenerateReports, fetchReports, fetchTopics, fetchModels, fetchSources, generateReport, generateWeeklyReports, deleteReport, fetchBatches, exportReport, downloadReportFile, listAvailableModels, pushReportToHaiSee, reviewItemsInScope } from "../api";
+import type { Report, Topic, ModelConfig, Source } from "../types";
 import { ReportViewerModal } from "./ReportViewerModal";
 import { ReportBatchPanel } from "./ReportBatchPanel";
 import { YmgDeepPanel } from "./YmgDeepPanel";
@@ -39,6 +39,7 @@ export function ReportsPage() {
   const [ollamaModels, setOllamaModels] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mainMode, setMainMode] = useState<"report" | "curate">("report");
   const [genMode, setGenMode] = useState<GenMode>("single");
   const [reportType, setReportType] = useState<ReportType>("analytical");
   const [generating, setGenerating] = useState(false);
@@ -243,11 +244,25 @@ export function ReportsPage() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h2>智能报告</h2>
-          <p className="text-muted">基于采集到的信息，使用 AI 模型自动生成综合分析报告。</p>
+          <h2>智能整理</h2>
+          <p className="text-muted">使用 AI 生成综合分析报告，或对设定范围的信息进行全面再整理，清理无效内容。</p>
         </div>
       </div>
 
+      {/* 顶层功能切换：智能报告 / 全面整理 */}
+      <div className="segmented-control" style={{ marginBottom: 16 }}>
+        <button type="button" className={`seg-btn${mainMode === "report" ? " seg-btn--active" : ""}`} onClick={() => setMainMode("report")}>
+          <BrainCircuit size={14} /> 智能报告
+        </button>
+        <button type="button" className={`seg-btn${mainMode === "curate" ? " seg-btn--active" : ""}`} onClick={() => setMainMode("curate")}>
+          <Wand2 size={14} /> 全面整理
+        </button>
+      </div>
+
+      {mainMode === "curate" ? (
+        <CuratePanel topics={topics} models={models} />
+      ) : (
+      <>
       {/* Mode switch */}
       <div className="segmented-control" style={{ marginBottom: 16 }}>
         <button type="button" className={`seg-btn${genMode === "single" ? " seg-btn--active" : ""}`} onClick={() => setGenMode("single")}>
@@ -441,6 +456,8 @@ export function ReportsPage() {
         message={deleteTarget?.message || ""}
         variant="danger"
       />
+      </>
+      )}
     </div>
   );
 }
@@ -449,6 +466,168 @@ function statusText(status: string): string {
   if (status === "completed") return "完成";
   if (status === "failed") return "失败";
   return "中";
+}
+
+// ── 全面整理面板 ──────────────────────────────────────────────────────
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: "trade", label: "贸易政策" },
+  { value: "tariff", label: "关税税则" },
+  { value: "regulation", label: "法规与合规" },
+  { value: "technology", label: "技术性贸易措施" },
+  { value: "security", label: "出口管制" },
+  { value: "enforcement", label: "执法与缉私" },
+  { value: "market", label: "市场与商品" },
+  { value: "energy", label: "能源" },
+  { value: "defense_procurement", label: "军工采购" },
+  { value: "general", label: "综合" },
+];
+
+const LANGUAGE_OPTIONS: { value: string; label: string }[] = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英文" },
+  { value: "ja", label: "日文" },
+  { value: "ko", label: "韩文" },
+  { value: "fr", label: "法文" },
+  { value: "de", label: "德文" },
+  { value: "es", label: "西班牙文" },
+  { value: "ru", label: "俄文" },
+  { value: "ar", label: "阿拉伯文" },
+];
+
+interface CurateResult { reviewed: number; curated: number; deleted: number; retained: number; }
+
+function CuratePanel({ topics, models }: { topics: Topic[]; models: ModelConfig[] }) {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [topicId, setTopicId] = useState("");
+  const [sourceId, setSourceId] = useState("");
+  const [category, setCategory] = useState("");
+  const [language, setLanguage] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [limit, setLimit] = useState(100);
+  const [curating, setCurating] = useState(false);
+  const [result, setResult] = useState<CurateResult | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchSources().then((s) => { if (active) setSources(s); }).catch(() => { if (active) setSources([]); });
+    return () => { active = false; };
+  }, []);
+
+  const scopeSet = Boolean(topicId || sourceId || category || language || keyword.trim());
+
+  const runCurate = async () => {
+    setCurating(true);
+    setMsg(null);
+    setResult(null);
+    try {
+      const res = await reviewItemsInScope({
+        topic_id: topicId || undefined,
+        source_id: sourceId || undefined,
+        category: category || undefined,
+        language: language || undefined,
+        q: keyword.trim() || undefined,
+        limit,
+      });
+      setResult(res);
+      setMsg(`整理完成：审核 ${res.reviewed} 条，AI 重写整理 ${res.curated} 条，删除无效信息 ${res.deleted} 条，保留 ${res.retained} 条。`);
+    } catch (e) {
+      setMsg(`整理失败：${e instanceof Error ? e.message : "未知错误"}`);
+    }
+    setCurating(false);
+  };
+
+  return (
+    <div className="gen-controls" style={{ background: "var(--surface-card)", border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 20, marginBottom: 16 }}>
+      <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>全面整理采集信息</h3>
+      <p className="text-muted small" style={{ marginBottom: 12 }}>
+        对设定范围内的已采集信息调用 AI 模型重新整理：清理导航、图片、.gov 横幅等无效内容，重写为简洁的中文标题/摘要/正文，并删除低价值、非文章类页面。可设定主题、来源、分类、语言或关键词范围，留空则按最近采集顺序处理。
+      </p>
+
+      <div className="gen-controls-row">
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-topic">按主题</label>
+          <select id="curate-topic" value={topicId} onChange={(e) => setTopicId(e.target.value)}>
+            <option value="">全部主题</option>
+            {topics.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-source">按来源</label>
+          <select id="curate-source" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+            <option value="">全部来源</option>
+            {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="gen-controls-row">
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-category">按分类</label>
+          <select id="curate-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">全部分类</option>
+            {CATEGORY_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-language">按语言</label>
+          <select id="curate-language" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <option value="">全部语言</option>
+            {LANGUAGE_OPTIONS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="gen-controls-row">
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-q">关键词搜索</label>
+          <input id="curate-q" type="text" placeholder="在标题/摘要/正文中检索" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+        </div>
+        <div className="gen-field">
+          <label className="gen-label" htmlFor="curate-limit">处理条数上限</label>
+          <input id="curate-limit" type="number" min={1} max={500} value={limit} onChange={(e) => setLimit(Number(e.target.value) || 100)} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-primary" onClick={() => void runCurate()} disabled={curating || models.length === 0}>
+          <Wand2 size={14} className={curating ? "spin" : ""} />
+          {curating ? "整理中…" : "开始全面整理"}
+        </button>
+        <span className="text-muted small">
+          {scopeSet ? "将仅处理符合以上范围的信息" : "未设定范围，将按最近采集顺序处理最多 " + limit + " 条"}
+        </span>
+      </div>
+
+      {models.length === 0 && (
+        <div className="text-red small" style={{ marginTop: 8 }}>
+          尚未配置 AI 模型。请先在"模型配置"页面添加一个模型。
+        </div>
+      )}
+
+      {msg && (
+        <div className={`${result ? "" : "text-red"} small`} style={{ marginTop: 12, padding: 10, background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: 6, fontSize: "0.8rem" }}>
+          {msg}
+        </div>
+      )}
+
+      {result && (
+        <div className="curate-result-grid" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+          {[
+            { label: "审核", value: result.reviewed },
+            { label: "AI 重写整理", value: result.curated },
+            { label: "删除无效", value: result.deleted },
+            { label: "保留", value: result.retained },
+          ].map((r) => (
+            <div key={r.label} style={{ background: "var(--surface-elevated)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--accent)" }}>{r.value}</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}>{r.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface SingleTopicPanelProps {

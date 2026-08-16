@@ -76,10 +76,17 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
               {item.enforcement_review.confidence != null && ` | 置信度: ${String(item.enforcement_review.confidence)}`}
             </div>
           )}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <BookmarkButton itemId={item.id} size={18} />
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <button
+              type="button"
+              className="reading-modal-close"
+              onClick={onClose}
+              title="关闭"
+              aria-label="关闭弹窗"
+            >
               <X size={16} />
+              <span>关闭</span>
             </button>
           </div>
         </div>

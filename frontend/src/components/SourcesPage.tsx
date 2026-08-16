@@ -2,7 +2,7 @@ import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Plus, Trash2, Edit3, CheckCircle, Eye, ExternalLink, Settings, Zap, Search, X, ChevronRight, ChevronDown, FolderTree, List, Wrench, ShieldCheck, HeartPulse, Activity, Newspaper, ChartNoAxesCombined, ShieldAlert, MapPinned, Library, Landmark, MessagesSquare, Scale, Database, Route, BriefcaseBusiness } from "lucide-react";
 import { fetchSources, createSource, deleteSource, updateSource, validateSource, fetchConnectors, reconcileSourceReadiness, healthCheckSources, fetchHealthSummary } from "../api";
-import type { Source, ConnectorInfo } from "../types";
+import type { Source, ConnectorInfo, SourceVerdict } from "../types";
 import { getSourceGroupDefinition, OTHER_SOURCE_GROUP, SOURCE_GROUPS, type SourceGroupId } from "../sourceGroups";
 import { SourceComplianceReviewDialog } from "./SourceComplianceReviewDialog";
 
@@ -27,6 +27,14 @@ function channelLabel(channel: string) {
   return CHANNEL_LABELS[channel.toUpperCase()] || channel;
 }
 
+const LANG_LABELS: Record<string, string> = {
+  zh: "中文", en: "英文", ja: "日文", ko: "韩文", fr: "法文",
+  de: "德文", es: "西班牙文", ru: "俄文", ar: "阿拉伯文",
+};
+function langLabel(code: string) {
+  return LANG_LABELS[code] || code;
+}
+
 function sourceGroupRank(groupId: string) {
   const index = SOURCE_GROUPS.findIndex((group) => group.id === groupId);
   return index >= 0 ? index : SOURCE_GROUPS.length;
@@ -41,7 +49,7 @@ export function SourcesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<{id: string; message: string} | null>(null);
-  const [sourceTab, setSourceTab] = useState<"configured" | "standby">("configured");
+  const [sourceTab, setSourceTab] = useState<"configured" | "standby" | "recent">("configured");
   const [sourceSearch, setSourceSearch] = useState("");
   const [businessGroup, setBusinessGroup] = useState<SourceGroupId | "all">("all");
   const [groupView, setGroupView] = useState<"grouped" | "flat">("grouped");
@@ -53,7 +61,7 @@ export function SourcesPage() {
   const [healthSummary, setHealthSummary] = useState<{ healthy: number; degraded: number; failed: number; unreachable: number; unknown?: number } | null>(null);
   const [healthFilter, setHealthFilter] = useState<string | null>(null);
 
-  const changeSourceTab = (tab: "configured" | "standby") => {
+  const changeSourceTab = (tab: "configured" | "standby" | "recent") => {
     setSourceTab(tab);
     setBusinessGroup("all");
   };
@@ -127,8 +135,11 @@ export function SourcesPage() {
     }
   };
 
-  const sourcesForTab = sources
-    .filter((s) => sourceTab === "configured" ? s.is_configured : !s.is_configured);
+  const sourcesForTab = sources.filter((s) => {
+    if (sourceTab === "configured") return s.is_configured;
+    if (sourceTab === "standby") return !s.is_configured;
+    return s.last_verdict != null; // recent：最近采集过、有结论的信息源
+  });
   const businessGroupCounts = useMemo(() => {
     const counts = new Map<SourceGroupId, number>();
     for (const source of sourcesForTab) {
@@ -199,6 +210,7 @@ export function SourcesPage() {
         </span>
         <span className="meta-inline text-muted source-card-status">采集 {s.items_collected} 条{s.last_error && <span className="text-red source-card-error" title={s.last_error}> · 错误: {s.last_error}</span>}</span>
         {!s.is_configured && <span className="meta-inline text-muted">{sourceReadinessHint(s)}</span>}
+        {s.last_verdict && <SourceVerdictBadges verdict={s.last_verdict} />}
       </div>
       <div className="card-item-footer">
         {s.is_configured ? (
@@ -337,6 +349,13 @@ export function SourcesPage() {
           onClick={() => changeSourceTab("standby")}
         >
           <Settings size={12} /> 备用未配置 ({sources.filter(s => !s.is_configured).length})
+        </button>
+        <button
+          type="button"
+          className={`seg-btn ${sourceTab === "recent" ? "seg-btn--active" : ""}`}
+          onClick={() => changeSourceTab("recent")}
+        >
+          <Activity size={12} /> 最近采集 ({sources.filter(s => s.last_verdict != null).length})
         </button>
       </div>
 
@@ -488,6 +507,27 @@ export function SourcesPage() {
         />
       )}
     </div>
+  );
+}
+
+// 信息源最近一次采集结论：可连接/可爬取/可下载/语言 + 新增/重复/发现
+function SourceVerdictBadges({ verdict }: { verdict: SourceVerdict }) {
+  return (
+    <span className="meta-inline source-verdict-line" title={verdict.summary}>
+      <span className={`verdict-pill ${verdict.connectable ? "verdict-ok" : "verdict-bad"}`}>
+        {verdict.connectable ? "可连接" : "不可连接"}
+      </span>
+      <span className={`verdict-pill ${verdict.crawlable ? "verdict-ok" : "verdict-bad"}`}>
+        {verdict.crawlable ? "可爬取" : "未爬取"}
+      </span>
+      <span className={`verdict-pill ${verdict.downloadable ? "verdict-ok" : "verdict-bad"}`}>
+        {verdict.downloadable ? "可下载" : "无正文"}
+      </span>
+      {verdict.languages && verdict.languages.length > 0 && (
+        <span className="verdict-pill verdict-lang">语言：{verdict.languages.map(langLabel).join("、")}</span>
+      )}
+      <span className="verdict-pill">发现 {verdict.items_found} = 新增 {verdict.items_new} + 重复 {verdict.items_duplicate}</span>
+    </span>
   );
 }
 

@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchTags, fetchTagStats, updateTag, deleteTag, mergeTags, fetchItems } from "../api";
-import type { Tag, TagStats, CollectedItem } from "../types";
+import { fetchTags, fetchTagStats, updateTag, deleteTag, mergeTags } from "../api";
+import type { Tag, TagStats } from "../types";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
 import { EChart } from "./EChart";
-import { Trash2, Edit3, GitMerge, List } from "lucide-react";
-import { formatBeijingDateTime, formatBeijingDate } from "../utils/date";
+import { Trash2, Edit3, GitMerge, List, ArrowRight } from "lucide-react";
+import { formatBeijingDateTime } from "../utils/date";
 
 /** Namespace → 中文显示名 (回退到原始 namespace)。 */
 const NS_LABELS: Record<string, string> = {
@@ -36,8 +36,12 @@ export function TagsPage() {
   const [confirmDelete, setConfirmDelete] = useState<{id: string; value: string} | null>(null);
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [mergeMsg, setMergeMsg] = useState<string | null>(null);
-  // Tag detail (last items)
-  const [detailTag, setDetailTag] = useState<Tag | null>(null);
+
+  // 点击标签 → 跳转到「采集条目」并按该标签筛选，快速命中信息合集
+  const goToItems = useCallback((tag: Tag) => {
+    window.dispatchEvent(new CustomEvent("filter-items-by-tag", { detail: { tag: tag.id } }));
+    window.dispatchEvent(new CustomEvent("navigate-view", { detail: { view: "items" } }));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,7 +132,7 @@ export function TagsPage() {
       <div className="page-header">
         <div>
           <h2>标签系统</h2>
-          <p className="text-muted">标签是信息的核心结构化维度。每条信息自动打标签后可按标签过滤和统计。</p>
+          <p className="text-muted">标签用于快速命中信息合集：点击任意标签即跳转到采集条目并按该标签筛选。每条信息采集时已基于内容自动打上受控分类标签。</p>
         </div>
       </div>
 
@@ -149,13 +153,16 @@ export function TagsPage() {
               {t.color && <span className="tag-dot" style={{ background: t.color }} />}
               <span
                 className="tag-chip"
-                title={`${nsLabel(t.namespace)} · ${t.value} — ${t.item_count} 条 | 点击编辑`}
-                onClick={() => setEditing(t)}
+                title={`${nsLabel(t.namespace)} · ${t.value} — ${t.item_count} 条 | 点击查看信息合集`}
+                onClick={() => goToItems(t)}
                 style={{ cursor: "pointer" }}
               >
                 {tagLabel(t)}
                 <em>{t.item_count}</em>
               </span>
+              <button type="button" className="tag-chip-action" onClick={() => goToItems(t)} title="查看该标签的信息合集">
+                <ArrowRight size={10} />
+              </button>
               <button type="button" className="tag-chip-action" onClick={() => setEditing(t)} title="编辑标签">
                 <Edit3 size={10} />
               </button>
@@ -227,7 +234,7 @@ export function TagsPage() {
                   </td>
                   <td>
                     <div className="tag-table-actions">
-                      <button type="button" className="btn-icon" onClick={() => setDetailTag(t)} title="查看最近条目">
+                      <button type="button" className="btn-icon" onClick={() => goToItems(t)} title="查看该标签的信息合集">
                         <List size={12} />
                       </button>
                       <button type="button" className="btn-icon" onClick={() => setEditing(t)} title="编辑">
@@ -254,13 +261,6 @@ export function TagsPage() {
         />
       )}
 
-      {/* Tag Detail Modal (last 10 items) */}
-      {detailTag && (
-        <TagDetailModal
-          tag={detailTag}
-          onClose={() => setDetailTag(null)}
-        />
-      )}
       {confirmDelete && (
         <ConfirmDialog
           open={true}
@@ -285,56 +285,6 @@ export function TagsPage() {
           onClose={() => setConfirmMerge(false)}
         />
       )}
-    </div>
-  );
-}
-
-// ── Tag Detail Modal ──────────────────────────────────────────────────
-
-function TagDetailModal({ tag, onClose }: { tag: Tag; onClose: () => void }) {
-  const [items, setItems] = useState<CollectedItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetchItems({ tag: tag.id, page_size: 10, page: 1 })
-      .then((res) => { if (active) setItems(res.items); })
-      .catch(() => { if (active) setItems([]); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [tag.id]);
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640, maxWidth: "95vw" }}>
-        <h3>{tag.namespace}:{tag.value}</h3>
-        <p className="text-muted small">共 {tag.item_count} 条 · 显示最近 10 条</p>
-        {loading ? (
-          <div className="loading">加载中...</div>
-        ) : items.length === 0 ? (
-          <p className="text-muted">暂无关联条目。</p>
-        ) : (
-          <ul className="tag-detail-list">
-            {items.map((it) => (
-              <li key={it.id}>
-                {it.url ? (
-                  <a href={it.url} target="_blank" rel="noreferrer">{it.title || it.id}</a>
-                ) : (
-                  <span>{it.title || it.id}</span>
-                )}
-                <span className="text-muted small">
-                  {it.source_id}
-                    {it.collected_at && ` · ${formatBeijingDate(it.collected_at)}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>关闭</button>
-        </div>
-      </div>
     </div>
   );
 }

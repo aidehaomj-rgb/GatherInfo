@@ -12,6 +12,13 @@ if [[ -f "$PROJECT_DIR/backend/.env" ]]; then
   set +a
 fi
 
+# 后端 .env 中若混入 VITE_* 前端专用变量（如 VITE_API_BASE_URL），
+# 会因 set -a 被导出到 Vite 进程，覆盖 frontend/.env 的正确值，
+# 导致前端请求缺失 /api/v1 前缀而全部 404。这里统一清除，杜绝透传。
+for _v in $(compgen -v 'VITE_' 2>/dev/null); do
+  unset "$_v"
+done
+
 # ── Pre-flight checks ────────────────────────────────────────────────────────
 if [[ ! -x backend/.venv/bin/python ]]; then
   echo "ERROR: backend/.venv is missing."
