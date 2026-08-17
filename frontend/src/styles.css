@@ -674,7 +674,7 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .tags-page-header { align-items: center; }
 .tags-page-summary { display: flex; align-items: center; gap: 6px; color: var(--ink-muted); font-size: .74rem; }
 .tags-page-summary svg, .tags-page-summary strong { color: var(--accent); }
-.tags-workspace { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--line); background: var(--surface-card); }
+.tags-workspace { display: block; min-height: 560px; border: 1px solid var(--line); background: var(--surface-card); }
 .tags-namespaces { padding: 8px; border-right: 1px solid var(--line); background: var(--surface); }
 .tags-namespaces button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 10px; border: 0; background: transparent; color: var(--ink-muted); text-align: left; cursor: pointer; }
 .tags-namespaces button:hover { color: var(--ink); background: var(--surface-raised); }
@@ -698,6 +698,129 @@ code { font-size: 0.85em; background: var(--surface-elevated); padding: 1px 5px;
 .tag-namespace-badge { display: inline-flex; padding: 3px 7px; background: var(--surface-raised); color: var(--ink-muted); font-size: .68rem; }
 .tag-delete-action { color: var(--red) !important; }
 .tags-empty { padding: 70px 20px; text-align: center; color: var(--ink-muted); }
+
+/* ── 多维标签组合筛选（标签系统 v2）────────────────────────────────── */
+.tags-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-card);
+}
+.tags-filter-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+}
+.tag-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tag-filter-chip:hover { border-color: var(--red); }
+.tag-filter-chip svg { opacity: 0.6; }
+
+.tags-dimension-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tags-dimension-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-height: 48px;
+}
+.tags-dimension-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-elevated);
+  border-radius: 6px;
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+.tags-dimension-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.tags-dimension-count {
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.tags-dimension-tags {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: center;
+  padding: 4px 0;
+}
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.tag-pill:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.tag-pill--active {
+  color: var(--ink);
+  font-weight: 650;
+}
+.tag-pill-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.tag-pill-label { white-space: nowrap; }
+.tag-pill-count {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding-left: 2px;
+}
+
+@media (max-width: 768px) {
+  .tags-dimension-row { flex-direction: column; align-items: stretch; }
+  .tags-dimension-head { width: 100%; }
+}
 .tags-merge-panel { margin-top: 12px; border-top: 1px solid var(--line); }
 .tags-merge-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 2px; color: var(--ink-muted); font-size: .73rem; cursor: pointer; list-style: none; }
 .tags-merge-panel > summary span { display: flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 700; }

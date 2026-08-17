@@ -1,4 +1,5 @@
 import { ExternalLink, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { BookmarkButton } from "./BookmarkButton";
 import type { CollectedItem, Source } from "../types";
 import { cleanItemTitle, getDisplayTitle } from "../utils/title";
@@ -45,7 +46,7 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
 
   const displayContent = awaitingTranslation ? "" : hasTranslation ? translatedContent : originalContent;
 
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal reading-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
@@ -162,7 +163,8 @@ export function ItemDetailModal({ item, sources, onClose }: ItemDetailModalProps
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

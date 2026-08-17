@@ -21,7 +21,13 @@ from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
 from app.collection_policy import evaluate_collection_policy
 from app.content_parser import parse_fetch_item
 from app.model_defaults import get_default_model
-from app.tag_taxonomy import CATEGORY_LABEL, normalize_category
+from app.tag_taxonomy import (
+    CATEGORY_LABEL,
+    classify_item_dimensions,
+    dimension_values,
+    normalize_category,
+    tag_id_for,
+)
 from app.trade_semantics import is_semantically_relevant
 from app.models import (
     CollectionRun, CollectedItem, ItemStatus,
@@ -918,7 +924,31 @@ class CollectionEngine:
                     tag_id = f"category:{normalized}"
                     self.ensure_tag(tag_id, "category", normalized, CATEGORY_LABEL.get(normalized))
                     self.tag_item(item.id, tag_id)
+
+            # 多维受控标签：按语义给条目打 policy/impact/region/evidence 维度标签
+            self._apply_dimension_tags(item)
         self.db.commit()
+
+    def _apply_dimension_tags(self, item) -> None:
+        """按受控多维标签体系给单条条目打维度标签（policy/impact/category/region/evidence）。"""
+        metadata = item.raw_metadata if isinstance(item.raw_metadata, dict) else {}
+        review = metadata.get("enforcement_review") if isinstance(metadata, dict) else {}
+        china_relevance = ""
+        if isinstance(review, dict):
+            china_relevance = str(review.get("china_relevance") or "").strip()
+
+        dims = classify_item_dimensions(
+            title=item.title or "",
+            content=item.content or "",
+            category=item.category,
+            china_relevance=china_relevance,
+        )
+        for dim, values in dims.items():
+            for value in values:
+                label = dimension_values(dim).get(value)
+                tag_id = tag_id_for(dim, value)
+                self.ensure_tag(tag_id, dim, value, label)
+                self.tag_item(item.id, tag_id)
 
     # ── Internals ───────────────────────────────────────────────────────
 

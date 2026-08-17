@@ -1,4 +1,5 @@
 import { Download } from "lucide-react";
+import { createPortal } from "react-dom";
 import type { Report } from "../types";
 import { RenderMarkdown } from "./shared/RenderMarkdown";
 import { formatBeijingDateTime } from "../utils/date";
@@ -9,7 +10,7 @@ interface Props {
 }
 
 export function ReportViewerModal({ report, onClose }: Props) {
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 800, maxWidth: "95vw" }}>
         <div className="modal-header-with-actions">
@@ -40,6 +41,7 @@ export function ReportViewerModal({ report, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

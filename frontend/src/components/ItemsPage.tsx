@@ -15,6 +15,20 @@ import { ItemInventoryPanel } from "./ItemInventoryPanel";
 
 const PAGE_SIZE = 40;
 
+// 跨组件持久化的标签筛选请求（模块级单例）：
+// 标签系统页点击「查看信息」时写入，ItemsPage 挂载时读取，
+// 规避「事件早于 ItemsPage 挂载」导致的丢失问题。
+let pendingTagFilter: string | null = null;
+export function requestTagFilter(tag: string) {
+  pendingTagFilter = tag;
+  window.dispatchEvent(new CustomEvent("filter-items-by-tag", { detail: { tag } }));
+}
+
+// 跨请求竞争保护：仅最后一次 fetchItems 的结果能写入 data，
+// 避免「从标签系统跳转」时初始请求(无 tag) 与 applyTag 后的请求(带 tag) 竞争，
+// 后到的无 tag 请求把正确的过滤结果覆盖掉。
+const latestRequestRef: { current: number } = { current: 0 };
+
 export function ItemsPage() {
   const [data, setData] = useState<ItemList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,6 +97,10 @@ export function ItemsPage() {
   })), [batches]);
 
   const load = useCallback(async () => {
+    // 用 ref 标记本次请求，过期的请求结果不覆盖 data，
+    // 避免「从标签系统跳转」时初始请求(无 tag) 与 applyTag 后的请求(带 tag) 竞争，
+    // 后到的无 tag 请求把正确的过滤结果覆盖掉。
+    const requestId = ++latestRequestRef.current;
     setLoading(true);
     try {
       const result = await fetchItems({
@@ -94,12 +112,18 @@ export function ItemsPage() {
         ...(filterBatch ? { batch_id: filterBatch } : {}),
         ...(filterCat ? { category: filterCat } : {}),
       });
-      setData(result);
-      setError(null);
+      if (latestRequestRef.current === requestId) {
+        setData(result);
+        setError(null);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed");
+      if (latestRequestRef.current === requestId) {
+        setError(e instanceof Error ? e.message : "Failed");
+      }
     }
-    setLoading(false);
+    if (latestRequestRef.current === requestId) {
+      setLoading(false);
+    }
   }, [page, query, filterTag, filterSource, filterTopic, filterCat, filterBatch]);
 
   useEffect(() => { void load(); }, [load]);
@@ -127,16 +151,23 @@ export function ItemsPage() {
 
   // 从标签系统跳转：按标签快速命中信息合集
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ tag?: string }>).detail;
-      if (!detail?.tag) return;
-      setFilterTag(detail.tag);
+    const applyTag = (tag: string) => {
+      setFilterTag(tag);
       setFilterTopic("");
       setFilterSource("");
       setFilterBatch("");
       setFilterCat("");
       setPage(1);
     };
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tag?: string }>).detail;
+      if (detail?.tag) applyTag(detail.tag);
+    };
+    // 挂载时消费持久化的待筛选标签（规避事件时序丢失）
+    if (pendingTagFilter) {
+      applyTag(pendingTagFilter);
+      pendingTagFilter = null;
+    }
     window.addEventListener("filter-items-by-tag", handler);
     return () => window.removeEventListener("filter-items-by-tag", handler);
   }, []);

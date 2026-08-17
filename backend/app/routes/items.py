@@ -398,7 +398,10 @@ def list_items(
             db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
         ))
     if tag:
-        query = query.filter(CollectedItem.tags.any(Tag.id == tag))
+        # 支持多标签组合筛选（AND）：逗号分隔的 tag id，如 "policy:tariff,category:enforcement"
+        tag_ids = [t.strip() for t in tag.split(",") if t.strip()]
+        for tag_id in tag_ids:
+            query = query.filter(CollectedItem.tags.any(Tag.id == tag_id))
     if q:
         needle = q.lower()
         candidates = query.order_by(

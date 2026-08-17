@@ -1,4 +1,5 @@
  import { useEffect, useState } from "react";
+ import { createPortal } from "react-dom";
  import { X, Zap, FileText, Loader2, CalendarDays } from "lucide-react";
  import type { Topic, Report } from "../types";
  import { formatBeijingDateTime } from "../utils/date";
@@ -38,7 +39,7 @@
      }
    };
 
-   return (
+   return createPortal(
      <div className="modal-overlay" onClick={onClose}>
        <div className="modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
          <div className="modal-header-with-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -110,13 +111,14 @@
                <>开始采集 {selected.length > 0 && `(${selected.length})`}</>
              )}
            </button>
-         </div>
-       </div>
-     </div>
-   );
- }
+           </div>
+           </div>
+           </div>,
+           document.body,
+           );
+           }
 
- type RecentReportsDialogProps = {
+           type RecentReportsDialogProps = {
    open: boolean;
    reports: Report[];
    onClose: () => void;
@@ -125,7 +127,7 @@
 
  export function RecentReportsDialog({ open, reports, onClose, onView }: RecentReportsDialogProps) {
    if (!open) return null;
-   return (
+   return createPortal(
      <div className="modal-overlay" onClick={onClose}>
        <div className="modal" style={{ width: 640 }} onClick={(e) => e.stopPropagation()}>
          <div className="modal-header-with-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -162,7 +164,8 @@
          <div className="modal-actions">
            <button type="button" className="btn btn-ghost" onClick={onClose}>关闭</button>
          </div>
-       </div>
-     </div>
-   );
- }
+         </div>
+         </div>,
+         document.body,
+         );
+         }
