@@ -610,6 +610,47 @@
       "report_ids": []
     },
     {
+      "id": "inv-japan-tdk-xiamen-us-defense-network",
+      "country": "Japan",
+      "name": "TDK株式会社—厦门TDK—美国集团/军工网络供应链",
+      "description": "用户报告还原TDK株式会社、厦门TDK有限公司、TDK Corporation of America和TDK-Lambda Americas等主体。报告称2026年5月至8月厦门TDK至少10票磁芯类货物进入美国集团公司，合计2421千克、193箱；贸易截图关键字段打码，当前以聚合记录保存。报告另称DLA供应链图谱把TDK/厦门TDK与Patriot置于同一网络，并列出TDK-Lambda美国军方采购。因缺图谱原件、料号、BOM、订单和最终用途文件，调查保持researching。",
+      "status": "researching",
+      "entity_ids": [
+        "ent-japan-tdk-corporation",
+        "ent-japan-tdk-narita-plant",
+        "ent-china-tdk-xiamen",
+        "ent-china-tdk-dalian-electronics",
+        "ent-china-tdk-zhuhai-ftz",
+        "ent-us-tdk-corporation-america",
+        "ent-us-tdk-lambda-americas",
+        "ent-us-dla-tdk-network"
+      ],
+      "case_ids": [
+        "case-japan-tdk-xiamen-us-core-trade",
+        "case-japan-tdk-patriot-network-lead",
+        "case-japan-tdk-lambda-us-military-power"
+      ],
+      "shipment_ids": [
+        "shp-japan-tdk-xiamen-america-202605-202608-summary"
+      ],
+      "evidence_ids": [
+        "ev-japan-tdk-xiamen-america-trade",
+        "ev-japan-tdk-xiamen-patriot-candidate",
+        "ev-japan-tdk-group-us-military-context"
+      ],
+      "open_source_evidence_ids": [
+        "ose-japan-tdk-report-trade-screenshot",
+        "ose-japan-tdk-report-entity-resolution",
+        "ose-japan-tdk-report-narita-transfer",
+        "ose-japan-tdk-report-patriot-network",
+        "ose-japan-tdk-report-lambda-military-procurement",
+        "ose-japan-tdk-evidence-boundary"
+      ],
+      "report_ids": [
+        "scr-japan-tdk-xiamen-us-defense-network"
+      ]
+    },
+    {
       "id": "inv-taiwan-huajie-uh60m-screen",
       "country": "Taiwan",
       "name": "华捷SH-60B FLIR问题批次—台湾UH-60M筛查（已排除）",
@@ -1750,6 +1791,59 @@
       ],
       "source_url": "https://nbd.ltd/trader/info/NBDD3Y524350267",
       "notes": "公开贸易页面对供应商名称作了掩码处理，需通过完整提单进一步识别。"
+    },
+    {
+      "id": "ent-china-tdk-dalian-electronics",
+      "name": "TDK大连电子有限公司",
+      "name_zh": "TDK大连电子有限公司",
+      "country": "China",
+      "entity_type": "component_supplier",
+      "aliases": [
+        "TDK Dalian Electronics"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "叠层电感器及射频组件制造",
+        "北方制造节点"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "作为TDK在华布局背景节点；未与Patriot具体批次闭合。"
+    },
+    {
+      "id": "ent-china-tdk-xiamen",
+      "name": "TDK Xiamen Co., Ltd.",
+      "name_zh": "厦门TDK有限公司",
+      "country": "China",
+      "entity_type": "china_exporter",
+      "aliases": [
+        "厦门TDK",
+        "厦门TDK有限公司（TDK Xiamen Co., Ltd.）"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "铁氧体磁芯制造",
+        "磁性元件中国制造节点",
+        "2026年向美国集团公司供货"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "报告称主要生产铁氧体磁芯等产品；10票贸易的主体字段在截图中被打码。"
+    },
+    {
+      "id": "ent-china-tdk-zhuhai-ftz",
+      "name": "TDK（珠海保税区）有限公司",
+      "name_zh": "TDK（珠海保税区）有限公司",
+      "country": "China",
+      "entity_type": "component_supplier",
+      "aliases": [
+        "TDK Zhuhai Free Trade Zone"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "压敏电阻及薄膜电容器制造",
+        "南方制造节点"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "与TDK（珠海）有限公司必须分开；本调查未将其产品归入厦门磁芯批次。"
     },
     {
       "id": "ent-china-walkera-garuda",
@@ -2936,6 +3030,42 @@
       "notes": "NEC本体为日本防卫电子主要承包方；应与NEC Aerospace Systems子公司节点区分。"
     },
     {
+      "id": "ent-japan-tdk-corporation",
+      "name": "TDK Corporation",
+      "name_zh": "TDK株式会社",
+      "country": "Japan",
+      "entity_type": "integrator",
+      "aliases": [
+        "TDK Corp.",
+        "TDK株式会社（TDK Corporation）"
+      ],
+      "parent_id": null,
+      "defense_roles": [
+        "磁性元件集团整合",
+        "美国集团供应网络",
+        "两用物项关注名单主体"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "用户报告将TDK株式会社还原为日本母公司；关注名单原件及名单编号仍需独立复核。"
+    },
+    {
+      "id": "ent-japan-tdk-narita-plant",
+      "name": "TDK Corporation Narita Plant",
+      "name_zh": "TDK成田工厂",
+      "country": "Japan",
+      "entity_type": "component_supplier",
+      "aliases": [
+        "Narita Plant"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "铁氧体产品原制造节点",
+        "向厦门转移部分制造工序（报告材料）"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "产能转移依据来自用户报告汇总，需补工厂通知原件。"
+    },
+    {
       "id": "ent-jiangsu-nonferrous-ie",
       "name": "Jiangsu Nonferrous Metals I/E Corp.",
       "name_zh": "江苏省有色金属进出口有限公司",
@@ -3851,6 +3981,22 @@
       "notes": "项目与Moog作动器关系已核验。"
     },
     {
+      "id": "ent-us-dla-tdk-network",
+      "name": "U.S. Defense Logistics Agency",
+      "name_zh": "美国国防后勤局",
+      "country": "United States",
+      "entity_type": "government_agency",
+      "aliases": [
+        "DLA"
+      ],
+      "parent_id": null,
+      "defense_roles": [
+        "供应链图谱与军用电源采购（报告材料）"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "报告提及2024年供应链图谱和采购记录，但未附原件页码或链接。"
+    },
+    {
       "id": "ent-us-dod",
       "name": "U.S. Department of Defense",
       "name_zh": "美国国防部",
@@ -4274,6 +4420,40 @@
       ],
       "source_url": "https://www.moog.com/news/operating-group-news/2025/moog-missile-cas-performs-flawlessly-during-successful-test-of-leidos-black-arrow-scm-for-ussocm.html",
       "notes": "Moog和Leidos公开材料确认项目关系。"
+    },
+    {
+      "id": "ent-us-tdk-corporation-america",
+      "name": "TDK Corporation of America",
+      "name_zh": "美国TDK公司",
+      "country": "United States",
+      "entity_type": "importer",
+      "aliases": [
+        "TDK Corporation of America"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "美国进口、库存与集团渠道承接"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "报告将其识别为厦门TDK货物的美国进口端；需逐票提单复核。"
+    },
+    {
+      "id": "ent-us-tdk-lambda-americas",
+      "name": "TDK-Lambda Americas Inc.",
+      "name_zh": "TDK-Lambda美国公司",
+      "country": "United States",
+      "entity_type": "defense_supplier",
+      "aliases": [
+        "TDK-Lambda Americas"
+      ],
+      "parent_id": "ent-japan-tdk-corporation",
+      "defense_roles": [
+        "直流电源",
+        "军用维修方舱电源",
+        "美国空军自动测试站套件"
+      ],
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "notes": "军方采购线与厦门磁芯贸易线属于集团层交叉，不能自动拼接为同一实物链。"
     },
     {
       "id": "ent-us-teledyne",
@@ -4883,6 +5063,54 @@
       "source_url": "https://www.mod.go.jp/j/press/news/2024/11/15d.html",
       "source_excerpt": "日本防卫省确认签署向印度海军转移UNICORN的细目安排；后续公开规格调整计划申请企业为NEC、认定额约15亿日元。",
       "status": "verified"
+    },
+    {
+      "id": "case-japan-tdk-lambda-us-military-power",
+      "country": "Japan",
+      "title": "TDK-Lambda Americas电源进入美国军方维修测试体系（报告线索）",
+      "procurement_agency": "U.S. Defense Logistics Agency / U.S. Air Force",
+      "procurement_reference": "用户报告所列采购公告摘要",
+      "procurement_date": null,
+      "supplier_entity_id": "ent-us-tdk-lambda-americas",
+      "product": "直流电源及自动测试站套件",
+      "target_program": "A***M-***电子设备维修方舱/多用途维修基地自动测试站",
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称DLA采购TDK-Lambda直流电源，2026年美国空军又以单一来源采购其套件。",
+      "status": "follow_up"
+    },
+    {
+      "id": "case-japan-tdk-patriot-network-lead",
+      "country": "Japan",
+      "title": "TDK/厦门TDK与Patriot供应网络图谱关联（待原件核验）",
+      "procurement_agency": "U.S. Defense Logistics Agency",
+      "procurement_reference": "报告所述2024年DLA供应链图谱",
+      "procurement_date": null,
+      "supplier_entity_id": "ent-japan-tdk-corporation",
+      "product": "磁性元件/铁氧体磁芯（具体Patriot料号待核）",
+      "target_program": "Patriot防空导弹供应网络",
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称DLA图谱把Patriot、TDK株式会社和厦门TDK纳入同一供应网络；尚缺图谱原件、页码和节点定义。",
+      "status": "follow_up"
+    },
+    {
+      "id": "case-japan-tdk-xiamen-us-core-trade",
+      "country": "Japan",
+      "title": "厦门TDK磁芯直供美国集团公司（2026年10票汇总）",
+      "procurement_agency": "TDK Corporation of America",
+      "procurement_reference": "用户报告/打码贸易截图汇总",
+      "procurement_date": "2026-08-07T00:00:00",
+      "supplier_entity_id": "ent-japan-tdk-corporation",
+      "product": "铁氧体磁芯等磁性元件（完整货描和料号待核）",
+      "target_program": "TDK集团美国供应、库存或再分销网络",
+      "contract_value": null,
+      "currency": "USD",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称2026年5月至8月至少10票，合计2421千克、193箱；截图字段部分打码。",
+      "status": "researching"
     },
     {
       "id": "case-lockheed-sippican-mast-antenna",
@@ -6567,6 +6795,70 @@
       }
     },
     {
+      "id": "shp-japan-tdk-xiamen-america-202605-202608-summary",
+      "exporter_name": "厦门TDK有限公司（TDK Xiamen Co., Ltd.）",
+      "exporter_country": "China",
+      "importer_entity_id": "ent-us-tdk-corporation-america",
+      "importer_name": "美国TDK公司（TDK Corporation of America）",
+      "product": "铁氧体磁芯等磁性元件（截图货描部分打码）",
+      "hs_code": null,
+      "shipment_date": "2026-08-07T00:00:00",
+      "weight_kg": 2421.0,
+      "quantity": 10.0,
+      "quantity_unit": "shipments",
+      "origin_country": "China",
+      "destination_country": "United States",
+      "bill_no": null,
+      "source_name": "用户上传报告/贸易截图汇总",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "raw_record": {
+        "evidence_boundary": "report_aggregate_not_individual_bills",
+        "reported_period": "2026-05 to 2026-08",
+        "reported_shipments": 10,
+        "reported_total_weight_kg": 2421,
+        "reported_total_packages": 193,
+        "visible_rows": [
+          {
+            "arrival_date": "2026-08-07",
+            "weight_kg": 120
+          },
+          {
+            "arrival_date": "2026-08-01",
+            "weight_kg": 37
+          },
+          {
+            "arrival_date": "2026-07-24",
+            "weight_kg": 54
+          },
+          {
+            "arrival_date": "2026-07-16",
+            "weight_kg": 161
+          },
+          {
+            "arrival_date": "2026-07-03",
+            "weight_kg": 54
+          },
+          {
+            "arrival_date": "2026-07-01",
+            "weight_kg": 315
+          },
+          {
+            "arrival_date": "2026-06-20",
+            "weight_kg": 44
+          },
+          {
+            "arrival_date": "2026-06-13",
+            "weight_kg": 429
+          }
+        ],
+        "visible_rows_weight_kg": 1214,
+        "bill_numbers_redacted": true,
+        "importer_and_supplier_fields_redacted": true,
+        "product_text_partially_redacted": true,
+        "source_report": "D:\\CODEX客户端\\workspace\\gatherinfo-yz\\data\\reports\\supply_chain\\TDK在华供应链穿透分析_企业名称补全版.docx"
+      }
+    },
+    {
       "id": "shp-jiangsu-gec-yb2o3-20260628",
       "exporter_name": "Jiangsu Nonferrous Metals I/E Corp.",
       "exporter_country": "China",
@@ -8108,6 +8400,67 @@
         "taiwan_boundary_enforced": false
       },
       "is_reportable": true
+    },
+    {
+      "id": "ev-japan-tdk-group-us-military-context",
+      "case_id": "case-japan-tdk-lambda-us-military-power",
+      "shipment_id": "shp-japan-tdk-xiamen-america-202605-202608-summary",
+      "relation_type": "corporate_group_context",
+      "evidence_grade": "C",
+      "score": 30,
+      "status": "follow_up",
+      "reasoning": "报告支持TDK-Lambda Americas存在独立美国军方采购，但它与厦门TDK磁芯贸易属于不同业务线，只能作为集团军方业务背景，不能合并为同一批次供应关系。",
+      "verified_facts": [
+        "TDK-Lambda军方采购为独立业务线",
+        "厦门磁芯批次未指向TDK-Lambda",
+        "不得以集团关系替代料号和最终用途证据"
+      ],
+      "model_review": {
+        "review": "manual import",
+        "boundary": "corporate-level overlap only"
+      },
+      "is_reportable": false
+    },
+    {
+      "id": "ev-japan-tdk-xiamen-america-trade",
+      "case_id": "case-japan-tdk-xiamen-us-core-trade",
+      "shipment_id": "shp-japan-tdk-xiamen-america-202605-202608-summary",
+      "relation_type": "direct_trade_record",
+      "evidence_grade": "B",
+      "score": 68,
+      "status": "follow_up",
+      "reasoning": "报告和截图支持中国原产磁芯类货物输美及日期重量汇总，但提单号、主体字段和完整货描被打码，需商业数据库底稿逐票复核。",
+      "verified_facts": [
+        "报告汇总10票",
+        "合计2421千克、193箱",
+        "截图可见8条日期重量",
+        "原产国标注中国"
+      ],
+      "model_review": {
+        "review": "manual import",
+        "boundary": "redacted aggregate trade screenshot"
+      },
+      "is_reportable": false
+    },
+    {
+      "id": "ev-japan-tdk-xiamen-patriot-candidate",
+      "case_id": "case-japan-tdk-patriot-network-lead",
+      "shipment_id": "shp-japan-tdk-xiamen-america-202605-202608-summary",
+      "relation_type": "candidate_component",
+      "evidence_grade": "C",
+      "score": 42,
+      "status": "follow_up",
+      "reasoning": "TDK/厦门TDK被报告称出现在Patriot供应网络图谱，且存在近期集团内输美贸易；但没有图谱原件、精确料号、BOM、订单或最终用途文件证明该批磁芯进入Patriot。",
+      "verified_facts": [
+        "集团与工厂身份已在报告中还原",
+        "近期输美贸易与图谱关联为两类独立线索",
+        "具体装机关系未闭合"
+      ],
+      "model_review": {
+        "review": "manual import",
+        "boundary": "no batch-to-Patriot closure"
+      },
+      "is_reportable": false
     },
     {
       "id": "ev-paras-china-optics-air-defense",
@@ -12178,6 +12531,120 @@
       ]
     },
     {
+      "id": "ose-japan-tdk-evidence-boundary",
+      "case_id": "case-japan-tdk-patriot-network-lead",
+      "title": "报告明确边界：Patriot实物装机仍待证",
+      "source_type": "evidence_boundary",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "补充材料明确说明，同一供应网络不等同于具体料号已装入Patriot导弹。",
+      "verified_facts": [
+        "缺料号",
+        "缺BOM",
+        "缺采购订单",
+        "缺最终用途文件"
+      ],
+      "evidence_grade": "A",
+      "status": "verified",
+      "limitations": [
+        "本条用于限定结论，不是Patriot供应关系的正向证明"
+      ]
+    },
+    {
+      "id": "ose-japan-tdk-report-entity-resolution",
+      "case_id": "case-japan-tdk-xiamen-us-core-trade",
+      "title": "企业名称补全：TDK株式会社、厦门TDK及美国集团公司",
+      "source_type": "user_report",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "补充材料将1公司还原为TDK株式会社、2公司还原为厦门TDK有限公司、4子公司还原为TDK Corporation of America。",
+      "verified_facts": [
+        "TDK集团控制关系",
+        "厦门TDK中国制造节点",
+        "美国TDK进口承接节点"
+      ],
+      "evidence_grade": "B",
+      "status": "follow_up",
+      "limitations": [
+        "贸易截图中的主体字段打码",
+        "仍需企业注册和逐票提单交叉确认"
+      ]
+    },
+    {
+      "id": "ose-japan-tdk-report-lambda-military-procurement",
+      "case_id": "case-japan-tdk-lambda-us-military-power",
+      "title": "报告线索：TDK-Lambda Americas美国军方电源采购",
+      "source_type": "user_report",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称DLA采购TDK-Lambda直流电源用于维修方舱，2026年美国空军单一来源采购其测试站套件。",
+      "verified_facts": [
+        "报告记录TDK集团美国军方采购业务"
+      ],
+      "evidence_grade": "C",
+      "status": "follow_up",
+      "limitations": [
+        "未附采购公告原始链接和合同号",
+        "与厦门磁芯贸易不是同一已闭合链路"
+      ]
+    },
+    {
+      "id": "ose-japan-tdk-report-narita-transfer",
+      "case_id": "case-japan-tdk-xiamen-us-core-trade",
+      "title": "报告材料：TDK成田工厂铁氧体制造工序向厦门转移",
+      "source_type": "user_report",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称公开工厂通知显示铁氧体制造由成田分阶段转至厦门，粉料工序另涉及稻仓工厂。",
+      "verified_facts": [
+        "报告记录日本产能向厦门转移"
+      ],
+      "evidence_grade": "C",
+      "status": "follow_up",
+      "limitations": [
+        "未附工厂通知原件和具体日期"
+      ]
+    },
+    {
+      "id": "ose-japan-tdk-report-patriot-network",
+      "case_id": "case-japan-tdk-patriot-network-lead",
+      "title": "报告线索：DLA 2024年供应链图谱中的TDK/厦门TDK/Patriot关联",
+      "source_type": "user_report",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称图谱将TDK株式会社列在DLA授权供应商一栏，并将厦门TDK列在中国供应商一栏。",
+      "verified_facts": [
+        "报告声称三者处于同一供应网络"
+      ],
+      "evidence_grade": "C",
+      "status": "follow_up",
+      "limitations": [
+        "缺少图谱原件、页码、图例和供应商节点定义",
+        "不能证明具体磁芯批次装入Patriot"
+      ]
+    },
+    {
+      "id": "ose-japan-tdk-report-trade-screenshot",
+      "case_id": "case-japan-tdk-xiamen-us-core-trade",
+      "title": "用户报告及贸易截图：厦门TDK磁芯类货物输美汇总",
+      "source_type": "embedded_trade_screenshot",
+      "source_publisher": "用户上传报告",
+      "source_url": "file:///D:/CODEX%E5%AE%A2%E6%88%B7%E7%AB%AF/workspace/gatherinfo-yz/data/reports/supply_chain/TDK%E5%9C%A8%E5%8D%8E%E4%BE%9B%E5%BA%94%E9%93%BE%E7%A9%BF%E9%80%8F%E5%88%86%E6%9E%90_%E4%BC%81%E4%B8%9A%E5%90%8D%E7%A7%B0%E8%A1%A5%E5%85%A8%E7%89%88.docx",
+      "source_excerpt": "报告称2026年5月至8月至少10票、2421千克、193箱；截图可见8行日期、原产国中国及重量，关键主体和提单字段被打码。",
+      "verified_facts": [
+        "2026-06-13至08-07截图可见8行",
+        "可见8行重量合计1214千克",
+        "报告总口径为10票2421千克193箱"
+      ],
+      "evidence_grade": "B",
+      "status": "follow_up",
+      "limitations": [
+        "未提供逐票底稿",
+        "提单号和主体字段被打码",
+        "完整货描和料号不可见"
+      ]
+    },
+    {
       "id": "ose-lockheed-pac3-2026-acceleration",
       "case_id": "case-us-moog-pac3-actuator",
       "title": "Lockheed Martin确认2026年PAC-3 MSE加速生产合同",
@@ -13922,6 +14389,27 @@
       "summary": "A级正向链：精确料号、日期码、六级转售、EIF集成数量和日本防卫省用途均由参议院报告闭合；具体日本平台仍未披露。",
       "error_log": null,
       "generated_at": "2026-08-08T04:52:59.419319"
+    },
+    {
+      "id": "scr-japan-tdk-xiamen-us-defense-network",
+      "country": "Japan",
+      "title": "TDK在华供应链：厦门磁芯输美与Patriot网络关联分析",
+      "case_ids": [
+        "case-japan-tdk-xiamen-us-core-trade",
+        "case-japan-tdk-patriot-network-lead",
+        "case-japan-tdk-lambda-us-military-power"
+      ],
+      "evidence_ids": [
+        "ev-japan-tdk-xiamen-america-trade",
+        "ev-japan-tdk-xiamen-patriot-candidate",
+        "ev-japan-tdk-group-us-military-context"
+      ],
+      "model_id": "manual-user-report-import",
+      "status": "completed",
+      "content": "# 系统导入说明\n\n本报告按日本方向归档。贸易事实采用用户材料的聚合口径，不虚构被打码的提单号、主体字段、完整货描或料号。Patriot图谱和TDK-Lambda军方采购分别作为待补证线索；当前不得表述为厦门磁芯已经进入Patriot导弹。\n\n# 附件正文与企业名称补全材料\n\n被列入“关注名单”的日本TDK株式会社在华布局多家子公司，其中厦门TDK近三个月10票磁性元件或经美国子公司进入“爱国者”导弹供应链\n\n2026年2月，日本TDK株式会社被我方列入两用物项出口管制“关注名单”，要求相关出口提交单项许可申请、风险评估报告和安全承诺。对可能用于军事能力建设的申请，不予许可。\n\n这一措施并非无端收紧正常贸易。TDK株式会社中国市场销售约占集团合并销售额的55%，中国制造据点生产额约占62%，中国有形固定资产占44%。该集团深度依赖中国市场、资产和产能，其部分产品却不断进入日本和美国军用体系。\n\n其中，中国南方的厦门TDK有限公司至美国军工供应网络的链条最值得关注。\n\n厦门TDK有限公司主要生产铁氧体磁芯等产品。TDK株式会社已将日本成田工厂的铁氧体产品转移至中国南方的厦门TDK有限公司。厦门TDK有限公司由此成为TDK株式会社磁性元件的重要中国制造节点。\n\n2026年5月至8月，厦门TDK有限公司至少有10票货物进入集团美国子公司TDK Corporation of America，合计2421千克、193箱。值得注意的是，货物在商业海关平台部分被打码，但结合厦门TDK有限公司工厂产品范围，可以确认属于磁芯类货物。\n\n这条链路的敏感性，不仅在于产品本身。\n\n美国国防后勤局（DLA）在2024年发布的供应链图谱中，将爱国者导弹、和中国厦门TDK有限公司同时纳入同一供应网络。图谱将日本TDK株式会社列在美国国防后勤局授权供应商一栏，将中国厦门TDK有限公司列在中国供应商一栏。\n\n这意味着，厦门TDK有限公司并非普通的孤立出口工厂，而是被美国机构识别为爱国者导弹供应网络中的中国供应节点。2026年的磁芯直供记录，又为这一图谱补充了现实贸易方向。\n\n“日本产能转移、中国生产、磁芯直供美国、军工图谱关联”已经形成4层相互支撑的证据。\n\n美国端的军用需求同样明确。美国TDK-Lambda Americas Inc.的直流电源已被美国国防后勤局采购，用于A***M-***电子设备维修方舱。2026年，美国空军又以单一来源方式采购TDK-Lambda Americas Inc.套件，用于多用途维修基地自动测试站。这表明TDK集团在美国业务体系并非与军方需求无关，而是已经进入直接军方采购链。\n\n此外，TDK株式会社在在华北方子公司TDK大连电子有限公司和南方子公司TDK（珠海保税区）有限公司也在2026年持续向北美供应滤波器、变压器、电感器、压敏电阻和薄膜电容器。日本母公司还组织中国原产磁体进入美国仓库，香港节点参与物流衔接。\n\n但相比之下，厦门TDK有限公司链条最为集中。它同时具备日本产能转移、中国制造、直接输美和爱国者导弹图谱关联4项特征。\n\n任何外国企业都不能一边依靠中国制造获取利益，一边利用集团内部贸易和复杂供应链模糊最终用途，甚至为外国军工体系提供潜在支撑。对厦门TDK有限公司磁芯等重点产品实施料号穿透和最终用途审查，具有充分的现实必要性。\n\n补充材料｜原文企业名称补全版\n\n企业代称还原与供应链穿透分析\n\n以下内容为新增分析；此前页面保留原文段落顺序和论述内容，并已将企业代称替换为穿透后的真实名称。\n\n一、隐藏主体还原\n\n二、穿透后的主体链路\n\n核心链路可还原为：TDK株式会社 → 厦门TDK有限公司 → TDK Corporation of America → 美国境内集团销售、库存或再分销网络。另一条可独立确认的集团军方业务线为TDK株式会社 → TDK-Lambda Americas Inc. → 美国军方电源采购。\n\n要点：集团控制关系：厦门TDK、TDK Corporation of America及TDK-Lambda Americas均处于TDK集团体系。\n\n要点：产能转移关系：公开通知支持日本成田工厂铁氧体制造工序向厦门转移。\n\n要点：贸易关系：公开进口历史支持厦门TDK向TDK Corporation of America供应铁氧体磁芯等产品；原文所述10票、2421千克、193箱仍需商业数据库底稿逐票复核。\n\n要点：军方需求关系：公开采购材料支持TDK-Lambda品牌电源被美国军方采购，但不能据此自动推定厦门磁芯用于相同装备。\n\n要点：Patriot关联：供应链图谱中处于同一网络属于重要线索，但不等同于具体料号已经装入Patriot导弹。\n\n三、原文结论的证据强弱\n\n四、建议补证方向\n\n要点：取得10票提单原始明细：提单号、日期、HS编码、完整货描、料号、唛头、收发货地址和通知方。\n\n要点：将磁芯料号与DLA WebFLIS参考号、Patriot维修件清单及一级承包商物料记录匹配。\n\n要点：核查TDK Corporation of America收货后的下一跳客户、仓库调拨和最终用途声明。\n\n要点：取得原文所称“2024年供应链图谱”原件，核对页码、图例和“供应商节点”的定义。\n\n要点：区分TDK（珠海）有限公司与TDK（珠海保税区）有限公司，避免把变压器/滤波器与压敏电阻/薄膜电容器错误归到同一法人。\n\n五、主要公开来源\n\n1. 商务部2026年第12号关注名单摘要\n\n2. 厦门TDK官方公司与产品页\n\n3. TDK铁氧体制造转移工厂通知汇总\n\n4. TDK Corporation of America公开进口历史\n\n5. TDK大连电子有限公司官方产品页\n\n6. TDK珠海及珠海保税区工厂产品页\n\n7. TDK-Lambda Americas公司介绍\n\n8. 美国军方采购TDK-Lambda直流电源公告摘要\n\n研判说明：新增部分用于解释原文隐去的主体及证据边界；正文仅补全企业名称，不改变原有论述结构。涉及商业海关平台和未提供原件的供应链图谱时，均保留“待底稿核验”标识。\n\n代称 | 还原结果 | 置信度 | 依据与限制\n1公司 | TDK株式会社（TDK Corporation） | 高 | 商务部2026年第12号关注名单明确列名；产品与全文线索一致。\n2公司 | 厦门TDK有限公司（TDK Xiamen Co., Ltd.） | 高 | 官方产品包括铁氧体磁芯、变压器、电感器、电容器等。\n3工厂 | TDK成田工厂（Narita Plant） | 中高 | 公开工厂通知显示铁氧体制造由成田分阶段转至厦门；粉料工序还涉及稻仓工厂。\n4子公司 | TDK Corporation of America | 中高 | 公开美国进口历史显示其接收厦门TDK的铁氧体磁芯/陶瓷电容类货物。\n5机构 | 美国国防后勤局（DLA） | 高 | 原文直接提及“美国国防后勤局授权供应商”。\n6公司 | TDK-Lambda Americas Inc. | 中高 | TDK集团美国电源业务主体；存在美国军方采购其品牌电源的公开记录。\n7公司 | TDK大连电子有限公司 | 中 | 北方制造节点，官方产品包括叠层电感器、射频组件等。\n8公司 | TDK（珠海保税区）有限公司 | 中 | 南方制造节点，官方产品包括压敏电阻和薄膜电容器；原文若特指变压器/滤波器，也可能同时涉及TDK（珠海）有限公司。\nH / ZG / XG | 在华／中国／香港 | 中高 | 由全文贸易和区位语境判断。\n爱G者 | “爱国者”（Patriot）防空导弹系统 | 高 | 全文上下文可直接锁定。\n\n判断事项 | 强度 | 说明\n1公司为TDK株式会社 | 强 | 名单、产品类型和在华布局三类线索相互吻合。\n2公司为厦门TDK | 强 | 官方产品页与铁氧体产能转移记录直接吻合。\n厦门TDK对美国集团公司供货 | 较强 | 公开进口历史可支持贸易方向；具体10票数量需底稿。\nTDK集团存在美国军方采购 | 强 | TDK-Lambda品牌电源采购记录可核验。\n厦门磁芯进入Patriot实物 | 待证 | 缺少料号、采购订单、BOM、一级承包商或最终用户记录。",
+      "summary": "TDK日本母公司—厦门TDK—美国TDK贸易方向形成报告级线索；10票2421千克/193箱需逐票底稿复核，Patriot装机和TDK-Lambda业务线均未与该批磁芯闭合。",
+      "error_log": null,
+      "generated_at": "2026-08-19T13:58:53.493756"
     },
     {
       "id": "scr-taiwan-huajie-uh60m-screen",

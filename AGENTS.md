@@ -816,3 +816,12 @@ D
    资讯（14目标/16来源）和国外海关风险管理动态（49目标/158来源）。本轮验证基线为后端612项
    通过、SQLite `integrity_check=ok`、前端生产构建通过；巴西财政部目标回放取得1,899字正文及
    页面结构化发布日期。未核验的其余来源继续阻断，不因追求数量降低门槛。
+---
+
+## 2026-08-19 TDK在华磁性元件供应链
+
+1. `backend/scripts/import_japan_tdk_xiamen_supply_chain.py` 将用户上传的TDK在华供应链报告幂等导入日本方向，并在导入前通过SQLite在线备份生成一致性快照。
+2. 核心贸易记录按报告聚合口径保存：2026年5月至8月厦门TDK向TDK Corporation of America供应磁芯类货物10票、合计2421千克和193箱；截图仅可见8行日期和重量，提单号、主体字段及部分货描被打码，不得虚构逐票明细。
+3. TDK日本成田工厂向厦门转移铁氧体制造工序、DLA供应链图谱中的Patriot关联，以及TDK-Lambda Americas军方电源采购均按用户报告线索保存；缺少原始图谱、公告链接、料号、BOM、订单和最终用途文件前保持`follow_up`。
+4. 厦门磁芯贸易、Patriot网络关联和TDK-Lambda军方采购是三类独立证据，不得因同属TDK集团而自动合并成同一批次军工供应链；调查状态保持`researching`，所有关系证据均不可直接报告为已装机。
+5. 原始DOCX归档于`data/reports/supply_chain/TDK在华供应链穿透分析_企业名称补全版.docx`，完整正文同步写入供应链报告；版本化数据同步导出到`config/snapshots/supply_chain.json`。
