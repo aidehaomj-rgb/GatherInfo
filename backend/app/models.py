@@ -21,6 +21,7 @@ from app._models_items import (
     Tag,
     item_tags,
     CollectionRun,
+    CollectionBatch,
     CollectedItem,
     ItemTopicMembership,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "Tag",
     "item_tags",
     "CollectionRun",
+    "CollectionBatch",
     "CollectedItem",
     "ItemTopicMembership",
     "Topic",

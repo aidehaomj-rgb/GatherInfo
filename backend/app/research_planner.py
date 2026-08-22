@@ -6,9 +6,14 @@ import logging
 import re
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from app.llm_client import call_llm
 from app.models import ModelConfig, Topic
+from app.topic_research_context import (
+    TopicResearchContext,
+    build_topic_research_context,
+)
 from app.trade_semantics import (
     POLICY_INSTRUMENTS,
     TOPIC_SEMANTIC_PROFILES,
@@ -129,6 +134,9 @@ async def build_research_queries(
     today: date | None = None,
     window_start_date: date | None = None,
     window_end_date: date | None = None,
+    research_context: TopicResearchContext | None = None,
+    round_number: int = 1,
+    gaps: dict[str, list[str]] | None = None,
 ) -> list[str]:
     """Turn an analyst prompt into search inputs, keeping evidence on the web."""
     current_date = today or datetime.now(timezone.utc).date()
@@ -137,7 +145,16 @@ async def build_research_queries(
         current_date - timedelta(days=safe_window_days)
     )
     target_end = window_end_date or current_date
-    request = _collection_instruction(topic, user_prompt)
+    context = research_context or build_topic_research_context(
+        topic,
+        prompt=user_prompt,
+        window_start=target_start,
+        window_end=target_end,
+    )
+    request = _collection_instruction(context, user_prompt)
+    gap_block = _gap_instruction(round_number, gaps)
+    if gap_block:
+        request = f"{request}\n\n{gap_block}"
     time_constraint = (
         f"Today is {current_date.isoformat()}. The target publication window is "
         f"{target_start.isoformat()} through {target_end.isoformat()}. "
@@ -145,6 +162,11 @@ async def build_research_queries(
         "an obsolete year or month. Do not make an exact quoted date a required match."
     )
     request = f"{request}\n\n{time_constraint}"
+
+    if round_number >= 2 and gaps:
+        followups = _parse_followup_queries(user_prompt)
+        gap_queries = _gap_queries(context, gaps, current_date, max_queries)
+        return list(dict.fromkeys([*followups, *gap_queries]))[:max_queries]
 
     if topic.id == "weekly-enforcement-intelligence":
         followups = _parse_followup_queries(user_prompt)
@@ -157,16 +179,16 @@ async def build_research_queries(
         # A fixed geographic mission matrix is more reliable than asking a
         # sometimes-slow model to invent a new plan for every weekly run. The
         # model remains authoritative at the evidence-review stage.
-        return _fallback_queries(
+        return _contextualize_queries(_fallback_queries(
             topic, current_date, safe_window_days, max_queries,
-        )
+        ), context, max_queries)
     if topic.id == "weekly-trade-current-affairs":
         # The customs-risk chain must be represented even when query-planning
         # models are unavailable. A stable mission matrix also makes recurring
         # runs comparable across periods.
-        return _fallback_queries(
+        return _contextualize_queries(_fallback_queries(
             topic, current_date, safe_window_days, max_queries,
-        )
+        ), context, max_queries)
     if bool(getattr(topic, "weekly_digest_enabled", False)):
         request += (
             "\n\nWeekly global-coverage constraints: cover at least English, Spanish, "
@@ -175,8 +197,8 @@ async def build_research_queries(
             "export-control, import-rule and supply-chain authorities across regions."
         )
 
-    keywords = topic.keywords if isinstance(topic.keywords, list) else []
-    topic_desc = topic.description or ""
+    keywords = list(context.keywords)
+    topic_desc = context.description
     instrument_vocab = ", ".join(instrument_terms())
     channel_vocab = ", ".join(channel_terms())
     system_prompt = f"""
@@ -204,6 +226,7 @@ Requirements:
 Topic: {topic.name}
 Topic description: {topic_desc}
 Topic keywords: {", ".join(map(str, keywords[:40]))}
+Unified topic research context: {json.dumps(context.to_dict(), ensure_ascii=False)}
 Analyst request: {request}
 """.strip()
 
@@ -218,6 +241,9 @@ Analyst request: {request}
         fallback = _fallback_queries(
             topic, current_date, safe_window_days, max_queries,
         )
+        if round_number >= 2 and gaps:
+            fallback = _gap_queries(context, gaps, current_date, max_queries) or fallback
+        fallback = _contextualize_queries(fallback, context, max_queries)
         return _with_weekly_global_lanes(topic, fallback, max_queries)
 
     queries = _parse_query_json(content)
@@ -244,8 +270,10 @@ Analyst request: {request}
         cleaned.append(value[:240])
         if len(cleaned) >= max_queries:
             break
-    queries = cleaned or _fallback_queries(
-        topic, current_date, safe_window_days, max_queries,
+    queries = _contextualize_queries(cleaned, context, max_queries) if cleaned else (
+        _contextualize_queries(_fallback_queries(
+            topic, current_date, safe_window_days, max_queries,
+        ), context, max_queries)
     )
     return _with_weekly_global_lanes(topic, queries, max_queries)
 
@@ -284,18 +312,98 @@ def _parse_followup_queries(prompt: str) -> list[str]:
     return [re.sub(r"\s+", " ", str(value)).strip()[:420] for value in values if str(value).strip()][:32]
 
 
-def _collection_instruction(topic: Topic, user_prompt: str) -> str:
+def _collection_instruction(topic: Topic | TopicResearchContext, user_prompt: str) -> str:
     explicit = (user_prompt or "").strip()
     if explicit:
         return explicit
     keywords = [str(value).strip() for value in (topic.keywords or []) if str(value).strip()]
+    synonyms = [str(value).strip() for value in (getattr(topic, "synonyms", ()) or ()) if str(value).strip()]
     return (
         f"Collect information closely related to the topic '{topic.name}'. "
         f"Topic description: {topic.description or 'not provided'}. "
-        f"Semantic directions: {', '.join(keywords) or topic.name}. "
+        f"Semantic directions: {', '.join([*keywords, *synonyms]) or topic.name}. "
         "Use the concepts as a combined information direction, including synonyms, "
         "translations and equivalent events; do not require literal keyword matching."
     )
+
+
+def _gap_instruction(round_number: int, gaps: dict[str, list[str]] | None) -> str:
+    if round_number < 2 or not gaps:
+        return ""
+    return (
+        "This is collection round 2. Fill only the measured coverage and evidence gaps; "
+        "prioritise official originals, verifiable publication dates, named actors, routes "
+        "and case numbers. Gaps: " + json.dumps(gaps, ensure_ascii=False)
+    )
+
+
+def _gap_queries(
+    context: TopicResearchContext,
+    gaps: dict[str, list[str]],
+    today: date,
+    max_queries: int,
+) -> list[str]:
+    """Build deterministic second-round queries from acceptance gaps."""
+    countries = _clean_gap_values(gaps.get("countries")) or list(context.focus_countries) or [""]
+    languages = _clean_gap_values(gaps.get("languages")) or list(context.focus_languages) or [""]
+    instruments = _clean_gap_values(gaps.get("policy_instruments")) or list(context.policy_instruments[:3]) or list(context.keywords[:3])
+    products = _clean_gap_values(gaps.get("products")) or [""]
+    grades = _clean_gap_values(gaps.get("source_grades"))
+    evidence_hint = "official government original notice case PDF" if "A" in grades else "independent authoritative source"
+    date_hint = f"since {context.window.start.isoformat()} through {context.window.end.isoformat() or today.isoformat()}"
+    queries = [
+        " ".join(filter(None, (country, language, instrument, product, evidence_hint, date_hint)))
+        for country in countries
+        for language in languages[:2]
+        for instrument in instruments[:3]
+        for product in products[:2]
+    ]
+    return list(dict.fromkeys(query[:240] for query in queries if len(query.strip()) >= 3))[:max_queries]
+
+
+def build_followup_queries(
+    context: TopicResearchContext,
+    gaps: dict[str, list[str]],
+    *,
+    max_queries: int = 12,
+    today: date | None = None,
+) -> list[str]:
+    """Public deterministic adapter for a batch acceptance result."""
+    return _gap_queries(context, gaps, today or context.window.end, max_queries)
+
+
+def _contextualize_queries(
+    queries: list[str],
+    context: TopicResearchContext,
+    max_queries: int,
+) -> list[str]:
+    """Apply configured country, language, target-site and exclusion lanes offline."""
+    if not queries:
+        return []
+    exclusions = " ".join(f'-"{term}"' for term in context.exclude_keywords[:4])
+    base = [" ".join(filter(None, (query, exclusions)))[:240] for query in queries]
+    countries = context.focus_countries[:3]
+    languages = context.focus_languages[:3]
+    target_hosts = [urlparse(url).netloc for url in context.target_urls[:3] if urlparse(url).netloc]
+    lanes = [
+        " ".join(filter(None, (
+            base[index % len(base)],
+            countries[index % len(countries)] if countries else "",
+            languages[index % len(languages)] if languages else "",
+            f"site:{target_hosts[index % len(target_hosts)]}" if target_hosts else "",
+        )))[:240]
+        for index in range(max(len(countries), len(languages), len(target_hosts), 0))
+    ]
+    if not lanes:
+        return base[:max_queries]
+    keep = max(0, max_queries - len(lanes))
+    return list(dict.fromkeys([*base[:keep], *lanes]))[:max_queries]
+
+
+def _clean_gap_values(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(str(entry).strip() for entry in value if str(entry).strip()))
 
 
 def _fallback_queries(

@@ -149,7 +149,7 @@ function SourceRow({
   const Icon = CHANNEL_ICONS[source.channel] ?? Globe;
   return (
     <label
-      className={`source-row ${isSelected ? "source-row--selected" : ""}`}
+      className={`source-row source-tree-leaf ${isSelected ? "source-row--selected" : ""}`}
     >
       <input
         type="checkbox"
@@ -183,7 +183,7 @@ function GroupHeader({
   const allSelected = selectedCount === totalCount && totalCount > 0;
   return (
     <div
-      className="source-group-header"
+      className="source-group-header source-tree-root"
       role="button"
       tabIndex={0}
       aria-expanded={expanded}
@@ -548,7 +548,11 @@ export function SourceSelector({
                 const groupSelected = groupIds.filter((id) => draft.includes(id)).length;
                 const expanded = isGroupExpanded(group.id);
                 return (
-                  <section key={group.id} className="source-tree-group">
+                  <section
+                    key={group.id}
+                    className="source-tree-group"
+                    aria-expanded={expanded}
+                  >
                     <GroupHeader
                       label={group.label}
                       expanded={expanded}

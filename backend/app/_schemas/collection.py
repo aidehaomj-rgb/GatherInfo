@@ -1,5 +1,5 @@
 """Collection, item, and batch schemas."""
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from .common import IsoDT
 
 
@@ -20,10 +20,38 @@ class RunOut(BaseModel):
     items_found: int = 0
     items_new: int = 0
     items_failed: int = 0
+    items_discovered: int = 0
+    items_date_rejected: int = 0
+    items_topic_rejected: int = 0
+    items_quality_rejected: int = 0
+    items_reused: int = 0
+    items_duplicate: int = 0
+    model_failures: int = 0
+    source_failures: int = 0
     started_at: IsoDT = None
     completed_at: IsoDT = None
     duration_ms: int | None = None
     error_log: list | None = None
+    model_config = {"from_attributes": True}
+
+
+class CollectionBatchSummaryOut(BaseModel):
+    batch_id: str = Field(validation_alias=AliasChoices("batch_id", "id"))
+    topic_id: str | None = None
+    status: str
+    current_round: int | None = 0
+    max_rounds: int | None = 2
+    target: dict | None = None
+    metrics: dict | None = None
+    acceptance: dict | None = None
+    gaps: list[dict] | None = None
+    source_plan: dict | list | None = None
+    round_summaries: list[dict] | None = None
+    stop_reason: str | None = None
+    created_at: IsoDT = None
+    started_at: IsoDT = None
+    completed_at: IsoDT = None
+    updated_at: IsoDT = None
     model_config = {"from_attributes": True}
 
 
@@ -32,6 +60,7 @@ class CollectResultOut(BaseModel):
     total_items: int = 0
     items_new: int = 0
     errors: list[str] | None = None
+    batch_summary: CollectionBatchSummaryOut | None = None
 
 
 class ItemOut(BaseModel):
@@ -121,6 +150,13 @@ class BatchRunOut(BaseModel):
     items_found: int = 0
     items_failed: int = 0
     items_duplicate: int = 0
+    items_discovered: int = 0
+    items_date_rejected: int = 0
+    items_topic_rejected: int = 0
+    items_quality_rejected: int = 0
+    items_reused: int = 0
+    model_failures: int = 0
+    source_failures: int = 0
     duplicate_items: list[dict] = Field(default_factory=list)
     source_verdict: dict | None = None
     started_at: IsoDT = None
@@ -142,6 +178,7 @@ class BatchOut(BaseModel):
     completed_at: IsoDT = None
     source_count: int = 0
     runs: list[BatchRunOut] = []
+    batch_summary: CollectionBatchSummaryOut | None = None
 
 
 class ActiveRunOut(BaseModel):
@@ -162,6 +199,7 @@ class ActiveRunOut(BaseModel):
     batch_completed_sources: int = 0
     batch_failed_sources: int = 0
     batch_active_sources: int = 1
+    batch_summary: CollectionBatchSummaryOut | None = None
 
 
 class RunFailureOut(BaseModel):

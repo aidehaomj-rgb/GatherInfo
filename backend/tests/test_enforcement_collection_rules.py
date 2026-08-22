@@ -120,6 +120,20 @@ def test_enforcement_topic_expands_rss_discovery_stems():
     assert len(keywords) == len({keyword.casefold() for keyword in keywords})
 
 
+def test_topic_collection_keywords_include_synonyms_without_duplicates():
+    topic = SimpleNamespace(
+        id="foreign-customs-risk-management",
+        keywords=["customs risk", "Receita Federal"],
+        synonyms=["receita federal", "gestão de risco aduaneiro"],
+    )
+
+    keywords = _topic_collection_keywords(topic)
+
+    assert keywords == [
+        "customs risk", "Receita Federal", "gestão de risco aduaneiro",
+    ]
+
+
 def test_rss_publication_time_is_converted_to_utc():
     published = _parse_published_at("Tue, 28 Jul 2026 13:54:11 -0400")
 

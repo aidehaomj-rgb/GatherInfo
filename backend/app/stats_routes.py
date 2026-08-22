@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import CollectedItem, CollectionRun, SourceConfig, Tag, Topic
 from app.services.tag_service import refresh_tag_counts
+from app.services.topic_item_query import topic_item_stats
 from app.time_utils import BEIJING_TIMEZONE, beijing_day_bounds_utc
 
 router = APIRouter(prefix="/api/v1", tags=["stats"])
@@ -43,11 +44,7 @@ def dashboard(db: Session = Depends(get_db)):
     # Theme results must be derived from the items actually persisted for that
     # topic. Topic.total_items_collected is a lifetime counter and may include
     # entries later removed or deduplicated across sources.
-    topic_rows = db.query(
-        CollectedItem.topic_id,
-        func.count(CollectedItem.id),
-        func.max(CollectedItem.collected_at),
-    ).filter(CollectedItem.topic_id.isnot(None)).group_by(CollectedItem.topic_id).all()
+    topic_rows = topic_item_stats(db)
     topic_counts = {topic_id: (count, latest) for topic_id, count, latest in topic_rows}
     topic_stats = []
     for topic in db.query(Topic).filter(Topic.is_active == True).all():

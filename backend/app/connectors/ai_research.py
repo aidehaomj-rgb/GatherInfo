@@ -69,7 +69,15 @@ class AIResearchCollector(BaseCollector):
         is_enforcement_plan = any(
             str(query).lstrip().startswith("jurisdiction=") for query in queries
         )
-        per_provider = max(1, max_items // max(1, len(providers)))
+        provider_budgets = {
+            "official_enforcement": max_items,
+            "tavily": max_items,
+            "baidu_qianfan": max(5, math.ceil(max_items * 0.6)),
+            "gdelt": max(10, math.ceil(max_items * 0.7)),
+            "pdf_search": max(5, math.ceil(max_items * 0.5)),
+            "news_rss": max(5, math.ceil(max_items * 0.5)),
+            "broad_web": max(4, math.ceil(max_items * 0.3)),
+        }
         provider_tasks = []
         if "tavily" in providers:
             tavily_key = self._resolve_tavily_api_key()
@@ -77,7 +85,7 @@ class AIResearchCollector(BaseCollector):
                 provider_tasks.append(
                     self._fetch_provider(
                         "tavily", tavily_key, queries,
-                        max_items if is_enforcement_plan else per_provider,
+                        max_items if is_enforcement_plan else provider_budgets["tavily"],
                         is_enforcement_plan=is_enforcement_plan,
                     )
                 )
@@ -89,7 +97,7 @@ class AIResearchCollector(BaseCollector):
                 provider_tasks.append(
                     self._fetch_provider(
                         "baidu_qianfan", baidu_key, queries,
-                        max_items if is_enforcement_plan else per_provider,
+                        max_items if is_enforcement_plan else provider_budgets["baidu_qianfan"],
                         is_enforcement_plan=is_enforcement_plan,
                     )
                 )
@@ -98,7 +106,7 @@ class AIResearchCollector(BaseCollector):
         if "gdelt" in providers:
             provider_tasks.append(
                 self._fetch_provider(
-                    "gdelt", "", queries, per_provider,
+                    "gdelt", "", queries, provider_budgets["gdelt"],
                     is_enforcement_plan=is_enforcement_plan,
                 )
             )
@@ -111,10 +119,13 @@ class AIResearchCollector(BaseCollector):
                     is_enforcement_plan=is_enforcement_plan,
                 )
             )
-        for provider in ("broad_web", "news_rss", "image_search", "pdf_search"):
+        # Image search is enrichment-only and never enters the formal text
+        # evidence funnel. Text/PDF discovery providers receive weighted,
+        # high-signal budgets instead of an equal split across all providers.
+        for provider in ("broad_web", "news_rss", "pdf_search"):
             if provider in providers:
                 provider_tasks.append(self._fetch_provider(
-                    provider, "", queries, per_provider,
+                    provider, "", queries, provider_budgets[provider],
                     is_enforcement_plan=is_enforcement_plan,
                 ))
 
@@ -127,23 +138,19 @@ class AIResearchCollector(BaseCollector):
             provider_items, provider_errors = provider_result
             provider_item_groups.append(provider_items)
             errors.extend(provider_errors)
-        if is_enforcement_plan:
-            # Keep one high-volume provider from crowding official and regional
-            # search results out of the model-review pool.
-            pending_groups = [list(group) for group in provider_item_groups if group]
-            while pending_groups and len(items) < max_items:
-                next_groups: list[list[FetchItem]] = []
-                for group in pending_groups:
-                    if group:
-                        items.append(group.pop(0))
-                    if group:
-                        next_groups.append(group)
-                    if len(items) >= max_items:
-                        break
-                pending_groups = next_groups
-        else:
-            for provider_items in provider_item_groups:
-                items.extend(provider_items)
+        # Round-robin merge keeps one high-volume provider from crowding out
+        # official, regional or PDF evidence in every topic.
+        pending_groups = [list(group) for group in provider_item_groups if group]
+        while pending_groups and len(items) < max_items:
+            next_groups: list[list[FetchItem]] = []
+            for group in pending_groups:
+                if group:
+                    items.append(group.pop(0))
+                if group:
+                    next_groups.append(group)
+                if len(items) >= max_items:
+                    break
+            pending_groups = next_groups
 
         deduped: list[FetchItem] = []
         seen: set[str] = set()
@@ -308,7 +315,6 @@ class AIResearchCollector(BaseCollector):
                 # Weekly enforcement reports must not formally store a result
                 # whose publication date cannot be verified.
                 "allow_undated_results": False,
-                "allow_unfiltered_results": True,
             })
             annotated.append(replace(item, raw_metadata=metadata))
         return annotated

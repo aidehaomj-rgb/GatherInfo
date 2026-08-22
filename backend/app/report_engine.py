@@ -162,7 +162,7 @@ async def generate_report(
                 )
             )
         else:
-            q = db.query(CollectedItem).filter(CollectedItem.topic_id == topic_id)
+            q = _topic_items_query(db, topic_id)
         if collection_run_ids:
             q = q.filter(CollectedItem.run_id.in_(collection_run_ids))
         elif collection_run_id:

@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.collection_schemas import (
     CategoryCreate, CategoryOut, CategoryUpdate,
-    CollectRequest, CollectResultOut,
+    CollectRequest, CollectResultOut, CollectionBatchSummaryOut,
     RunOut, TopicCreate, TopicOut, TopicUpdate,
 )
 from app.database import get_db
 from app.engine import CollectionEngine
-from app.models import Category, CollectionRun, Topic
+from app.models import Category, CollectionBatch, CollectionRun, Topic
 
 from ._helpers import _gen_id, _normalize_topic_payload, _topic_out
 
@@ -190,6 +190,19 @@ def _build_collect_results(results, db: Session) -> list[CollectResultOut]:
     out = []
     for r in results:
         run = db.query(CollectionRun).filter(CollectionRun.id == r.run_id).first()
+        batch = (
+            db.query(CollectionBatch).filter(CollectionBatch.id == run.batch_id).first()
+            if run and run.batch_id else None
+        )
+        summary = CollectionBatchSummaryOut(
+            batch_id=batch.id, topic_id=batch.topic_id, status=batch.status or "pending",
+            current_round=batch.current_round or 0, max_rounds=batch.max_rounds or 2,
+            target=batch.target, metrics=batch.metrics, acceptance=batch.acceptance,
+            gaps=batch.gaps or [], source_plan=batch.source_plan,
+            round_summaries=batch.round_summaries or [], stop_reason=batch.stop_reason,
+            created_at=batch.created_at, started_at=batch.started_at,
+            completed_at=batch.completed_at, updated_at=batch.updated_at,
+        ) if batch else None
         out.append(CollectResultOut(
             run=RunOut.model_validate(run) if run else RunOut(
                 id=r.run_id, source_id=r.source_id, status=r.status or "unknown",
@@ -198,5 +211,6 @@ def _build_collect_results(results, db: Session) -> list[CollectResultOut]:
             ),
             total_items=len(r.items), items_new=r.items_new,
             errors=r.error_log,
+            batch_summary=summary,
         ))
     return out

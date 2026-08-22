@@ -1,10 +1,11 @@
 """Item business logic — queries, filtering, batch operations."""
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import text
 from fastapi import HTTPException
 
 from app.models import CollectedItem, CollectionRun, Tag
+from app.services.topic_item_query import filter_items_by_topic
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,7 @@ def build_item_query(
 ):
     """Build a filtered query for CollectedItem, reusable across list/export/ids."""
     query = db.query(CollectedItem)
-    if topic_id:
-        query = query.filter(CollectedItem.topic_id == topic_id)
+    query = filter_items_by_topic(query, topic_id)
     if source_id:
         query = query.filter(CollectedItem.source_id == source_id)
     if category:
@@ -70,7 +70,9 @@ def build_item_query(
             db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
         ))
     if tag:
-        query = query.filter(CollectedItem.tags.any(Tag.id == tag))
+        tag_ids = [tag_id.strip() for tag_id in tag.split(",") if tag_id.strip()]
+        for tag_id in tag_ids:
+            query = query.filter(CollectedItem.tags.any(Tag.id == tag_id))
     if q:
         query = query.filter(
             (CollectedItem.title.ilike(f"%{q}%")) |

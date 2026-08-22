@@ -41,6 +41,11 @@ class ItemTopicMembership(Base):
     first_run_id = Column(String(80), nullable=True)
     last_run_id = Column(String(80), nullable=True)
     relevance_score = Column(Float, nullable=True)
+    relevance_tier = Column(String(30), nullable=True)
+    evidence_grade = Column(String(10), nullable=True)
+    customs_value = Column(String(40), nullable=True)
+    information_type = Column(String(40), nullable=True)
+    relevance_metadata = Column(JSON, nullable=True)
     first_seen_at = Column(DateTime(timezone=True), default=_utc_now)
     last_seen_at = Column(DateTime(timezone=True), default=_utc_now)
 
@@ -85,6 +90,14 @@ class CollectionRun(Base):
     items_new = Column(Integer, default=0)
     items_updated = Column(Integer, default=0)
     items_failed = Column(Integer, default=0)
+    items_discovered = Column(Integer, default=0)
+    items_date_rejected = Column(Integer, default=0)
+    items_topic_rejected = Column(Integer, default=0)
+    items_quality_rejected = Column(Integer, default=0)
+    items_reused = Column(Integer, default=0)
+    items_duplicate = Column(Integer, default=0)
+    model_failures = Column(Integer, default=0)
+    source_failures = Column(Integer, default=0)
 
     # Timing
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -114,6 +127,31 @@ class CollectionRun(Base):
 
     def __repr__(self):
         return f"<CollectionRun id={self.id} status={self.status}>"
+
+
+class CollectionBatch(Base):
+    """Persistent audit record for one topic's bounded collection loop."""
+    __tablename__ = "collection_batches"
+
+    id = Column(String(80), primary_key=True)
+    topic_id = Column(String(80), ForeignKey("topics.id"), nullable=True, index=True)
+    status = Column(String(20), default="pending", nullable=True, index=True)
+    current_round = Column(Integer, default=0, nullable=True)
+    max_rounds = Column(Integer, default=2, nullable=True)
+    target = Column(JSON, nullable=True)
+    metrics = Column(JSON, nullable=True)
+    acceptance = Column(JSON, nullable=True)
+    gaps = Column(JSON, nullable=True)
+    source_plan = Column(JSON, nullable=True)
+    round_summaries = Column(JSON, nullable=True)
+    stop_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utc_now)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    def __repr__(self):
+        return f"<CollectionBatch id={self.id} status={self.status}>"
 
 
 class CollectedItem(Base):

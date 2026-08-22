@@ -10,18 +10,20 @@ from sqlalchemy.orm import Session
 from app.collection_schemas import (
     ActiveRunOut, BatchOut, BatchRunOut, RunFailureOut, ItemInventoryOut,
     ItemDeleteRequest, ItemListOut, ItemOut, ItemQualityReviewRequest, ItemTranslateRequest,
-    FeaturedImageResolveRequest, RunOut,
+    CollectionBatchSummaryOut, FeaturedImageResolveRequest, RunOut,
 )
 from app.connectors.base import FetchItem
 from app.database import get_db
 from app.models import (
-    Category, CollectedItem, CollectionRun, JobStatus, ModelConfig,
-    SourceConfig, Tag, Topic,
+    Category, CollectedItem, CollectionBatch, CollectionRun, JobStatus, ModelConfig,
+    SourceConfig, Topic,
 )
 
 from ._helpers import _item_tags
 from app.translation_service import item_translation_fields, translate_existing_items
 from app.engine import _web_translation_model, request_batch_stop
+from app.services.item_service import build_item_query
+from app.services.topic_item_query import item_has_any_topic, topic_item_stats
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["items"])
@@ -40,6 +42,29 @@ def _utc_sort_time(value: datetime | None) -> datetime:
     if value is None:
         return datetime.min.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _batch_summary(batch: CollectionBatch | None) -> CollectionBatchSummaryOut | None:
+    if batch is None:
+        return None
+    return CollectionBatchSummaryOut(
+        batch_id=batch.id,
+        topic_id=batch.topic_id,
+        status=batch.status or "pending",
+        current_round=batch.current_round or 0,
+        max_rounds=batch.max_rounds or 2,
+        target=batch.target,
+        metrics=batch.metrics,
+        acceptance=batch.acceptance,
+        gaps=batch.gaps or [],
+        source_plan=batch.source_plan,
+        round_summaries=batch.round_summaries or [],
+        stop_reason=batch.stop_reason,
+        created_at=batch.created_at,
+        started_at=batch.started_at,
+        completed_at=batch.completed_at,
+        updated_at=batch.updated_at,
+    )
 
 
 # ── Runs ────────────────────────────────────────────────────────────────
@@ -67,10 +92,24 @@ def list_batches(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    q = db.query(CollectionRun).filter(CollectionRun.created_at.isnot(None))
+    recent = db.query(
+        CollectionRun.batch_id,
+        func.max(CollectionRun.created_at).label("latest_at"),
+    ).filter(
+        CollectionRun.created_at.isnot(None),
+        CollectionRun.batch_id.isnot(None),
+    )
     if topic_id:
-        q = q.filter(CollectionRun.topic_id == topic_id)
-    q = q.order_by(CollectionRun.created_at.desc()).limit(limit * 5).all()
+        recent = recent.filter(CollectionRun.topic_id == topic_id)
+    recent_ids = [
+        row[0] for row in recent.group_by(CollectionRun.batch_id)
+        .order_by(func.max(CollectionRun.created_at).desc())
+        .limit(limit).all()
+    ]
+    q = (
+        db.query(CollectionRun).filter(CollectionRun.batch_id.in_(recent_ids)).all()
+        if recent_ids else []
+    )
 
     batch_map: dict[str, list] = {}
     for r in q:
@@ -81,6 +120,11 @@ def list_batches(
             batch_map[bid].append(r)
 
     batches: list[BatchOut] = []
+    persisted_batches = {
+        batch.id: batch for batch in db.query(CollectionBatch).filter(
+            CollectionBatch.id.in_(list(batch_map)),
+        ).all()
+    } if batch_map else {}
     for batch_id, runs in sorted(
         batch_map.items(),
         key=lambda x: max((_utc_sort_time(r.created_at) for r in x[1]), default=_utc_sort_time(None)),
@@ -106,7 +150,16 @@ def list_batches(
                 topic_id=r.topic_id, status=r.status if r.status else "unknown",
                 items_new=r.items_new or 0, items_found=r.items_found or 0,
                 items_failed=r.items_failed or 0,
-                items_duplicate=len(duplicate_items) if duplicate_items else (r.items_updated or 0),
+                items_discovered=r.items_discovered or 0,
+                items_date_rejected=r.items_date_rejected or 0,
+                items_topic_rejected=r.items_topic_rejected or 0,
+                items_quality_rejected=r.items_quality_rejected or 0,
+                items_reused=r.items_reused or 0,
+                model_failures=r.model_failures or 0,
+                source_failures=r.source_failures or 0,
+                items_duplicate=(
+                    r.items_duplicate or len(duplicate_items) or r.items_updated or 0
+                ),
                 duplicate_items=duplicate_items,
                 source_verdict=getattr(r, "source_verdict", None),
                 started_at=r.started_at.isoformat() if r.started_at else None,
@@ -147,9 +200,56 @@ def list_batches(
             completed_at=completed_at.isoformat() if completed_at else None,
             source_count=len(runs),
             runs=run_outs,
+            batch_summary=_batch_summary(persisted_batches.get(batch_id)),
         ))
 
     return batches
+
+
+@router.get("/runs/batches/{batch_id}", response_model=BatchOut)
+def get_batch(batch_id: str, db: Session = Depends(get_db)):
+    """Return one persisted loop batch with its round acceptance summary."""
+    summary = db.query(CollectionBatch).filter(CollectionBatch.id == batch_id).first()
+    runs = db.query(CollectionRun).filter(CollectionRun.batch_id == batch_id).all()
+    if summary is None and not runs:
+        raise HTTPException(404, "Collection batch not found")
+    topic_id = summary.topic_id if summary else runs[0].topic_id
+    candidates = list_batches(topic_id=topic_id, limit=100, db=db)
+    matched = next((candidate for candidate in candidates if candidate.batch_id == batch_id), None)
+    if matched:
+        return matched
+    topic = db.query(Topic).filter(Topic.id == topic_id).first() if topic_id else None
+    source_names = {
+        source.id: source.name for source in db.query(SourceConfig).filter(
+            SourceConfig.id.in_([run.source_id for run in runs]),
+        ).all()
+    } if runs else {}
+    run_outs = [BatchRunOut(
+        id=run.id, source_id=run.source_id, topic_id=run.topic_id,
+        status=run.status or "unknown", items_new=run.items_new or 0,
+        items_found=run.items_found or 0, items_failed=run.items_failed or 0,
+        items_duplicate=run.items_duplicate or run.items_updated or 0,
+        items_discovered=run.items_discovered or 0,
+        items_date_rejected=run.items_date_rejected or 0,
+        items_topic_rejected=run.items_topic_rejected or 0,
+        items_quality_rejected=run.items_quality_rejected or 0,
+        items_reused=run.items_reused or 0, model_failures=run.model_failures or 0,
+        source_failures=run.source_failures or 0,
+        duplicate_items=run.duplicate_items or [], source_verdict=run.source_verdict,
+        started_at=run.started_at, completed_at=run.completed_at,
+        duration_ms=run.duration_ms, error_log=run.error_log,
+        source_name=source_names.get(run.source_id, run.source_id),
+    ) for run in runs]
+    return BatchOut(
+        batch_id=batch_id,
+        topic_id=topic_id,
+        topic_name=topic.name if topic else None,
+        status=summary.status if summary else "completed",
+        source_count=len(runs),
+        total_new=sum(run.items_new or 0 for run in runs),
+        runs=run_outs,
+        batch_summary=_batch_summary(summary),
+    )
 
 
 @router.get("/runs/active", response_model=list[ActiveRunOut])
@@ -186,6 +286,10 @@ def list_active_runs(db: Session = Depends(get_db)):
         metrics = batch_metrics.get(r.batch_id or "", {
             "total": 1, "completed": 0, "failed": 0, "active": 1,
         })
+        summary = (
+            db.query(CollectionBatch).filter(CollectionBatch.id == r.batch_id).first()
+            if r.batch_id else None
+        )
         result.append(ActiveRunOut(
             id=r.id, source_id=r.source_id,
             source_name=src.name if src else r.source_id,
@@ -203,6 +307,7 @@ def list_active_runs(db: Session = Depends(get_db)):
             batch_completed_sources=metrics["completed"],
             batch_failed_sources=metrics["failed"],
             batch_active_sources=metrics["active"],
+            batch_summary=_batch_summary(summary),
         ))
 
     return result
@@ -283,6 +388,7 @@ def clear_history(db: Session = Depends(get_db)):
         db.query(CollectedItem).delete(synchronize_session=False)
         # Then delete all runs
         db.query(CollectionRun).delete(synchronize_session=False)
+        db.query(CollectionBatch).delete(synchronize_session=False)
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -300,6 +406,12 @@ def stop_run(run_id: str, db: Session = Depends(get_db)):
     # 停止语义：停止该 run 及其同批次仍在执行的信息源 run。
     # 已入库的采集条目一律保留，仅把活跃 run 标记为失败结束。
     request_batch_stop(getattr(run, "batch_id", None))
+    if run.batch_id:
+        batch = db.query(CollectionBatch).filter(CollectionBatch.id == run.batch_id).first()
+        if batch:
+            batch.status = "failed"
+            batch.stop_reason = "stopped_by_user"
+            batch.completed_at = datetime.now(timezone.utc)
     target_ids = {run_id}
     if getattr(run, "batch_id", None):
         siblings = db.query(CollectionRun).filter(
@@ -379,29 +491,17 @@ def list_items(
     page_size: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(CollectedItem)
-
-    if topic_id:
-        query = query.filter(CollectedItem.topic_id == topic_id)
-    if source_id:
-        query = query.filter(CollectedItem.source_id == source_id)
-    if category:
-        query = query.filter(CollectedItem.category == category)
-    if status:
-        query = query.filter(CollectedItem.status == status)
-    if language:
-        query = query.filter(CollectedItem.language == language)
-    if run_id:
-        query = query.filter(CollectedItem.run_id == run_id)
-    if batch_id:
-        query = query.filter(CollectedItem.run_id.in_(
-            db.query(CollectionRun.id).filter(CollectionRun.batch_id == batch_id),
-        ))
-    if tag:
-        # 支持多标签组合筛选（AND）：逗号分隔的 tag id，如 "policy:tariff,category:enforcement"
-        tag_ids = [t.strip() for t in tag.split(",") if t.strip()]
-        for tag_id in tag_ids:
-            query = query.filter(CollectedItem.tags.any(Tag.id == tag_id))
+    query = build_item_query(
+        db,
+        topic_id=topic_id,
+        source_id=source_id,
+        category=category,
+        tag=tag,
+        status=status,
+        language=language,
+        run_id=run_id,
+        batch_id=batch_id,
+    )
     if q:
         needle = q.lower()
         candidates = query.order_by(
@@ -443,7 +543,24 @@ def item_inventory(db: Session = Depends(get_db)):
 
     topic_names = dict(db.query(Topic.id, Topic.name).all())
     source_names = dict(db.query(SourceConfig.id, SourceConfig.name).all())
-    topics = grouped_rows(CollectedItem.topic_id, topic_names, "__unassigned__", "未关联主题")
+    topics = [
+        {
+            "id": topic_id,
+            "label": topic_names.get(topic_id, topic_id),
+            "count": int(count),
+            "latest_at": latest_at,
+        }
+        for topic_id, count, latest_at in topic_item_stats(db)
+    ]
+    topics.sort(key=lambda row: (-row["count"], row["label"]))
+    unassigned = db.query(
+        func.count(CollectedItem.id), func.max(CollectedItem.collected_at),
+    ).filter(~item_has_any_topic()).first()
+    if unassigned and unassigned[0]:
+        topics = [*topics, {
+            "id": "__unassigned__", "label": "未关联主题",
+            "count": int(unassigned[0]), "latest_at": unassigned[1],
+        }]
     for row in topics:
         row["topic_id"] = row["id"] if row["id"] != "__unassigned__" else None
 
@@ -671,6 +788,15 @@ def search_items(
     db: Session = Depends(get_db),
 ):
     """Full-text search using SQLite FTS5 with optional field filters."""
+    if topic_id:
+        return list_items(
+            topic_id=topic_id,
+            source_id=source_id,
+            q=q,
+            page=page,
+            page_size=page_size,
+            db=db,
+        )
     try:
         from app import fts_search
         item_ids, total = fts_search.search_items(

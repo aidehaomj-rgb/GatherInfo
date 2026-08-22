@@ -16,11 +16,13 @@ from app.material_set_service import (
     resolve_material_items,
 )
 from app.models import CollectedItem, MaterialSet, Report, Topic
+from app.services.topic_item_query import filter_items_by_topic
 
 router = APIRouter(prefix="/api/v1/haisee", tags=["haisee"])
 
 
 class HaiSeePushRequest(BaseModel):
+    topic_id: str | None = None
     item_ids: list[str] | None = Field(default=None, max_length=500)
     report_id: str | None = None
     material_set_id: str | None = None
@@ -65,8 +67,9 @@ async def push_to_haisee(data: HaiSeePushRequest, db: Session = Depends(get_db))
     else:
         if not item_ids and report:
             item_ids = list(report.item_ids or [])
-        rows = _resolve_items(db, item_ids)
-        topic_id = report.topic_id if report else (rows[0].topic_id if rows else None)
+        topic_id = data.topic_id or (report.topic_id if report else None)
+        rows = _resolve_items(db, item_ids, topic_id=topic_id)
+        topic_id = topic_id or (rows[0].topic_id if rows else None)
         topic = db.get(Topic, topic_id) if topic_id else None
         material_set = create_material_set(
             db,
@@ -107,9 +110,23 @@ async def push_to_haisee(data: HaiSeePushRequest, db: Session = Depends(get_db))
         raise HTTPException(502, f"推送 HaiSee 失败：{exc}") from exc
 
 
-def _resolve_items(db: Session, item_ids: list[str]) -> list[CollectedItem]:
+def _resolve_items(
+    db: Session,
+    item_ids: list[str],
+    topic_id: str | None = None,
+) -> list[CollectedItem]:
+    if not item_ids and not topic_id:
+        raise HTTPException(400, "需提供主题、条目、归档报告或素材集")
     if not item_ids:
-        raise HTTPException(400, "需提供条目、归档报告或素材集")
+        rows = (
+            filter_items_by_topic(db.query(CollectedItem), topic_id)
+            .order_by(CollectedItem.published_at.desc())
+            .limit(500)
+            .all()
+        )
+        if not rows:
+            raise HTTPException(400, "所选主题下没有信息")
+        return rows
     rows = db.query(CollectedItem).filter(CollectedItem.id.in_(item_ids)).all()
     by_id = {row.id: row for row in rows}
     missing = [item_id for item_id in item_ids if item_id not in by_id]

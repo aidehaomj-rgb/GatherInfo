@@ -1,6 +1,81 @@
 """Topic, schedule, and category schemas."""
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    AliasChoices, BaseModel, ConfigDict, Field, model_serializer, model_validator,
+)
 from .common import IsoDT
+
+
+class CollectionPolicy(BaseModel):
+    """Typed, operator-overridable acceptance policy for a topic."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    weekly_target: tuple[int, int] | None = None
+    max_rounds: int = Field(default=2, ge=1, le=2)
+    minimum_domains: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("minimum_domains", "min_independent_domains"),
+        ge=1,
+        le=1000,
+    )
+    minimum_regions: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("minimum_regions", "min_regions"),
+        ge=1,
+        le=250,
+    )
+    preferred_evidence_grades: tuple[str, ...] | None = None
+    minimum_preferred_evidence_ratio: float | None = Field(default=None, ge=0, le=1)
+    max_top_source_ratio: float | None = Field(default=None, ge=0, le=1)
+    minimum_quality: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("minimum_quality", "quality_threshold"),
+        ge=0,
+        le=1,
+    )
+    minimum_relevance: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("minimum_relevance", "relevance_threshold"),
+        ge=0,
+        le=1,
+    )
+    candidate_floor: int | None = Field(default=None, ge=1, le=300)
+    candidate_ceiling: int | None = Field(default=None, ge=1, le=300)
+    per_source_review_limit: int | None = Field(default=None, ge=1, le=160)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_weekly_target_aliases(cls, value):
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        minimum = normalized.pop("weekly_target_min", None)
+        maximum = normalized.pop("weekly_target_max", None)
+        if "weekly_target" in normalized or (minimum is None and maximum is None):
+            return normalized
+        if minimum is None or maximum is None:
+            raise ValueError("weekly_target_min and weekly_target_max must be provided together")
+        return {**normalized, "weekly_target": (minimum, maximum)}
+
+    @model_validator(mode="after")
+    def validate_target_range(self):
+        if self.weekly_target is not None and self.weekly_target[0] > self.weekly_target[1]:
+            raise ValueError("weekly target minimum exceeds maximum")
+        if (
+            self.candidate_floor is not None
+            and self.candidate_ceiling is not None
+            and self.candidate_floor > self.candidate_ceiling
+        ):
+            raise ValueError("candidate floor exceeds ceiling")
+        return self
+
+    @model_serializer(mode="plain")
+    def serialize_overrides(self) -> dict:
+        """Persist only explicit overrides so topic defaults remain effective."""
+        return {
+            field_name: getattr(self, field_name)
+            for field_name in self.model_fields_set
+        }
 
 
 class TopicCreate(BaseModel):
@@ -17,7 +92,9 @@ class TopicCreate(BaseModel):
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
     prompt_template_ids: list[str] | None = None
+    collection_policy: CollectionPolicy | None = None
     target_urls: list[str] | None = None
+    target_urls_mode: str = Field(default="discovery", pattern="^(discovery|explicit)$")
     auto_tag_rules: list[dict] | None = None
     schedule_cron: str | None = None
     is_scheduled: bool = False
@@ -50,13 +127,16 @@ class TopicUpdate(BaseModel):
     category_id: str | None = None
     keywords: list[str] | None = None
     synonyms: list[str] | None = None
+    exclude_keywords: list[str] | None = None
     categories: list[str] | None = None
     focus_countries: list[str] | None = None
     focus_languages: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
     prompt_template_ids: list[str] | None = None
+    collection_policy: CollectionPolicy | None = None
     target_urls: list[str] | None = None
+    target_urls_mode: str | None = Field(default=None, pattern="^(discovery|explicit)$")
     auto_tag_rules: list[dict] | None = None
     schedule_cron: str | None = None
     is_scheduled: bool | None = None
@@ -85,13 +165,16 @@ class TopicOut(BaseModel):
     keyword_tags: list[dict] | None = None
     description_prompt: str | None = None
     synonyms: list[str] | None = None
+    exclude_keywords: list[str] | None = None
     categories: list[str] | None = None
     focus_countries: list[str] | None = None
     focus_languages: list[str] | None = None
     source_ids: list[str] | None = None
     collection_model_ids: list[str] | None = None
     prompt_template_ids: list[str] | None = None
+    collection_policy: CollectionPolicy | None = None
     target_urls: list[str] | None = None
+    target_urls_mode: str = "discovery"
     auto_tag_rules: list[dict] | None = None
     collect_window_days: int = 7
     schedule_cron: str | None = None

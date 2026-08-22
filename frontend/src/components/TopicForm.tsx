@@ -81,6 +81,9 @@ export function TopicForm({
   const [targetUrls, setTargetUrls] = useState(
     (topic?.target_urls ?? []).join("\n"),
   );
+  const [targetUrlsMode, setTargetUrlsMode] = useState<"discovery" | "explicit">(
+    topic?.target_urls_mode ?? "discovery",
+  );
   const [cron, setCron] = useState(topic?.schedule_cron ?? "");
   const [autoReport, setAutoReport] = useState(topic?.auto_report ?? false);
   const [autoReportModelId, setAutoReportModelId] = useState(
@@ -144,6 +147,7 @@ export function TopicForm({
               .map((s) => s.trim())
               .filter(Boolean)
           : null,
+        target_urls_mode: targetUrlsMode,
         schedule_cron: cron || null,
         is_scheduled: !!cron,
         auto_report: autoReport,
@@ -475,6 +479,21 @@ export function TopicForm({
               onChange={(e) => setTargetUrls(e.target.value)}
               placeholder={"https://example.com/page\nhttps://example.com/other"}
             />
+          </label>
+          <label>
+            目标 URL 用途
+            <select
+              value={targetUrlsMode}
+              onChange={(event) => setTargetUrlsMode(
+                event.target.value as "discovery" | "explicit",
+              )}
+            >
+              <option value="discovery">检索提示（同时采集来源栏目）</option>
+              <option value="explicit">显式详情页（只采这些正文）</option>
+            </select>
+            <span className="text-muted small">
+              显式模式适合工作簿中的文章线索，系统会读取原文而非保存标题或摘要。
+            </span>
           </label>
           <label className="span-2">
             自动标签 (keyword:tag, 逗号分隔){" "}

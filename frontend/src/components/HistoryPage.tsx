@@ -5,6 +5,7 @@ import type { ActiveRunOut, BatchOut, BatchRunOut, Report } from "../types";
 import { EmptyState } from "./shared/EmptyState";
 import { StatusBadge } from "./shared/StatusBadge";
 import { ConfirmDialog } from "./shared/ConfirmDialog";
+import { CollectionBatchProgress } from "./CollectionBatchProgress";
 import { formatBeijingDateTime, formatBeijingTime } from "../utils/date";
 
 type ViewMode = "cards" | "timeline";
@@ -128,6 +129,7 @@ function TimelineNode({ batch, expanded, onToggle }: { batch: BatchOut; expanded
         </div>
         {expanded && (
           <div className="timeline-card-body">
+            <CollectionBatchProgress summary={batch.batch_summary} />
             {batch.runs.map((r) => (
               <div key={r.id} className="timeline-source-row">
                 <span className="source-name">{r.source_name || r.source_id}</span>
@@ -316,6 +318,11 @@ export function HistoryPage() {
               <Square size={12} /> {stoppingAll ? "停止中..." : "一键停止全部"}
             </button>
           </h3>
+          {activeRuns
+            .filter((run, index, runs) => run.batch_summary && runs.findIndex(
+              (candidate) => candidate.batch_summary?.batch_id === run.batch_summary?.batch_id,
+            ) === index)
+            .map((run) => <CollectionBatchProgress key={run.batch_summary!.batch_id} summary={run.batch_summary} compact />)}
           {activeRuns.map((run) => (
             <div key={run.id} className="active-run-card">
               <div className="run-info">
@@ -405,6 +412,7 @@ export function HistoryPage() {
               </div>
               {expandedBatch === batch.batch_id && (
                 <div className="batch-detail">
+                  <CollectionBatchProgress summary={batch.batch_summary} />
                   {batch.runs.map((r) => (
                     <div key={r.id} className="batch-source-row">
                       <span className="source-name">{r.source_name || r.source_id}</span>

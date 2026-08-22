@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.research_planner import build_research_queries
+from app.topic_research_context import build_topic_research_context
 
 
 def _topic(**overrides):
@@ -111,7 +112,7 @@ def test_exact_backfill_dates_override_rolling_window_hint(monkeypatch):
     llm = AsyncMock(return_value={"content": '{"queries":["official customs update"]}'})
     monkeypatch.setattr("app.research_planner.call_llm", llm)
 
-    asyncio.run(build_research_queries(
+    queries = asyncio.run(build_research_queries(
         _topic(), "", SimpleNamespace(is_active=True, model_name="model"),
         window_days=30, today=date(2026, 8, 4),
         window_start_date=date(2026, 7, 27),
@@ -121,3 +122,54 @@ def test_exact_backfill_dates_override_rolling_window_hint(monkeypatch):
     prompt = llm.await_args.args[1]
     assert "2026-07-27 through 2026-08-02" in prompt
     assert "2026-07-05" not in prompt
+
+
+def test_planner_uses_context_synonyms_exclusions_targets_and_focus_lanes(monkeypatch):
+    llm = AsyncMock(return_value={"content": '{"queries":["official tariff notice"]}'})
+    monkeypatch.setattr("app.research_planner.call_llm", llm)
+    topic = _topic(
+        id="global-trade", name="关税类贸易政策",
+        synonyms=["customs duty"], exclude_keywords=["招聘"],
+        focus_countries=["US"], focus_languages=["en"],
+        target_urls=["https://ustr.gov"], categories=["tariff"],
+        description_prompt="区分提议、公布与生效阶段",
+    )
+    context = build_topic_research_context(topic)
+
+    queries = asyncio.run(build_research_queries(
+        topic, "", SimpleNamespace(is_active=True, model_name="model"),
+        max_queries=8, today=date(2026, 8, 17), research_context=context,
+    ))
+
+    prompt = llm.await_args.args[1]
+    assert "customs duty" in prompt
+    assert "招聘" in prompt
+    assert "US" in prompt and "en" in prompt
+    assert "https://ustr.gov" in prompt
+    assert "区分提议、公布与生效阶段" in prompt
+    assert any('-"招聘"' in query for query in queries)
+    assert any("US" in query and "en" in query for query in queries)
+    assert any("site:ustr.gov" in query for query in queries)
+
+
+def test_second_round_fallback_targets_declared_gaps(monkeypatch):
+    monkeypatch.setattr(
+        "app.research_planner.call_llm",
+        AsyncMock(side_effect=RuntimeError("offline")),
+    )
+    topic = _topic(
+        id="global-trade", name="关税类贸易政策",
+        synonyms=[], exclude_keywords=[], categories=["tariff"],
+        focus_countries=["BR"], focus_languages=["pt"], target_urls=[],
+        description_prompt="区分政策阶段",
+    )
+
+    queries = asyncio.run(build_research_queries(
+        topic, "", None, max_queries=6, today=date(2026, 8, 17),
+        round_number=2,
+        gaps={"countries": ["BR"], "languages": ["pt"], "source_grades": ["A"]},
+    ))
+
+    assert queries
+    assert any("BR" in query or "Brasil" in query for query in queries)
+    assert any("official" in query.lower() or "gov" in query.lower() for query in queries)

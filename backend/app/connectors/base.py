@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -60,9 +60,18 @@ class CollectResult:
     source_id: str
     status: JobStatus
     items: list[FetchItem]
+    discovered_urls: tuple[str, ...] = ()
     items_new: int = 0
     items_updated: int = 0
     items_failed: int = 0
+    items_discovered: int = 0
+    items_date_rejected: int = 0
+    items_topic_rejected: int = 0
+    items_quality_rejected: int = 0
+    items_reused: int = 0
+    items_duplicate: int = 0
+    model_failures: int = 0
+    source_failures: int = 0
     duration_ms: int = 0
     error_log: list[str] | None = None
 
@@ -80,6 +89,8 @@ class BaseCollector(ABC):
         self.config = config
         self.window_start: datetime | None = None
         self.window_end: datetime | None = None
+        self.target_urls: tuple[str, ...] = ()
+        self.target_urls_mode = "discovery"
 
     def set_collection_window(
         self,
@@ -89,6 +100,18 @@ class BaseCollector(ABC):
         """Attach a topic publication window for connectors that support server-side filtering."""
         self.window_start = window_start
         self.window_end = window_end
+
+    def set_target_urls(
+        self,
+        urls: list[str] | tuple[str, ...] | None,
+        *,
+        mode: str = "discovery",
+    ) -> None:
+        """Attach user-configured detail pages without changing source config."""
+        self.target_urls = tuple(dict.fromkeys(
+            str(url).strip() for url in (urls or ()) if str(url).strip()
+        ))
+        self.target_urls_mode = "explicit" if mode == "explicit" else "discovery"
 
     @abstractmethod
     async def fetch(self, keywords: list[str], max_items: int = 100) -> CollectResult:
@@ -128,6 +151,31 @@ class BaseCollector(ABC):
                 status=JobStatus.FAILED, items=[],
                 duration_ms=run.duration_ms, error_log=[str(exc)],
             )
+
+        retrieved_at = datetime.now(timezone.utc).isoformat()
+        result = replace(result, items=[
+            replace(item, raw_metadata={
+                **dict(item.raw_metadata or {}),
+                "primary_source_url": (
+                    dict(item.raw_metadata or {}).get("primary_source_url")
+                    or item.url
+                ),
+                "publisher": (
+                    dict(item.raw_metadata or {}).get("publisher")
+                    or self.config.name
+                ),
+                "collection_entrypoint": (
+                    self.config.api_endpoint or self.config.base_url
+                    or self.config.homepage_url
+                ),
+                "retrieved_at": retrieved_at,
+                "locator": dict(item.raw_metadata or {}).get("locator") or {
+                    "page": None, "section": None,
+                    "paragraph": None, "table_row": None,
+                },
+            })
+            for item in result.items
+        ])
 
         run.items_found = len(result.items)
         run.items_new = result.items_new

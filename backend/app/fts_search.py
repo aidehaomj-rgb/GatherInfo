@@ -135,7 +135,8 @@ def search_items(
             (CollectedItem.content.ilike(f"%{query}%"))
         )
         if topic_id:
-            q = q.filter(CollectedItem.topic_id == topic_id)
+            from app.services.topic_item_query import filter_items_by_topic
+            q = filter_items_by_topic(q, topic_id)
         if source_id:
             q = q.filter(CollectedItem.source_id == source_id)
 
@@ -177,11 +178,21 @@ def search_items(
             (CollectedItem.content.ilike(f"%{query}%"))
         )
         if topic_id:
-            q = q.filter(CollectedItem.topic_id == topic_id)
+            from app.services.topic_item_query import filter_items_by_topic
+            q = filter_items_by_topic(q, topic_id)
         if source_id:
             q = q.filter(CollectedItem.source_id == source_id)
         total = q.count()
         items = q.order_by(CollectedItem.collected_at.desc()).offset(offset).limit(limit).all()
         return [it.id for it in items], total
 
+    if topic_id and item_ids:
+        from app.services.topic_item_query import filter_items_by_topic
+        allowed = {
+            row[0] for row in filter_items_by_topic(
+                db.query(CollectedItem.id), topic_id,
+            ).filter(CollectedItem.id.in_(item_ids)).all()
+        }
+        item_ids = [item_id for item_id in item_ids if item_id in allowed]
+        total = len(item_ids)
     return item_ids, total

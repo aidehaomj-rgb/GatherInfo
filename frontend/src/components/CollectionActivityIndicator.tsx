@@ -8,6 +8,7 @@ import {
 import { fetchActiveRuns, fetchRunFailures } from "../api";
 import type { ActiveRunOut, CollectionProgressEvent, RunFailure } from "../types";
 import { formatBeijingTime } from "../utils/date";
+import { CollectionBatchProgress } from "./CollectionBatchProgress";
 
 const STATUS_WORDS = ["全网搜集", "智能处理", "服务战略"] as const;
 const POLL_INTERVAL_MS = 2000;
@@ -159,6 +160,11 @@ function TaskOverview({ runs, active, onOpenFailures }: {
           <strong>{failed}</strong><span>{failed > 0 ? "失败 · 双击查看" : "失败"}</span>
         </button>
       </div>
+      {runs
+        .filter((run, index, allRuns) => run.batch_summary && allRuns.findIndex(
+          (candidate) => candidate.batch_summary?.batch_id === run.batch_summary?.batch_id,
+        ) === index)
+        .map((run) => <CollectionBatchProgress key={run.batch_summary!.batch_id} summary={run.batch_summary} compact />)}
     </section>
   );
 }

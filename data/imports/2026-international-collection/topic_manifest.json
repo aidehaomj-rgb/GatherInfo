@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "description": "用户提供的2026年国际科采集资讯工作簿导入配置。站点和目标均从工作簿解析，本文件只定义用户主题。",
+  "topics": [
+    {
+      "id": "china-india-trade-intelligence",
+      "name": "中印贸易资讯",
+      "file_patterns": ["中印贸易资讯_*.xlsx"],
+      "sheet_patterns": ["中印贸易资讯*"],
+      "description": "持续采集中印双边贸易、关税与贸易救济、海关措施、边境贸易通道、市场准入、投资限制及供应链变化的可核验原文资讯。",
+      "keywords": [
+        "中印贸易", "China India trade", "印度海关", "India customs",
+        "关税", "反倾销", "贸易救济", "边境贸易", "市场准入", "供应链"
+      ],
+      "synonyms": [
+        "Sino-Indian trade", "India China commerce", "DGTR", "CBIC",
+        "customs notification", "trade remedy", "border trade route"
+      ],
+      "exclude_keywords": ["体育", "影视娱乐", "明星", "旅游攻略"],
+      "categories": ["中印贸易", "关税与贸易救济", "海关监管", "双边经贸"],
+      "focus_countries": ["中国", "印度"],
+      "focus_languages": ["zh", "en", "hi"],
+      "source_country_filters": ["印度"],
+      "collect_window_days": 180,
+      "target_urls_mode": "explicit",
+      "description_prompt": "必须读取并保存稳定原文页面的独立正文，不能把工作簿中的标题或摘要当作正文。区分官方事实、媒体报道和分析判断；明确政策阶段、涉事商品、主管机构、实施日期及对双边进出口和海关监管的意义。",
+      "is_active": true
+    },
+    {
+      "id": "foreign-customs-risk-management",
+      "name": "国外海关风险管理动态",
+      "file_patterns": ["国外海关风险管理动态跟踪_*.xlsx"],
+      "sheet_patterns": ["风险管理文章汇总"],
+      "description": "跟踪境外海关、国际组织、政府及研究机构在风险画像、边境管理、供应链韧性、电子商务监管、合规治理和新技术风险方面的原始动态。",
+      "keywords": [
+        "customs risk management", "border risk", "海关风险管理", "风险画像",
+        "supply chain risk", "trade compliance", "e-commerce risk", "border management"
+      ],
+      "synonyms": [
+        "risk assessment", "risk profiling", "intelligence-led enforcement",
+        "customs control", "supply chain resilience", "cross-border compliance",
+        "gestão de risco aduaneiro", "Receita Federal", "desembaraço aduaneiro",
+        "declaração de bens"
+      ],
+      "exclude_keywords": ["纯消费娱乐", "明星八卦", "体育比分"],
+      "categories": ["海关风险管理", "边境治理", "供应链风险", "监管科技"],
+      "focus_countries": ["全球"],
+      "focus_languages": ["en", "zh", "fr", "es", "de", "ja", "ko", "pt"],
+      "bind_all_directory_sources": true,
+      "collect_window_days": 180,
+      "target_urls_mode": "explicit",
+      "description_prompt": "工作簿文章只是采集线索，必须读取原网页或附件正文并核验发布日期。优先提取风险对象、识别方法、监管措施、实施机构、适用口岸或供应链环节；一般风险研究只有在能说明海关、跨境贸易或供应链参考价值时才可正式入库。",
+      "is_active": true
+    }
+  ]
+}

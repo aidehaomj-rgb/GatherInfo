@@ -70,6 +70,19 @@ def migrate_schema(engine):
                 conn.execute(text(
                     "ALTER TABLE source_configs ADD COLUMN compliance_snapshot JSON"
                 ))
+            if "collection_profile" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN collection_profile JSON"
+                ))
+            if "cooldown_until" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN cooldown_until TIMESTAMP"
+                ))
+            if "consecutive_failures" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE source_configs ADD COLUMN "
+                    "consecutive_failures INTEGER NOT NULL DEFAULT 0"
+                ))
             if "health_status" not in cols:
                 conn.execute(text(
                     "ALTER TABLE source_configs ADD COLUMN health_status "
@@ -155,6 +168,13 @@ def migrate_schema(engine):
                 ))
             if "prompt_template_ids" not in cols:
                 conn.execute(text("ALTER TABLE topics ADD COLUMN prompt_template_ids JSON"))
+            if "collection_policy" not in cols:
+                conn.execute(text("ALTER TABLE topics ADD COLUMN collection_policy JSON"))
+            if "target_urls_mode" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE topics ADD COLUMN target_urls_mode VARCHAR(20) "
+                    "NOT NULL DEFAULT 'discovery'"
+                ))
             conn.commit()
 
     # Older schedule rows predate explicit timezone support.  Keep the existing
@@ -185,6 +205,22 @@ def migrate_schema(engine):
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN duplicate_items JSON"))
             if "source_verdict" not in cols:
                 conn.execute(text("ALTER TABLE collection_runs ADD COLUMN source_verdict JSON"))
+            funnel_columns = {
+                "items_discovered": "INTEGER DEFAULT 0",
+                "items_date_rejected": "INTEGER DEFAULT 0",
+                "items_topic_rejected": "INTEGER DEFAULT 0",
+                "items_quality_rejected": "INTEGER DEFAULT 0",
+                "items_reused": "INTEGER DEFAULT 0",
+                "items_duplicate": "INTEGER DEFAULT 0",
+                "model_failures": "INTEGER DEFAULT 0",
+                "source_failures": "INTEGER DEFAULT 0",
+            }
+            for column_name, column_type in funnel_columns.items():
+                if column_name not in cols:
+                    conn.execute(text(
+                        f"ALTER TABLE collection_runs ADD COLUMN "
+                        f"{column_name} {column_type}"
+                    ))
             conn.commit()
 
     if "collected_items" in existing_tables:
@@ -227,6 +263,19 @@ def migrate_schema(engine):
                 "ALTER TABLE item_topic_memberships "
                 "ADD COLUMN relevance_score FLOAT"
             ))
+        membership_additions = {
+            "relevance_tier": "VARCHAR(30)",
+            "evidence_grade": "VARCHAR(10)",
+            "customs_value": "VARCHAR(40)",
+            "information_type": "VARCHAR(40)",
+            "relevance_metadata": "JSON",
+        }
+        for column_name, column_type in membership_additions.items():
+            if column_name not in membership_columns:
+                conn.execute(text(
+                    f"ALTER TABLE item_topic_memberships ADD COLUMN "
+                    f"{column_name} {column_type}"
+                ))
         if "collected_items" in existing_tables:
             conn.execute(text("""
                 INSERT OR IGNORE INTO item_topic_memberships (
@@ -246,6 +295,37 @@ def migrate_schema(engine):
                 )
                 WHERE relevance_score IS NULL
             """))
+        conn.commit()
+
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS collection_batches (
+                id VARCHAR(80) PRIMARY KEY,
+                topic_id VARCHAR(80) REFERENCES topics(id),
+                status VARCHAR(20) DEFAULT 'pending',
+                current_round INTEGER DEFAULT 0,
+                max_rounds INTEGER DEFAULT 2,
+                target JSON,
+                metrics JSON,
+                acceptance JSON,
+                gaps JSON,
+                source_plan JSON,
+                round_summaries JSON,
+                stop_reason TEXT,
+                created_at TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                updated_at TIMESTAMP
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_collection_batches_topic_id "
+            "ON collection_batches(topic_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_collection_batches_status "
+            "ON collection_batches(status)"
+        ))
         conn.commit()
     if "research_jobs" in existing_tables:
         cols = {c["name"] for c in inspector.get_columns("research_jobs")}

@@ -5,7 +5,9 @@ similar to readability algorithms. Falls back to CSS selectors.
 """
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from bs4 import BeautifulSoup, Tag
@@ -17,6 +19,10 @@ def extract_article_text(html: str, url: str = "") -> dict[str, Any]:
     Returns dict with: title, content, summary, author, published_at, word_count
     """
     soup = BeautifulSoup(html, "lxml")
+
+    # Structured evidence can live in script/meta nodes removed as page noise.
+    published_at = _extract_published_date(soup)
+    author = _extract_author(soup)
 
     # Remove noise elements first
     _remove_noise(soup)
@@ -38,9 +44,6 @@ def extract_article_text(html: str, url: str = "") -> dict[str, Any]:
     content = _clean_extracted_content(content)
 
     # Extract metadata
-    published_at = _extract_published_date(soup)
-    author = _extract_author(soup)
-
     # Generate summary from first meaningful paragraph
     summary = _generate_summary(content)
 
@@ -276,6 +279,15 @@ def _extract_title(soup: BeautifulSoup) -> str:
 
 def _extract_published_date(soup: BeautifulSoup) -> str | None:
     """Extract published date from HTML meta tags."""
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            value = json.loads(script.string or script.get_text(strip=True) or "null")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        date_value = _find_json_ld_date(value)
+        if date_value:
+            return date_value
+
     # Try common meta tags
     meta_selectors = [
         ("meta", {"property": "article:published_time"}),
@@ -297,6 +309,26 @@ def _extract_published_date(soup: BeautifulSoup) -> str | None:
             if date_str:
                 return date_str
 
+    return None
+
+
+def _find_json_ld_date(value: Any, depth: int = 0) -> str | None:
+    if depth > 6:
+        return None
+    if isinstance(value, Mapping):
+        for key in ("datePublished", "dateCreated"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        for nested in value.values():
+            candidate = _find_json_ld_date(nested, depth + 1)
+            if candidate:
+                return candidate
+    if isinstance(value, list):
+        for nested in value:
+            candidate = _find_json_ld_date(nested, depth + 1)
+            if candidate:
+                return candidate
     return None
 
 

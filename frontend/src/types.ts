@@ -62,6 +62,7 @@ export interface Topic {
   collection_model_ids: string[] | null;
   prompt_template_ids: string[] | null;
   target_urls: string[] | null;
+  target_urls_mode: "discovery" | "explicit";
   auto_tag_rules: AutoTagRule[] | null;
   collect_window_days: number;
   schedule_cron: string | null;
@@ -84,6 +85,20 @@ export interface Topic {
   next_run_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  collection_policy?: CollectionPolicy | null;
+}
+
+export interface CollectionPolicy {
+  weekly_target?: [number, number];
+  weekly_target_min?: number;
+  weekly_target_max?: number;
+  max_rounds?: number;
+  min_independent_domains?: number;
+  min_regions?: number;
+  min_primary_source_ratio?: number;
+  max_top_source_ratio?: number;
+  quality_threshold?: number;
+  [key: string]: unknown;
 }
 
 export interface ResearchRound {
@@ -250,6 +265,14 @@ export interface CollectRun {
   items_found: number;
   items_new: number;
   items_failed: number;
+  items_discovered?: number;
+  items_date_rejected?: number;
+  items_topic_rejected?: number;
+  items_quality_rejected?: number;
+  items_reused?: number;
+  items_duplicate?: number;
+  model_failures?: number;
+  source_failures?: number;
   started_at: string | null;
   completed_at: string | null;
   duration_ms: number | null;
@@ -275,6 +298,7 @@ export interface CollectResult {
   total_items: number;
   items_new: number;
   errors: string[] | null;
+  batch_summary?: CollectionBatchSummary | null;
 }
 
 export interface ConnectorInfo {
@@ -664,6 +688,13 @@ export interface BatchRunOut {
   items_found: number;
   items_failed: number;
   items_duplicate: number;
+  items_discovered?: number;
+  items_date_rejected?: number;
+  items_topic_rejected?: number;
+  items_quality_rejected?: number;
+  items_reused?: number;
+  model_failures?: number;
+  source_failures?: number;
   duplicate_items: DuplicateItem[];
   source_verdict: SourceVerdict | null;
   started_at: string | null;
@@ -685,6 +716,43 @@ export interface BatchOut {
   completed_at: string | null;
   source_count: number;
   runs: BatchRunOut[];
+  batch_summary?: CollectionBatchSummary | null;
+}
+
+export type CollectionBatchGap = string | {
+  type?: string;
+  message?: string;
+  label?: string;
+  reason?: string;
+  follow_up?: string;
+  missing?: number;
+  current?: number;
+  target?: number;
+  [key: string]: unknown;
+};
+
+export interface CollectionBatchSummary {
+  batch_id: string;
+  topic_id: string | null;
+  status: string;
+  current_round: number;
+  max_rounds: number;
+  target: Record<string, unknown> | null;
+  metrics: Record<string, unknown> | null;
+  acceptance: {
+    accepted?: boolean;
+    passed?: boolean;
+    checks?: Record<string, boolean>;
+    [key: string]: unknown;
+  } | null;
+  gaps: CollectionBatchGap[];
+  source_plan?: Record<string, unknown> | unknown[] | null;
+  round_summaries?: Array<Record<string, unknown>>;
+  stop_reason: string | null;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface CollectionProgressEvent {
@@ -714,6 +782,7 @@ export interface ActiveRunOut {
   batch_completed_sources: number;
   batch_failed_sources: number;
   batch_active_sources: number;
+  batch_summary?: CollectionBatchSummary | null;
 }
 
 // ── Notifications ───────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.material_set_service import create_material_set, material_set_record
 from app.models import CollectedItem, HandoffRun, MaterialSet, Report, Topic
+from app.services.topic_item_query import filter_items_by_topic
 
 router = APIRouter(prefix="/api/v1/material-sets", tags=["material-sets"])
 
@@ -116,7 +117,7 @@ def _resolve_create_scope(
         source_type = "report" if report else "selection"
         source_ref_id = report.id if report else None
     elif topic_id:
-        query = query.filter(CollectedItem.topic_id == topic_id)
+        query = filter_items_by_topic(query, topic_id)
         if data.collection_run_ids:
             query = query.filter(CollectedItem.run_id.in_(data.collection_run_ids))
             source_type = "batch"

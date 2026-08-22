@@ -35,6 +35,7 @@ from app.material_set_service import (
     resolve_material_items,
 )
 from app.models import CollectedItem, MaterialSet, ModelConfig, Report, Topic
+from app.services.topic_item_query import filter_items_by_topic
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/ymg-deep", tags=["ymg-deep"])
@@ -111,7 +112,7 @@ def _resolve_items(
         return rows
     if not topic_id:
         raise HTTPException(400, "需提供 topic_id 或 item_ids")
-    q = db.query(CollectedItem).filter(CollectedItem.topic_id == topic_id)
+    q = filter_items_by_topic(db.query(CollectedItem), topic_id)
     if collection_run_ids:
         q = q.filter(CollectedItem.run_id.in_(collection_run_ids))
     return q.order_by(CollectedItem.published_at.desc()).limit(limit).all()

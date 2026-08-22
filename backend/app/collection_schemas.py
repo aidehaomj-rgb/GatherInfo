@@ -16,14 +16,14 @@ from app._schemas.source import (
     SourceComplianceReview, SourceCreate, SourceUpdate, SourceOut,
 )
 from app._schemas.topic import (
-    TopicCreate, TopicUpdate, TopicOut,
+    CollectionPolicy, TopicCreate, TopicUpdate, TopicOut,
     ScheduleCreate, ScheduleOut,
     CategoryCreate, CategoryUpdate, CategoryOut,
     PromptTemplateCreate, PromptTemplateUpdate, PromptTemplateOut,
     PromptTemplateImportRequest, PromptTemplateImportItem, PromptTemplateExportOut,
 )
 from app._schemas.collection import (
-    CollectRequest, RunOut, CollectResultOut,
+    CollectRequest, RunOut, CollectResultOut, CollectionBatchSummaryOut,
     ItemOut, ItemListOut, ItemDeleteRequest, ItemTranslateRequest, ItemQualityReviewRequest,
     FeaturedImageResolveRequest,
     InventoryRowOut, ItemInventoryOut,
@@ -54,13 +54,13 @@ __all__ = [
     # source
     "SourceComplianceReview", "SourceCreate", "SourceUpdate", "SourceOut",
     # topic
-    "TopicCreate", "TopicUpdate", "TopicOut",
+    "CollectionPolicy", "TopicCreate", "TopicUpdate", "TopicOut",
     "ScheduleCreate", "ScheduleOut",
     "CategoryCreate", "CategoryUpdate", "CategoryOut",
     "PromptTemplateCreate", "PromptTemplateUpdate", "PromptTemplateOut",
     "PromptTemplateImportRequest", "PromptTemplateImportItem", "PromptTemplateExportOut",
     # collection
-    "CollectRequest", "RunOut", "CollectResultOut",
+    "CollectRequest", "RunOut", "CollectResultOut", "CollectionBatchSummaryOut",
     "ItemOut", "ItemListOut", "ItemDeleteRequest", "ItemTranslateRequest", "ItemQualityReviewRequest",
     "InventoryRowOut", "ItemInventoryOut",
     "BatchRunOut", "BatchOut", "ActiveRunOut", "RunFailureOut",

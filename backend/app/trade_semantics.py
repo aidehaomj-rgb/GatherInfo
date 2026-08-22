@@ -49,10 +49,15 @@ POLICY_INSTRUMENTS: dict[str, tuple[str, ...]] = {
     "sps_tbt": (
         "technical barriers to trade", "技术性贸易壁垒", "sanitary and phytosanitary",
         "卫生与植物卫生", "tbt notification", "sps measures", "技术壁垒",
+        "product standard", "conformity assessment", "quarantine measure",
+        "carbon footprint", "battery regulation", "digital product passport",
+        "产品标准", "合格评定", "检验检疫", "碳足迹", "电池法规", "数字产品护照",
     ),
     "customs_procedure": (
         "customs", "海关", "clearance", "清关", "报关", "customs declaration",
-        "aduana", "zoll", "税関", "세관", "海关程序",
+        "aduana", "zoll", "税関", "세관", "海关程序", "border agency",
+        "seizure", "detained cargo", "smuggling", "forfeiture", "prosecution",
+        "查获", "扣押", "走私", "没收", "起诉", "处罚案件",
     ),
     "rules_of_origin": (
         "rules of origin", "origin certificate", "原产地", "产地证",

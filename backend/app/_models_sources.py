@@ -57,6 +57,12 @@ class SourceConfig(Base):
     compliance_reviewed_by = Column(String(200), nullable=True)
     compliance_snapshot = Column(JSON, nullable=True)
 
+    # Collection-loop diagnostics are maintained by the engine.  They are
+    # deliberately separate from operator-owned compliance attestations.
+    collection_profile = Column(JSON, nullable=True)
+    cooldown_until = Column(DateTime(timezone=True), nullable=True)
+    consecutive_failures = Column(Integer, default=0, server_default="0", nullable=False)
+
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
     items_collected = Column(Integer, default=0)

@@ -247,6 +247,8 @@ export const fetchBatches = (topicId?: string, limit = 20) =>
     ...(topicId ? { topic_id: topicId } : {}),
     limit: String(limit),
   } as Record<string, string>);
+export const fetchBatch = (batchId: string) =>
+  get<import("./types").BatchOut>(`/runs/batches/${encodeURIComponent(batchId)}`);
 export const fetchActiveRuns = () => get<import("./types").ActiveRunOut[]>("/runs/active");
 export const fetchRunFailures = (batchIds: string[]) =>
   get<RunFailure[]>("/runs/failures", { batch_ids: batchIds.join(",") });

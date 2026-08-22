@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from app.connectors.base import BaseCollector, CollectResult, FetchItem
 from app.connectors._helpers import detect_lang, infer_category, result
+from app.safe_fetch import public_async_client
 from app.web_content_extractor import extract_article_text
 
 
@@ -44,10 +45,9 @@ class OfficialEnforcementSearchCollector(BaseCollector):
         keywords: list[str],
         max_items: int = 100,
     ) -> CollectResult:
-        async with httpx.AsyncClient(
+        async with public_async_client(
             timeout=max(20, self.config.timeout_seconds),
             headers=_HEADERS,
-            follow_redirects=True,
         ) as client:
             responses = await asyncio.gather(
                 self._fetch_govuk(client),
@@ -295,7 +295,7 @@ class OfficialEnforcementSearchCollector(BaseCollector):
                 params=params,
                 headers={
                     **_HEADERS,
-                    "User-Agent": "Mozilla/5.0 GatherInfo/0.8",
+                    "User-Agent": "GatherInfo/0.8 (public-source risk monitor)",
                     "Referer": "https://customs.gov.ph/category/media-releases/",
                 },
             )
@@ -439,7 +439,6 @@ class OfficialEnforcementSearchCollector(BaseCollector):
                 "search_authority": authority,
                 "date_verification": date_verification,
                 "allow_undated_results": False,
-                "allow_unfiltered_results": True,
             },
         )
 

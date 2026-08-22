@@ -248,7 +248,6 @@ class TavilyCollector(BaseCollector):
                                     else "tavily_snippet"
                                 ),
                                 "allow_undated_results": False,
-                                "allow_unfiltered_results": True,
                             },
                         ))
 
@@ -368,7 +367,6 @@ class TavilyCollector(BaseCollector):
                                 # Each item originates from a single, already-scoped
                                 # search query; do not require it to contain every
                                 # keyword configured for the topic again.
-                                "allow_unfiltered_results": True,
                                 "allow_undated_results": False,
                             },
                         ))

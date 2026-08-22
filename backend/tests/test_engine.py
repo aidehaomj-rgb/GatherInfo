@@ -19,8 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.engine import (
     CollectionEngine, MAX_CANDIDATES_PER_SOURCE,
     SOURCE_EXECUTION_TIMEOUT_SECONDS, utc_now, _hash,
-    _dedupe_fingerprint,
+    _canonical_source_url, _dedupe_fingerprint,
     _sync_run_result_metrics,
+    _source_provenance,
     _planning_window_dates, _planning_window_days, _topic_collection_window,
 )
 from app.connectors.base import FetchItem, CollectResult
@@ -60,6 +61,12 @@ def test_dedupe_fingerprint_preserves_curated_roundup_section_identity():
     assert first == "url:https://example.test/daily?traderadar_section=abc123"
     assert second == "url:https://example.test/daily?traderadar_section=def456"
     assert first != second
+
+
+def test_canonical_source_url_strips_tracking_but_keeps_evidence_query():
+    assert _canonical_source_url(
+        "HTTPS://Example.COM/news/?id=42&utm_source=x&fbclid=y#fragment"
+    ) == "https://example.com/news?id=42"
 
 
 def test_final_run_metrics_include_window_and_quality_rejections():
@@ -233,6 +240,54 @@ class TestPersistItems:
 
         # Should not add anything because no keyword matches
         mock_db.add.assert_not_called()
+
+    def test_strict_topic_window_does_not_infer_date_from_article_text(self):
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        item = FetchItem(
+            title="Tariff notice dated 2026-08-10",
+            content="Tariff customs implementation details " * 20,
+            url="https://example.gov/notice?utm_source=test",
+        )
+
+        engine._persist_items(
+            [item], "src-1", "run-1", topic_id="global-trade",
+            window_start=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            window_end=datetime(2026, 8, 17, tzinfo=timezone.utc),
+            keywords=["tariff"], strict_date_metadata=True,
+        )
+
+        mock_db.add.assert_not_called()
+
+    def test_source_provenance_preserves_playbook_evidence_locator(self):
+        item = FetchItem(
+            title="Tariff notice",
+            url="https://example.gov/news?id=7&utm_source=noise",
+            published_at="2026-08-10T00:00:00+00:00",
+            raw_metadata={
+                "primary_source_url": "https://agency.gov/original/7",
+                "discovery_url": "https://search.example/result",
+                "publisher": "Agency",
+                "locator": {"section": "press releases", "paragraph": 3},
+                "retrieved_at": "2026-08-17T01:02:03+00:00",
+                "attachment_urls": ["https://agency.gov/file.pdf"],
+            },
+        )
+
+        provenance = _source_provenance(
+            item,
+            datetime(2026, 8, 10, tzinfo=timezone.utc),
+            "hash-value",
+        )
+
+        assert _canonical_source_url(item.url) == "https://example.gov/news?id=7"
+        assert provenance["primary_source_url"] == "https://agency.gov/original/7"
+        assert provenance["discovery_url"] == "https://search.example/result"
+        assert provenance["locator"]["section"] == "press releases"
+        assert provenance["locator"]["paragraph"] == 3
+        assert provenance["retrieved_at"] == "2026-08-17T01:02:03+00:00"
+        assert provenance["attachment_urls"] == ["https://agency.gov/file.pdf"]
 
     def test_keyword_filtering_allows_match(self):
         """Items matching enough keywords should be persisted."""
@@ -560,8 +615,8 @@ class TestWindowFiltering:
 
         mock_db.add.assert_not_called()
 
-    def test_search_result_kept_when_source_allows_topic_review(self):
-        """A search result selected by the topic query may bypass generic matching."""
+    def test_search_connector_cannot_bypass_topic_review(self):
+        """Connector metadata is untrusted until the shared topic review approves it."""
         mock_db = MagicMock()
         engine = CollectionEngine(mock_db)
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -570,6 +625,26 @@ class TestWindowFiltering:
             title="Result selected by search query", content="source excerpt",
             url="https://example.com/article",
             raw_metadata={"engine": "tavily", "allow_unfiltered_results": True},
+        )
+        engine._persist_items(
+            [item], "tavily-search", "run-1", topic_id="t1",
+            keywords=["critical minerals", "export control", "rare earth"],
+        )
+
+        mock_db.add.assert_not_called()
+
+    def test_search_result_kept_after_shared_topic_review_approves_it(self):
+        mock_db = MagicMock()
+        engine = CollectionEngine(mock_db)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        item = FetchItem(
+            title="Semantically reviewed result", content="source excerpt" * 20,
+            url="https://example.com/reviewed",
+            raw_metadata={
+                "engine": "tavily",
+                "quality_review": {"topic_relevance_score": 82},
+            },
         )
         engine._persist_items(
             [item], "tavily-search", "run-1", topic_id="t1",

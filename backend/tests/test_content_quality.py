@@ -10,9 +10,11 @@ from app.connectors.base import FetchItem
 from app.content_quality import (
     _build_intelligence_profile,
     curate_article_candidates,
+    normalize_score,
     review_persisted_items,
     rule_rejection_reason,
 )
+from app.topic_research_context import build_topic_research_context
 
 
 def _llm_approved_source() -> SimpleNamespace:
@@ -34,6 +36,86 @@ def test_rule_gate_rejects_gambling_tag_page() -> None:
     )
 
     assert rule_rejection_reason(item) == "非独立文章或低价值推广/聚合页面"
+
+
+def test_score_normalizer_accepts_legacy_percent_and_unit_interval() -> None:
+    assert normalize_score(88) == 0.88
+    assert normalize_score(0.88) == 0.88
+    assert normalize_score(150) == 1.0
+    assert normalize_score(-2) == 0.0
+
+
+def test_context_exclusion_terms_are_never_bypassed() -> None:
+    context = build_topic_research_context(SimpleNamespace(
+        id="global-trade", name="关税类贸易政策", description="",
+        keywords=["tariff"], synonyms=[], exclude_keywords=["招聘广告"],
+        categories=[], focus_countries=[], focus_languages=[], target_urls=[],
+        description_prompt="", collect_window_days=7,
+    ))
+    item = FetchItem(
+        title="招聘广告：国际贸易经理",
+        url="https://example.com/jobs/1",
+        content="招聘广告 国际贸易经理 负责关税政策研究和进出口业务。" * 12,
+    )
+
+    approved, rejected = asyncio.run(curate_article_candidates([item], None, context))
+
+    assert not approved
+    assert "主题排除词" in rejected[0].reason
+
+
+def test_quality_metadata_has_structured_trade_assessment_and_unit_scores(monkeypatch) -> None:
+    item = FetchItem(
+        title="Authority publishes tariff implementation notice",
+        url="https://example.gov/tariff-notice",
+        content=("The authority published a tariff implementation notice with product scope, "
+                 "effective date, customs declaration requirements and importer obligations. ") * 5,
+        quality_score=85,
+        relevance_score=82,
+    )
+    decision = {
+        "index": 0, "decision": "approve", "confidence": 92,
+        "independence_score": 91, "completeness_score": 90,
+        "customs_value_score": 88, "topic_relevance_score": 86,
+        "publishability": 90,
+        "information_type": "政策监管", "relevance_tier": "global_reference",
+        "evidence_grade": "A", "customs_value": "直接监管价值",
+        "facts": "主管机关公布关税实施通知，并明确商品范围和生效日期。",
+        "analysis_judgement": "该通知可能改变相关进口申报和税款核算要求。",
+        "analysis_basis": "原文列明商品范围、生效日期与申报要求。",
+        "title_zh": "主管机关公布关税实施通知",
+        "summary_zh": "主管机关公布关税实施通知，明确相关商品范围、生效日期、进口商义务以及海关申报要求。",
+        "content_zh": "主管机关公布关税实施通知，列明适用商品范围、生效日期、进口商义务及海关申报要求。原文事实显示新措施将进入实施阶段。分析判断认为，相关企业可能需要调整申报和税款核算流程，但具体影响仍应依据实际商品和申报资料核验。",
+    }
+    monkeypatch.setattr(
+        "app.content_quality.call_llm",
+        AsyncMock(return_value={"content": json.dumps({"reviews": [decision]}, ensure_ascii=False)}),
+    )
+    context = build_topic_research_context(SimpleNamespace(
+        id="global-trade", name="关税类贸易政策", description="",
+        keywords=["tariff"], synonyms=[], exclude_keywords=[], categories=["tariff"],
+        focus_countries=[], focus_languages=[], target_urls=[],
+        description_prompt="", collect_window_days=7,
+    ))
+
+    approved, rejected = asyncio.run(curate_article_candidates(
+        [item], SimpleNamespace(is_active=True, model_name="test"), context,
+    ))
+
+    assert not rejected
+    curated = approved[0]
+    assessment = curated.raw_metadata["trade_assessment"]
+    assert assessment == {
+        "information_type": "政策监管",
+        "relevance_tier": "global_reference",
+        "evidence_grade": "A",
+        "customs_value": "直接监管价值",
+        "facts": "主管机关公布关税实施通知，并明确商品范围和生效日期。",
+        "analysis_judgement": "该通知可能改变相关进口申报和税款核算要求。",
+        "analysis_basis": "原文列明商品范围、生效日期与申报要求。",
+    }
+    assert curated.quality_score == 0.88
+    assert curated.relevance_score == 0.86
 
 
 def test_quality_gate_rejects_uncurated_article_without_active_model() -> None:
@@ -125,6 +207,8 @@ def test_customs_hotspot_uses_conservative_rule_fallback_without_model() -> None
             "and created a black market price differential across the border. "
         ) * 3,
         summary="Fuel supply disruption created a cross-border price gap and customs enforcement concern.",
+        quality_score=85,
+        relevance_score=82,
     )
     context = {"topic_id": "weekly-trade-current-affairs"}
 
@@ -136,6 +220,8 @@ def test_customs_hotspot_uses_conservative_rule_fallback_without_model() -> None
     assert review["method"] == "rule_fallback"
     assert "边境走私" in review["customs_risk"]
     assert review["is_inference"] is True
+    assert approved[0].quality_score == 0.85
+    assert approved[0].relevance_score == 0.82
 def test_customs_hotspot_rejects_foreign_trade_remedy_without_china_customs_action(monkeypatch) -> None:
     item = FetchItem(
         title="US starts solar circumvention inquiry involving Ethiopia and Vietnam",

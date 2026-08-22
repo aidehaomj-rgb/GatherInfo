@@ -13,12 +13,14 @@ from collections import Counter
 from dataclasses import replace
 from datetime import date, datetime, timezone, timedelta
 from uuid import uuid4
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectorRegistry, CollectResult, FetchItem
 from app.collection_policy import evaluate_collection_policy
+from app.collection_strategy import normalize_score
 from app.content_parser import parse_fetch_item
 from app.model_defaults import get_default_model
 from app.tag_taxonomy import (
@@ -30,9 +32,10 @@ from app.tag_taxonomy import (
 )
 from app.trade_semantics import is_semantically_relevant
 from app.models import (
-    CollectionRun, CollectedItem, ItemStatus,
+    CollectionBatch, CollectionRun, CollectedItem, ItemStatus,
     ItemTopicMembership, JobStatus, ModelConfig, SourceConfig, Tag, Topic,
 )
+from app.services.topic_item_query import item_in_topic
 
 logger = logging.getLogger(__name__)
 _translation_lock = asyncio.Lock()
@@ -73,9 +76,214 @@ def is_batch_stopped(batch_id: str | None) -> bool:
     return bool(batch_id and batch_id in _stopped_batches)
 
 
+def _followup_gap_map(context, acceptance: dict) -> dict[str, list[str]]:
+    """Translate measured acceptance gaps into planner search dimensions."""
+    gaps = set(acceptance.get("gaps") or [])
+    return {
+        "countries": list(context.focus_countries) if "regions" in gaps else [],
+        "languages": list(context.focus_languages) if "regions" in gaps else [],
+        "policy_instruments": (
+            list(context.policy_instruments)
+            if gaps & {"items", "structure"} else []
+        ),
+        "products": (
+            list(context.products)
+            if gaps & {"items", "structure", "formal_completeness"} else []
+        ),
+        "source_grades": (
+            list(context.policy.preferred_evidence_grades)
+            if gaps & {
+                "domains", "evidence_ratio", "source_concentration",
+                "structure", "formal_completeness",
+            }
+            else []
+        ),
+    }
+
+
+def _allocate_candidate_quotas(
+    sources: list[SourceConfig], total_budget: int, per_source_limit: int = 160,
+) -> dict[str, int]:
+    """Allocate a bounded round budget with discovery-provider guarantees."""
+    budget = max(1, min(300, int(total_budget)))
+    quotas: dict[str, int] = {}
+    remaining = budget
+    source_cap = max(1, min(160, int(per_source_limit)))
+    for source in sources:
+        channel = _channel_value(source)
+        desired = 20 if channel in SEMANTIC_SEARCH_CHANNELS else (
+            12 if channel in {"rss", "official", "json_api"} else 4
+        )
+        quota = min(desired, source_cap, remaining)
+        if quota <= 0:
+            break
+        quotas[str(source.id)] = quota
+        remaining -= quota
+    discovery_ids = [
+        str(source.id) for source in sources
+        if _channel_value(source) in SEMANTIC_SEARCH_CHANNELS
+        and str(source.id) in quotas
+    ]
+    while remaining and discovery_ids:
+        changed = False
+        for source_id in discovery_ids:
+            if remaining <= 0:
+                break
+            if quotas[source_id] < source_cap:
+                quotas = {**quotas, source_id: quotas[source_id] + 1}
+                remaining -= 1
+                changed = True
+        if not changed:
+            break
+    return quotas
+
+
+def _batch_collection_plan_entries(sources: list[SourceConfig], context) -> list[dict]:
+    """Return playbook-style source plan entries without candidate bodies."""
+    from app.collection_strategy import build_source_profile
+
+    entries: list[dict] = []
+    for source in sources:
+        profile = build_source_profile(source, context)
+        entries.append({
+            "source_id": str(source.id),
+            "domain": profile.get("domain") or "",
+            "display_name": profile.get("display_name") or str(source.id),
+            "source_type": profile.get("source_type"),
+            "preferred_method": profile.get("preferred_method"),
+            "schedule": profile.get("schedule"),
+            "crawl_delay_seconds": profile.get("crawl_delay_seconds"),
+            "verification_status": profile.get("verification_status"),
+            "robots_status": profile.get("robots_status"),
+            "terms_status": profile.get("terms_status"),
+            "llm_ingest_allowed": profile.get("llm_ingest_allowed"),
+            "origin_resolution_required": profile.get("origin_resolution_required"),
+            "automated_fetch_allowed": profile.get("automated_fetch_allowed"),
+            "block_reason": profile.get("block_reason"),
+            "entrypoints": profile.get("entrypoints") or [],
+        })
+    return entries
+
+
+def _round_search_runs(
+    sources: list[SourceConfig],
+    results: list[CollectResult],
+    queries: list[str],
+) -> list[dict]:
+    """Describe search/discovery work as counters, never candidate bodies."""
+    result_by_source = {str(result.source_id): result for result in results}
+    executed_at = utc_now().isoformat()
+    rows: list[dict] = []
+    for source in sources:
+        result = result_by_source.get(str(source.id))
+        is_search = _channel_value(source) in SEMANTIC_SEARCH_CHANNELS
+        rows.append({
+            "source_id": str(source.id),
+            "domain": urlparse(
+                str(source.base_url or source.homepage_url or source.api_endpoint or "")
+            ).netloc.casefold(),
+            "query_count": len(queries) if is_search else 0,
+            "intent": "discovery" if is_search else "source_incremental",
+            "executed_at": executed_at,
+            "results_examined": int(getattr(result, "items_discovered", 0) or 0),
+            "new_candidate_count": int(getattr(result, "items_new", 0) or 0)
+            + int(getattr(result, "items_reused", 0) or 0),
+            "truncated": bool(
+                result and any("候选限额" in value for value in (result.error_log or []))
+            ),
+            "stop_reason": _result_stop_reason(result),
+        })
+    return rows
+
+
+def _coverage_audit(
+    context,
+    sources: list[SourceConfig],
+    results: list[CollectResult],
+) -> list[dict]:
+    """Summarise round coverage by declared source region."""
+    result_by_source = {str(result.source_id): result for result in results}
+    rows: list[dict] = []
+    for source in sources:
+        result = result_by_source.get(str(source.id))
+        fetched = int(getattr(result, "items_new", 0) or 0) + int(
+            getattr(result, "items_reused", 0) or 0
+        )
+        rejected = sum(int(getattr(result, field, 0) or 0) for field in (
+            "items_date_rejected", "items_topic_rejected", "items_quality_rejected",
+        ))
+        blocked = int(getattr(result, "source_failures", 0) or 0)
+        countries = source.country_focus if isinstance(source.country_focus, list) else []
+        rows.append({
+            "region": countries[0] if countries else "",
+            "topic": getattr(context, "name", "") or getattr(context, "topic_id", ""),
+            "languages": list(source.languages) if isinstance(source.languages, list) else [],
+            "source_domains_checked": 1 if result else 0,
+            "fetched_count": fetched,
+            "rejected_count": rejected,
+            "blocked_count": blocked,
+            "gap_reason": _result_stop_reason(result) if not fetched else None,
+        })
+    return rows
+
+
+def _result_stop_reason(result: CollectResult | None) -> str:
+    if result is None:
+        return "not_attempted"
+    if result.status == JobStatus.FAILED:
+        return "; ".join(result.error_log or ["source_failed"])[:500]
+    if int(getattr(result, "items_discovered", 0) or 0) == 0:
+        return "no_new_candidate"
+    return "completed"
+
+
+def _apply_forum_evidence_rules(
+    items: list[FetchItem], topic_id: str | None, source: SourceConfig,
+) -> tuple[list[FetchItem], int]:
+    if topic_id != "foreign-trade-forum-risk-monitoring":
+        return items, 0
+    retained: list[FetchItem] = []
+    rejected = 0
+    source_group = str(source.source_group or "").casefold()
+    for item in items:
+        host = urlparse(item.url or "").netloc.casefold()
+        is_community = (
+            _channel_value(source) in {"social", "deepweb"}
+            or any(marker in f"{source_group} {host}" for marker in (
+                "forum", "community", "reddit", "facebook", "linkedin",
+            ))
+        )
+        if not is_community:
+            retained.append(item)
+            continue
+        metadata = dict(item.raw_metadata or {})
+        profile = metadata.get("intelligence_profile")
+        profile = profile if isinstance(profile, dict) else {}
+        assessment = metadata.get("trade_assessment")
+        assessment = dict(assessment) if isinstance(assessment, dict) else {}
+        has_specifics = any(profile.get(field) for field in (
+            "products", "actors", "routes", "countries",
+        ))
+        if not has_specifics or not str(assessment.get("facts") or "").strip():
+            rejected += 1
+            continue
+        metadata["trade_assessment"] = {
+            **assessment,
+            "evidence_grade": "C",
+            "evidence_notice": "单一来源风险线索，未经独立证实",
+        }
+        retained.append(replace(item, raw_metadata=metadata))
+    return retained, rejected
+
+
 def _topic_collection_keywords(topic: Topic) -> list[str]:
-    values = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
-    keywords = [str(value).strip() for value in values if str(value or "").strip()]
+    raw_keywords = topic.keywords if isinstance(topic.keywords, list) else [topic.keywords]
+    raw_synonyms = topic.synonyms if isinstance(getattr(topic, "synonyms", None), list) else []
+    values = [*raw_keywords, *raw_synonyms]
+    keywords = list(dict.fromkeys(
+        str(value).strip() for value in values if str(value or "").strip()
+    ))
+    keywords = list(_dedupe_casefold(keywords))
     if topic.id != "weekly-enforcement-intelligence":
         return keywords
 
@@ -85,6 +293,14 @@ def _topic_collection_keywords(topic: Topic) -> list[str]:
             keywords.append(keyword)
             seen.add(keyword.casefold())
     return keywords
+
+
+def _dedupe_casefold(values: list[str]) -> tuple[str, ...]:
+    result: tuple[str, ...] = ()
+    for value in values:
+        if not any(existing.casefold() == value.casefold() for existing in result):
+            result = (*result, value)
+    return result
 
 
 def _topic_collection_prompt(db: Session, topic: Topic, override: str | None = None) -> str:
@@ -170,6 +386,10 @@ class CollectionEngine:
         window_start: "datetime | None" = None, window_end: "datetime | None" = None,
         batch_id: str | None = None, model: ModelConfig | None = None,
         semantic_prompt: str | None = None,
+        candidate_limit_override: int | None = None,
+        topic_research_context=None,
+        target_urls: list[str] | tuple[str, ...] | None = None,
+        target_urls_mode: str = "discovery",
     ) -> CollectResult:
         """Collect from one source with given keywords.
 
@@ -250,14 +470,17 @@ class CollectionEngine:
             )
             connector = ConnectorRegistry.create(source)
             connector.set_collection_window(window_start, window_end)
+            connector.set_target_urls(target_urls, mode=target_urls_mode)
         except ValueError as exc:
             run.status = JobStatus.FAILED
             run.error_log = [str(exc)]
             self._record_progress(
                 run, "failed", f"信息源连接失败：{exc}", status="failed",
             )
-            return CollectResult(run_id=run.id, source_id=source.id,
-                                 status=JobStatus.FAILED, items=[], error_log=[str(exc)])
+            failed = CollectResult(run_id=run.id, source_id=source.id,
+                                   status=JobStatus.FAILED, items=[], error_log=[str(exc)])
+            self._mark_source_failure(source, run, failed)
+            return failed
 
         self._record_progress(
             run, "searching", f"正在“{source.name}”检索与主题相关的信息",
@@ -269,7 +492,7 @@ class CollectionEngine:
             else SOURCE_EXECUTION_TIMEOUT_SECONDS
         )
         try:
-            runtime_max_items = (
+            runtime_max_items = candidate_limit_override or (
                 max(source.max_items_per_run or 0, MAX_ENFORCEMENT_SEARCH_RESULTS_PER_SOURCE)
                 if topic_id == "weekly-enforcement-intelligence"
                 and _channel_value(source) in SEMANTIC_SEARCH_CHANNELS
@@ -285,11 +508,14 @@ class CollectionEngine:
             run.completed_at = utc_now()
             run.error_log = [message]
             self._record_progress(run, "failed", message, status="failed")
-            return CollectResult(
+            failed = CollectResult(
                 run_id=run.id, source_id=source.id, status=JobStatus.FAILED,
                 items=[], error_log=[message],
             )
+            self._mark_source_failure(source, run, failed)
+            return failed
         if result.status == JobStatus.FAILED:
+            self._mark_source_failure(source, run, result)
             self._record_progress(
                 run, "failed", f"信息源采集失败：{'；'.join(result.error_log or ['未知错误'])}",
                 status="failed",
@@ -299,6 +525,10 @@ class CollectionEngine:
         run.status = JobStatus.RUNNING
         run.completed_at = None
         run.items_found = len(result.items)
+        result.items_discovered = len(result.items)
+        result.discovered_urls = tuple(dict.fromkeys(
+            item.url.strip() for item in result.items if item.url and item.url.strip()
+        ))
         self._record_progress(
             run, "fetched", f"信息源返回 {len(result.items)} 条候选信息，正在逐条核验",
             detail={"items_found": len(result.items)},
@@ -312,8 +542,12 @@ class CollectionEngine:
             )
         self.db.commit()
 
+        if any(_coerce_datetime(item.published_at) is None for item in result.items):
+            result.items = await _resolve_missing_candidate_dates(result.items)
+
         window_items, window_rejected = _filter_items_by_window(
-            result.items, window_start, window_end
+            result.items, window_start, window_end,
+            allow_text_date_extraction=topic_research_context is None,
         )
         early_duplicates: list[dict] = []
         if topic_id == "weekly-enforcement-intelligence":
@@ -340,10 +574,14 @@ class CollectionEngine:
                 existing_counts=existing_counts,
             )
         else:
-            candidate_limit = _candidate_review_limit(source)
+            candidate_limit = min(
+                _candidate_review_limit(source),
+                candidate_limit_override or MAX_CANDIDATES_PER_SOURCE,
+            )
             retained_items = window_items[:candidate_limit]
         candidate_limited = max(0, len(window_items) - len(retained_items))
         result.items = retained_items
+        result.items_date_rejected += window_rejected
         result.items_failed += window_rejected + candidate_limited
         if window_rejected:
             result.error_log = [
@@ -407,11 +645,46 @@ class CollectionEngine:
             approved_items, rejected_items = await curate_article_candidates(
                 result.items,
                 model,
-                _topic_review_context(
+                topic_research_context or _topic_review_context(
                     topic, semantic_prompt, window_start, window_end,
                 ) if topic else None,
             )
+            model_rejected = [
+                rejection for rejection in rejected_items
+                if "模型审核失败" in rejection.reason
+            ]
+            if model_rejected:
+                result.model_failures += 1
+                alternative = self.db.query(ModelConfig).filter(
+                    ModelConfig.is_active == True,
+                    ModelConfig.id != getattr(model, "id", None),
+                ).first()
+                if alternative:
+                    retry_approved, retry_rejected = await curate_article_candidates(
+                        [rejection.item for rejection in model_rejected],
+                        alternative,
+                        topic_research_context or _topic_review_context(
+                            topic, semantic_prompt, window_start, window_end,
+                        ) if topic else None,
+                    )
+                    approved_items = [*approved_items, *retry_approved]
+                    rejected_items = [
+                        *[rejection for rejection in rejected_items if rejection not in model_rejected],
+                        *retry_rejected,
+                    ]
+                    if any("模型审核失败" in rejection.reason for rejection in retry_rejected):
+                        result.model_failures += 1
         result.items = approved_items
+        result.items, forum_rejected = _apply_forum_evidence_rules(
+            result.items, topic_id, source,
+        )
+        result.items_quality_rejected += forum_rejected
+        topic_rejected = sum(
+            "排除词" in rejection.reason or "主题" in rejection.reason
+            for rejection in rejected_items
+        )
+        result.items_topic_rejected += topic_rejected
+        result.items_quality_rejected += len(rejected_items) - topic_rejected
         result.items_failed += len(rejected_items)
         if rejected_items:
             reasons = list(dict.fromkeys(rejection.reason for rejection in rejected_items))
@@ -470,10 +743,13 @@ class CollectionEngine:
                 ]
             result.items_new = len(result.items)
             run.items_new = result.items_new
-        persisted_count, duplicates = self._persist_items(
-            result.items, source.id, run.id, topic_id, window_start, window_end, keywords
+        persisted_count, duplicates, reused_count = self._persist_items(
+            result.items, source.id, run.id, topic_id, window_start, window_end,
+            keywords, strict_date_metadata=topic_research_context is not None,
         )
         result.items_new = persisted_count
+        result.items_reused += reused_count
+        result.items_duplicate += len(duplicates) + len(early_duplicates)
         _sync_run_result_metrics(run, result, persisted_count)
         all_duplicates = [*early_duplicates, *duplicates]
         duplicate_count = len(all_duplicates)
@@ -505,6 +781,7 @@ class CollectionEngine:
             )
         self.db.commit()
         self._update_source(source, persisted_count)
+        self._mark_source_success(source, result)
         self.db.commit()
         if result.items:
             item_ids = [item.item_id(source.id) for item in result.items]
@@ -543,14 +820,14 @@ class CollectionEngine:
         Returns (retained, duplicates) — 被排除的重复项保留标题/链接，
         供任务查看按“重复/新增”分类展示。
         """
-        existing = self.db.query(
+        from app.services.topic_item_query import filter_items_by_topic
+
+        existing = filter_items_by_topic(self.db.query(
             CollectedItem.id,
             CollectedItem.url,
             CollectedItem.title,
             CollectedItem.content,
-        ).filter(
-            CollectedItem.topic_id == "weekly-enforcement-intelligence",
-        ).all()
+        ), "weekly-enforcement-intelligence").all()
         existing_keys: dict[str, str] = {
             _dedupe_fingerprint(row.url, row.title or "", row.content): row.id
             for row in existing
@@ -577,8 +854,10 @@ class CollectionEngine:
     ) -> Counter[str]:
         from app.enforcement_review import infer_enforcement_jurisdiction
 
-        query = self.db.query(CollectedItem).filter(
-            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+        from app.services.topic_item_query import filter_items_by_topic
+
+        query = filter_items_by_topic(
+            self.db.query(CollectedItem), "weekly-enforcement-intelligence",
         )
         if window_start is not None:
             query = query.filter(CollectedItem.published_at >= window_start)
@@ -638,7 +917,211 @@ class CollectionEngine:
         collection_window_start: datetime | None = None,
         collection_window_end: datetime | None = None,
     ) -> list[CollectResult]:
-        """Collect from all sources relevant to a topic."""
+        """Run the six optimized topics through a bounded two-round loop."""
+        from app.collection_loop import (
+            dynamic_policy, evaluate_topic_batch, structured_gaps,
+        )
+        from app.collection_strategy import (
+            build_source_plan, build_source_profile, candidate_budget,
+        )
+        from app.research_planner import build_followup_queries
+        from app.topic_research_context import (
+            SIX_OPTIMIZED_TOPIC_IDS, build_topic_research_context,
+        )
+
+        topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
+        if not topic:
+            raise ValueError(f"Topic not found: {topic_id}")
+        if topic_id not in SIX_OPTIMIZED_TOPIC_IDS:
+            return await self._collect_topic_round(
+                topic_id, research_prompt, research_model_id, only_source_ids,
+                collection_window_start, collection_window_end,
+            )
+
+        window_start, window_end = _topic_collection_window(
+            topic,
+            requested_start=collection_window_start,
+            requested_end=collection_window_end,
+        )
+        prompt = _topic_collection_prompt(self.db, topic, research_prompt)
+        context = build_topic_research_context(
+            topic,
+            prompt=prompt,
+            window_start=window_start.date(),
+            window_end=window_end.date(),
+        )
+        policy = dynamic_policy(self.db, context)
+        max_rounds = min(2, max(1, context.policy.max_rounds))
+        batch_id = f"batch-{uuid4().hex[:12]}"
+        source_candidates = self._resolve_source_candidates(topic)
+        sources = [
+            source for source in source_candidates
+            if evaluate_collection_policy(source).content_depth == "full"
+            and ConnectorRegistry.get(_channel_value(source)) is not None
+        ]
+        if only_source_ids:
+            allowed = set(only_source_ids)
+            source_candidates = [
+                source for source in source_candidates if source.id in allowed
+            ]
+            sources = [source for source in sources if source.id in allowed]
+        if not sources:
+            raise ValueError(
+                "该主题没有通过来源核验、robots/条款与 LLM 使用许可的正式信息源；"
+                "请先查看 /sources/collection-readiness。"
+            )
+        collection_plan = _batch_collection_plan_entries(source_candidates, context)
+        for source in sources:
+            source.collection_profile = build_source_profile(source, context)
+        self.db.commit()
+        rotation_per_week = min(300, max(24, math.ceil(len(sources) / 4)))
+        plan = build_source_plan(sources, rotation_limit=rotation_per_week * 2)
+        first_rotation = plan.rotation[:rotation_per_week]
+        second_rotation = (
+            plan.rotation[rotation_per_week:rotation_per_week * 2]
+            or first_rotation
+        )
+        round_one_ids = tuple(str(source.id) for source in (*plan.core, *plan.discovery, *first_rotation))
+        round_two_ids = tuple(str(source.id) for source in (*plan.core, *plan.discovery, *second_rotation))
+        batch = CollectionBatch(
+            id=batch_id,
+            topic_id=topic_id,
+            status="running",
+            current_round=0,
+            max_rounds=max_rounds,
+            target=policy,
+            gaps=[],
+            source_plan={
+                "core": [str(source.id) for source in plan.core],
+                "discovery": [str(source.id) for source in plan.discovery],
+                "round_1_rotation": [str(source.id) for source in first_rotation],
+                "round_2_rotation": [str(source.id) for source in second_rotation],
+                "source_pool_size": len(source_candidates),
+                "eligible_source_count": len(sources),
+                "blocked_source_count": max(0, len(source_candidates) - len(sources)),
+                "collection_plan": collection_plan,
+            },
+            round_summaries=[],
+            started_at=utc_now(),
+        )
+        self.db.add(batch)
+        self.db.commit()
+
+        combined: list[CollectResult] = []
+        seen_discovered_urls: set[str] = set()
+        acceptance: dict = evaluate_topic_batch(self.db, context, policy)
+        try:
+            for round_number in range(1, max_rounds + 1):
+                batch.current_round = round_number
+                self.db.commit()
+                ids = round_one_ids if round_number == 1 else round_two_ids
+                gap_map = _followup_gap_map(context, acceptance)
+                queries = (
+                    None if round_number == 1
+                    else build_followup_queries(context, gap_map, max_queries=20)
+                )
+                round_budget = candidate_budget(
+                    int(policy["target_items"]) - int(acceptance["metrics"]["items"]),
+                    context.policy.candidate_floor,
+                    context.policy.candidate_ceiling,
+                )
+                results = await self._collect_topic_round(
+                    topic_id,
+                    research_prompt,
+                    research_model_id,
+                    list(ids),
+                    window_start,
+                    window_end,
+                    batch_id=batch_id,
+                    research_context=context,
+                    round_number=round_number,
+                    gaps=gap_map,
+                    planned_queries=queries,
+                    candidate_budget_limit=round_budget,
+                    per_source_review_limit=context.policy.per_source_review_limit,
+                )
+                combined.extend(results)
+                acceptance = evaluate_topic_batch(self.db, context, policy)
+                discovered_urls = {
+                    url
+                    for result in results
+                    for url in (
+                        result.discovered_urls
+                        or tuple(item.url for item in result.items if item.url)
+                    )
+                    if url
+                }
+                new_discovered_urls = discovered_urls - seen_discovered_urls
+                seen_discovered_urls = seen_discovered_urls | discovered_urls
+                round_summary = {
+                    "round": round_number,
+                    "candidate_budget": round_budget,
+                    "sources_attempted": len(results),
+                    "items_new": sum(result.items_new for result in results),
+                    "items_reused": sum(getattr(result, "items_reused", 0) for result in results),
+                    "new_urls_seen": len(new_discovered_urls),
+                    "search_runs": _round_search_runs(
+                        [source for source in sources if str(source.id) in ids],
+                        results,
+                        queries or [],
+                    ),
+                    "coverage_audit": _coverage_audit(
+                        context,
+                        [source for source in sources if str(source.id) in ids],
+                        results,
+                    ),
+                    "acceptance": acceptance,
+                }
+                batch.round_summaries = [*(batch.round_summaries or []), round_summary]
+                funnel_fields = (
+                    "items_discovered", "items_date_rejected", "items_topic_rejected",
+                    "items_quality_rejected", "items_new", "items_reused",
+                    "items_duplicate", "model_failures", "source_failures",
+                )
+                funnel = {
+                    field: sum(int(getattr(result, field, 0) or 0) for result in combined)
+                    for field in funnel_fields
+                }
+                batch.metrics = {**dict(acceptance.get("metrics") or {}), **funnel}
+                batch.acceptance = acceptance
+                batch.gaps = structured_gaps(acceptance)
+                self.db.commit()
+                if acceptance.get("passed"):
+                    batch.stop_reason = "dynamic_target_met"
+                    break
+                if not new_discovered_urls:
+                    batch.stop_reason = "no_new_urls"
+                    break
+            batch.status = "completed"
+            batch.stop_reason = batch.stop_reason or "max_rounds_reached"
+        except Exception as exc:
+            batch.status = "failed"
+            batch.stop_reason = f"collection_error:{type(exc).__name__}"
+            raise
+        finally:
+            batch.completed_at = utc_now()
+            self.db.commit()
+            _stopped_batches.discard(batch_id)
+        return combined
+
+    async def _collect_topic_round(
+        self,
+        topic_id: str,
+        research_prompt: str | None = None,
+        research_model_id: str | None = None,
+        only_source_ids: list[str] | None = None,
+        collection_window_start: datetime | None = None,
+        collection_window_end: datetime | None = None,
+        *,
+        batch_id: str | None = None,
+        research_context=None,
+        round_number: int = 1,
+        gaps: dict[str, list[str]] | None = None,
+        planned_queries: list[str] | None = None,
+        candidate_budget_limit: int = 120,
+        per_source_review_limit: int = 160,
+    ) -> list[CollectResult]:
+        """Execute one network round and persist only approved formal items."""
         topic = self.db.query(Topic).filter(Topic.id == topic_id).first()
         if not topic:
             raise ValueError(f"Topic not found: {topic_id}")
@@ -655,6 +1138,11 @@ class CollectionEngine:
                 "请先查看 /sources/collection-readiness。"
             )
         source_ids = [s.id for s in sources]
+        source_quotas = _allocate_candidate_quotas(
+            sources, candidate_budget_limit, per_source_review_limit,
+        )
+        sources = [source for source in sources if str(source.id) in source_quotas]
+        source_ids = [s.id for s in sources]
         keywords = _topic_collection_keywords(topic)
 
         window_days = getattr(topic, "collect_window_days", None) or 0
@@ -664,9 +1152,8 @@ class CollectionEngine:
             requested_end=collection_window_end,
         )
 
-        # Generate a shared batch_id for all runs in this topic collection
-        from uuid import uuid4
-        batch_id = f"batch-{uuid4().hex[:12]}"
+        # All source runs in a bounded loop share one batch id.
+        batch_id = batch_id or f"batch-{uuid4().hex[:12]}"
 
         # Topic-selected models are existing model configs, so no provider
         # credentials need to be copied into a topic. Rotate them by source so
@@ -685,7 +1172,7 @@ class CollectionEngine:
                 ModelConfig.id == configured_research_model_id, ModelConfig.is_active == True
             ).first() or research_model
 
-        semantic_queries: list[str] = []
+        semantic_queries: list[str] = list(planned_queries or [])
         effective_research_prompt = _topic_collection_prompt(self.db, topic, research_prompt)
         planning_window_days = _planning_window_days(
             window_start, window_end, fallback_days=window_days or 7,
@@ -693,7 +1180,7 @@ class CollectionEngine:
         planning_start_date, planning_end_date = _planning_window_dates(
             window_start, window_end,
         )
-        if any(_channel_value(source) in SEMANTIC_SEARCH_CHANNELS for source in sources):
+        if not semantic_queries and any(_channel_value(source) in SEMANTIC_SEARCH_CHANNELS for source in sources):
             try:
                 from app.research_planner import build_research_queries
                 semantic_queries = await build_research_queries(
@@ -704,6 +1191,9 @@ class CollectionEngine:
                     window_days=planning_window_days,
                     window_start_date=planning_start_date,
                     window_end_date=planning_end_date,
+                    research_context=research_context,
+                    round_number=round_number,
+                    gaps=gaps,
                 )
                 if semantic_queries:
                     logger.info(
@@ -739,6 +1229,10 @@ class CollectionEngine:
                     batch_id,
                     collection_models[index % len(collection_models)] if collection_models else default_model,
                     effective_research_prompt,
+                    source_quotas.get(str(source.id)),
+                    research_context,
+                    target_urls=topic.target_urls,
+                    target_urls_mode=research_context.target_urls_mode,
                 )
 
         tasks = [collect_one(index, source) for index, source in enumerate(sources)]
@@ -801,7 +1295,6 @@ class CollectionEngine:
             )
         except Exception as exc:
             logger.warning("Notification after collection failed: %s", exc)
-        _stopped_batches.discard(batch_id)
         return final
 
     # ── Scheduled collection ────────────────────────────────────────────
@@ -859,7 +1352,8 @@ class CollectionEngine:
         return False
 
     def _apply_auto_tags(self, topic_id: str, rules: list[dict]) -> int:
-        items = self.db.query(CollectedItem).filter(CollectedItem.topic_id == topic_id).all()
+        from app.services.topic_item_query import filter_items_by_topic
+        items = filter_items_by_topic(self.db.query(CollectedItem), topic_id).all()
         applied = 0
         for item in items:
             text = f"{item.title} {item.content or ''}".lower()
@@ -884,9 +1378,8 @@ class CollectionEngine:
         return applied
 
     def _apply_suggested_tags(self, topic_id: str):
-        items = self.db.query(CollectedItem).filter(
-            CollectedItem.topic_id == topic_id,
-        ).all()
+        from app.services.topic_item_query import filter_items_by_topic
+        items = filter_items_by_topic(self.db.query(CollectedItem), topic_id).all()
         for item in items:
             metadata = item.raw_metadata or {}
             # Ingest suggested_tags from Tavily's connector
@@ -952,7 +1445,8 @@ class CollectionEngine:
 
     # ── Internals ───────────────────────────────────────────────────────
 
-    def _resolve_sources(self, topic: Topic) -> list[SourceConfig]:
+    def _resolve_source_candidates(self, topic: Topic) -> list[SourceConfig]:
+        """Resolve configured topic sources plus semantic discovery sources."""
         if topic.source_ids:
             selected = self.db.query(SourceConfig).filter(
                 SourceConfig.id.in_(topic.source_ids),
@@ -964,11 +1458,6 @@ class CollectionEngine:
                 SourceConfig.is_active == True,
                 SourceConfig.is_configured == True,
             ).all()
-        selected = [
-            source for source in selected
-            if evaluate_collection_policy(source).content_depth == "full"
-            and ConnectorRegistry.get(_channel_value(source)) is not None
-        ]
         if not topic.collection_model_ids or not topic.source_ids:
             return selected
 
@@ -984,14 +1473,16 @@ class CollectionEngine:
         additions = ai_research_sources or [
             source for source in broad_sources if _channel_value(source) == "api_search"
         ]
-        additions = [
-            source for source in additions
-            if evaluate_collection_policy(source).content_depth == "full"
-            and ConnectorRegistry.get(_channel_value(source)) is not None
-        ]
         return [
             *selected,
             *(source for source in additions if source.id not in selected_ids),
+        ]
+
+    def _resolve_sources(self, topic: Topic) -> list[SourceConfig]:
+        return [
+            source for source in self._resolve_source_candidates(topic)
+            if evaluate_collection_policy(source).content_depth == "full"
+            and ConnectorRegistry.get(_channel_value(source)) is not None
         ]
 
     async def _translate_fetch_items(self, items: list[FetchItem], model: ModelConfig) -> list[FetchItem] | None:
@@ -1003,8 +1494,10 @@ class CollectionEngine:
     def _persist_items(self, items: list[FetchItem], source_id: str, run_id: str,
                        topic_id: str | None = None, window_start: "datetime | None" = None,
                        window_end: "datetime | None" = None,
-                       keywords: list[str] | None = None):
+                       keywords: list[str] | None = None,
+                       strict_date_metadata: bool = False):
         persisted_count = 0
+        reused_count = 0
         duplicates: list[dict] = []
         self._source_cache = getattr(self, "_source_cache", {})
         _source_obj = self._source_cache.get(source_id)
@@ -1016,8 +1509,9 @@ class CollectionEngine:
         _source_channel = getattr(_source_obj, "channel", None) if _source_obj else None
         _curated_channel = _source_channel in ("rss", "official", "json_api")
         for fi in items:
+            fi = replace(fi, url=_canonical_source_url(fi.url))
             parsed = parse_fetch_item(fi)
-            if not parsed.is_meaningful:
+            if not parsed.is_meaningful or not (fi.url or "").strip():
                 continue
 
             pub = _coerce_datetime(fi.published_at)
@@ -1025,16 +1519,9 @@ class CollectionEngine:
             # Strictly enforce the configured time window. Search connectors may
             # explicitly retain undated results for later source verification.
             if window_start is not None:
-                if pub is None:
+                if pub is None and not strict_date_metadata:
                     pub = _extract_date_from_text(f"{fi.title} {fi.content or ''} {fi.summary or ''}")
-                # For RSS/official sources, allow undated items (the publisher
-                # curates content topically; missing dates shouldn't discard
-                # valid trade news) and extend the window to 30 days so weekly
-                # collection captures items published slightly before the
-                # configured window.
-                if pub is None and _curated_channel:
-                    pass  # keep undated items from curated feeds
-                elif pub is None or (
+                if pub is None or (
                     pub is not None and _is_out_of_range(pub, window_start, window_end)
                 ):
                     continue
@@ -1042,10 +1529,10 @@ class CollectionEngine:
             # Keyword relevance filtering: skip items that don't match the keyword combination
             # Keywords work together as a topic definition, not individually.
             required_matches = 1 if _curated_channel else None
-            allow_unfiltered = bool(
-                isinstance(fi.raw_metadata, dict)
-                and fi.raw_metadata.get("allow_unfiltered_results")
-            )
+            # Connector output is untrusted external data.  Only the shared
+            # topic-quality gate may authorize semantic admission; a connector
+            # cannot bypass topic rules by setting its own metadata flag.
+            allow_unfiltered = False
             if isinstance(fi.raw_metadata, dict):
                 review = fi.raw_metadata.get("quality_review")
                 allow_unfiltered = allow_unfiltered or bool(
@@ -1075,6 +1562,10 @@ class CollectionEngine:
                         continue
             item_id = fi.item_id(source_id)
             content_hash = _hash(_dedupe_fingerprint(fi.url, fi.title, parsed.content))
+            provenance = _source_provenance(fi, pub, content_hash)
+            parsed_metadata = _merge_json(
+                parsed.metadata, {"source_provenance": provenance},
+            )
             try:
                 existing = self.db.query(CollectedItem).filter(CollectedItem.id == item_id).first()
                 matched_by = "url" if existing else None
@@ -1084,6 +1575,7 @@ class CollectionEngine:
                     ).first()
                     if existing:
                         matched_by = "content_hash"
+                was_existing = existing is not None
                 if existing:
                     # 与本地库比对命中已有条目 → 记录为“重复”，保留标题供任务查看展示
                     duplicates.append({
@@ -1103,26 +1595,26 @@ class CollectionEngine:
                     if fi.category and fi.category != existing.category:
                         existing.category = fi.category
                     existing.quality_score = max(
-                        float(existing.quality_score or 0),
-                        float(fi.quality_score or 0),
+                        normalize_score(existing.quality_score),
+                        normalize_score(fi.quality_score),
                     )
                     existing.relevance_score = max(
-                        float(existing.relevance_score or 0),
-                        float(fi.relevance_score or 0),
+                        normalize_score(existing.relevance_score),
+                        normalize_score(fi.relevance_score),
                     )
                     if pub and not existing.published_at:
                         existing.published_at = pub
-                    elif not existing.published_at and fi.url:
+                    elif not strict_date_metadata and not existing.published_at and fi.url:
                         _url_date = _extract_date_from_text(fi.url)
                         if _url_date:
                             existing.published_at = _url_date
                     if topic_id and not existing.topic_id:
                         existing.topic_id = topic_id
                     existing.entities = _merge_json(existing.entities, parsed.entities)
-                    existing.raw_metadata = _merge_json(existing.raw_metadata, parsed.metadata)
+                    existing.raw_metadata = _merge_json(existing.raw_metadata, parsed_metadata)
                     existing.updated_at = utc_now()
                 else:
-                    if pub is None and fi.url:
+                    if pub is None and not strict_date_metadata and fi.url:
                         pub = _extract_date_from_text(fi.url)
                     existing = CollectedItem(
                         id=item_id, source_id=source_id, run_id=run_id,
@@ -1132,24 +1624,32 @@ class CollectionEngine:
                         summary=parsed.summary, url=fi.url,
                         language=fi.language, category=fi.category,
                         entities=parsed.entities,
-                        quality_score=fi.quality_score,
-                        relevance_score=fi.relevance_score,
+                        quality_score=normalize_score(fi.quality_score),
+                        relevance_score=normalize_score(fi.relevance_score),
                         published_at=pub,
                         collected_at=utc_now(),
-                        raw_metadata=parsed.metadata,
+                        raw_metadata=parsed_metadata,
                         status=ItemStatus.RAW,
                     )
                     self.db.add(existing)
                     persisted_count += 1
                 self.db.flush()
                 if topic_id:
-                    self._ensure_topic_membership(
-                        existing.id, topic_id, run_id, fi.relevance_score,
+                    metadata = fi.raw_metadata if isinstance(fi.raw_metadata, dict) else {}
+                    assessment = (
+                        metadata.get("trade_assessment")
+                        or metadata.get("quality_review")
+                        or metadata.get("enforcement_review")
                     )
+                    membership_created = self._ensure_topic_membership(
+                        existing.id, topic_id, run_id, fi.relevance_score,
+                        assessment if isinstance(assessment, dict) else None,
+                    )
+                    reused_count += int(was_existing and membership_created)
             except Exception:
                 self.db.rollback()
         self.db.commit()
-        return persisted_count, duplicates
+        return persisted_count, duplicates, reused_count
 
     def _select_enforcement_portfolio(
         self,
@@ -1167,7 +1667,7 @@ class CollectionEngine:
         )
 
         query = self.db.query(CollectedItem).filter(
-            CollectedItem.topic_id == "weekly-enforcement-intelligence",
+            item_in_topic("weekly-enforcement-intelligence"),
         )
         if window_start is not None:
             query = query.filter(CollectedItem.published_at >= window_start)
@@ -1334,51 +1834,105 @@ class CollectionEngine:
         source.last_sync_at = utc_now()
         source.items_collected += items_found
 
+    def _mark_source_failure(
+        self, source: SourceConfig, run: CollectionRun, result: CollectResult,
+    ) -> None:
+        """Apply an ephemeral cooldown without changing operator activation."""
+        failures = int(source.consecutive_failures or 0) + 1
+        source.consecutive_failures = failures
+        result.source_failures = int(result.source_failures or 0) + 1
+        run.source_failures = result.source_failures
+        if failures >= 3:
+            hours = min(72, 6 * (2 ** min(3, failures - 3)))
+            source.cooldown_until = utc_now() + timedelta(hours=hours)
+        profile = dict(source.collection_profile or {})
+        source.collection_profile = {
+            **profile,
+            "last_failure_at": utc_now().isoformat(),
+            "consecutive_failures": failures,
+            "runtime_state": "paused_drift_review" if failures >= 3 else "degraded",
+            "stop_reason": (
+                "连续3次失败，进入页面漂移人工复核"
+                if failures >= 3 else "来源执行失败"
+            ),
+        }
+        self.db.commit()
+
+    def _mark_source_success(
+        self, source: SourceConfig, result: CollectResult,
+    ) -> None:
+        profile = dict(source.collection_profile or {})
+        discovered = int(result.items_discovered or len(result.items))
+        source.consecutive_failures = 0
+        source.cooldown_until = None
+        source.collection_profile = {
+            **profile,
+            "last_success_at": utc_now().isoformat(),
+            "last_discovered": discovered,
+            "last_items_new": int(result.items_new or 0),
+            "last_items_reused": int(result.items_reused or 0),
+            "runtime_state": "ready",
+            "stop_reason": None,
+            "date_completeness": round(
+                max(0, discovered - int(result.items_date_rejected or 0)) / discovered, 4
+            ) if discovered else 0.0,
+        }
+
     def _ensure_topic_membership(
         self,
         item_id: str,
         topic_id: str,
         run_id: str | None,
         relevance_score: float | None,
-    ) -> None:
+        assessment: dict | None = None,
+    ) -> bool:
         bounded_relevance = _bounded_relevance(relevance_score)
         membership = self.db.query(ItemTopicMembership).filter(
             ItemTopicMembership.item_id == item_id,
             ItemTopicMembership.topic_id == topic_id,
         ).first()
         if membership:
+            details = dict(assessment or {})
             membership.last_run_id = run_id or membership.last_run_id
             if bounded_relevance is not None:
                 membership.relevance_score = bounded_relevance
             membership.last_seen_at = utc_now()
-            return
+            membership.relevance_tier = details.get("relevance_tier") or membership.relevance_tier
+            membership.evidence_grade = details.get("evidence_grade") or membership.evidence_grade
+            membership.customs_value = details.get("customs_value") or membership.customs_value
+            membership.information_type = details.get("information_type") or membership.information_type
+            membership.relevance_metadata = {
+                **dict(membership.relevance_metadata or {}), **details,
+            } or None
+            return False
+        details = dict(assessment or {})
         self.db.add(ItemTopicMembership(
             item_id=item_id,
             topic_id=topic_id,
             first_run_id=run_id,
             last_run_id=run_id,
             relevance_score=bounded_relevance,
+            relevance_tier=details.get("relevance_tier"),
+            evidence_grade=details.get("evidence_grade"),
+            customs_value=details.get("customs_value"),
+            information_type=details.get("information_type"),
+            relevance_metadata=details or None,
             first_seen_at=utc_now(),
             last_seen_at=utc_now(),
         ))
+        return True
 
 
 async def _hydrate_enforcement_candidates(
     items: list[FetchItem],
 ) -> list[FetchItem]:
     """Fetch shortlisted source pages concurrently; search snippets remain fallback evidence."""
-    import httpx
-
+    from app.safe_fetch import public_async_client
     from app.web_content_extractor import extract_article_text
 
     semaphore = asyncio.Semaphore(6)
-    timeout = httpx.Timeout(12.0, connect=8.0)
-    limits = httpx.Limits(max_connections=8, max_keepalive_connections=4)
-
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        limits=limits,
-        follow_redirects=True,
+    async with public_async_client(
+        timeout=12,
         headers={"User-Agent": "GatherInfo/0.8 (public-source verification)"},
     ) as client:
         async def hydrate(item: FetchItem) -> FetchItem:
@@ -1414,6 +1968,40 @@ async def _hydrate_enforcement_candidates(
         return list(await asyncio.gather(*(hydrate(item) for item in items)))
 
 
+async def _resolve_missing_candidate_dates(
+    items: list[FetchItem],
+) -> list[FetchItem]:
+    """Safely read source metadata before rejecting an otherwise valid lead."""
+    from app.connectors.tavily_search import _resolve_page_metadata
+    from app.safe_fetch import public_async_client
+
+    semaphore = asyncio.Semaphore(6)
+    async with public_async_client(timeout=15) as client:
+        async def resolve(item: FetchItem) -> FetchItem:
+            if _coerce_datetime(item.published_at) is not None or not item.url:
+                return item
+            async with semaphore:
+                metadata = await _resolve_page_metadata(client, item.url)
+            published = metadata.get("published_at") if metadata else None
+            if not published:
+                return item
+            raw = dict(item.raw_metadata or {})
+            raw = {
+                **raw,
+                "date_verification": "source_page_metadata",
+                "updated_at": metadata.get("updated_at") or raw.get("updated_at"),
+            }
+            content = item.content
+            resolved_content = str(metadata.get("content") or "").strip()
+            if len((content or "").strip()) < 180 and len(resolved_content) >= 180:
+                content = resolved_content[:12000]
+            return replace(
+                item, published_at=published, content=content, raw_metadata=raw,
+            )
+
+        return list(await asyncio.gather(*(resolve(item) for item in items)))
+
+
 def _hash(s: str) -> str:
     import hashlib
     return hashlib.sha256(s.encode()).hexdigest()
@@ -1421,7 +2009,7 @@ def _hash(s: str) -> str:
 
 def _bounded_relevance(value: float | None) -> float | None:
     try:
-        return max(0.0, min(1.0, float(value))) if value is not None else None
+        return normalize_score(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 
@@ -1434,6 +2022,14 @@ def _sync_run_result_metrics(
     """Persist the final funnel counters after window and LLM review."""
     run.items_new = persisted_count
     run.items_failed = int(result.items_failed or 0)
+    run.items_discovered = int(result.items_discovered or 0)
+    run.items_date_rejected = int(result.items_date_rejected or 0)
+    run.items_topic_rejected = int(result.items_topic_rejected or 0)
+    run.items_quality_rejected = int(result.items_quality_rejected or 0)
+    run.items_reused = int(result.items_reused or 0)
+    run.items_duplicate = int(result.items_duplicate or 0)
+    run.model_failures = int(result.model_failures or 0)
+    run.source_failures = int(result.source_failures or 0)
     run.error_log = list(result.error_log) if result.error_log else None
 
 
@@ -1449,23 +2045,58 @@ def _candidate_review_limit(source: SourceConfig) -> int:
 def _dedupe_fingerprint(url: str | None, title: str, content: str | None) -> str:
     """Return a stable cross-source identity without retaining tracking parameters."""
     if url:
-        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
-        parsed = urlsplit(url.strip())
-        section_query = urlencode([
-            (key, value)
-            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-            if key == "traderadar_section"
-            and re.fullmatch(r"[0-9a-f]{6,64}", value.casefold())
-        ])
-        normalized_url = urlunsplit((
-            parsed.scheme.lower(), parsed.netloc.lower(),
-            parsed.path.rstrip("/"), section_query, "",
-        ))
+        normalized_url = _canonical_source_url(url)
         if normalized_url:
             return f"url:{normalized_url}"
     normalized_text = re.sub(r"\s+", " ", f"{title} {content or ''}").strip().lower()
     return f"text:{normalized_text}"
+
+
+def _canonical_source_url(url: str | None) -> str | None:
+    """Strip tracking parameters while preserving evidence-bearing query keys."""
+    if not url:
+        return None
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parsed = urlsplit(url.strip())
+    tracking = {"fbclid", "gclid", "spm", "ref", "source"}
+    query = urlencode([
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in tracking
+    ])
+    return urlunsplit((
+        parsed.scheme.casefold(), parsed.netloc.casefold(),
+        parsed.path.rstrip("/") or "/", query, "",
+    ))
+
+
+def _source_provenance(
+    item: FetchItem, published_at: datetime | None, content_hash: str,
+) -> dict:
+    metadata = item.raw_metadata if isinstance(item.raw_metadata, dict) else {}
+    locator = metadata.get("locator")
+    locator = dict(locator) if isinstance(locator, dict) else {}
+    return {
+        "url": item.url,
+        "primary_source_url": metadata.get("primary_source_url") or item.url,
+        "discovery_url": metadata.get("discovery_url"),
+        "domain": urlparse(item.url or "").netloc.casefold(),
+        "publisher": metadata.get("publisher"),
+        "locator": {
+            "page": locator.get("page"),
+            "section": locator.get("section") or metadata.get("section"),
+            "paragraph": locator.get("paragraph"),
+            "table_row": locator.get("table_row"),
+        },
+        "published_at": published_at.isoformat() if published_at else None,
+        "updated_at": metadata.get("updated_at"),
+        "content_hash": content_hash,
+        "retrieved_at": metadata.get("retrieved_at") or utc_now().isoformat(),
+        "collection_entrypoint": metadata.get("collection_entrypoint"),
+        "attachment_urls": list(metadata.get("attachment_urls") or []),
+    }
 
 
 def _web_translation_model() -> ModelConfig:
@@ -1572,6 +2203,8 @@ def _filter_items_by_window(
     items: list[FetchItem],
     window_start: datetime | None,
     window_end: datetime | None,
+    *,
+    allow_text_date_extraction: bool = True,
 ) -> tuple[list[FetchItem], int]:
     if window_start is None:
         return list(items), 0
@@ -1579,7 +2212,7 @@ def _filter_items_by_window(
     rejected = 0
     for item in items:
         published_at = _coerce_datetime(item.published_at)
-        if published_at is None:
+        if published_at is None and allow_text_date_extraction:
             published_at = _extract_date_from_text(
                 f"{item.title} {item.content or ''} {item.summary or ''}"
             )
@@ -1660,13 +2293,16 @@ def _topic_review_context(
     window_start: datetime | None = None,
     window_end: datetime | None = None,
 ) -> dict:
-    keywords = topic.keywords if isinstance(topic.keywords, list) else []
+    keywords = _topic_collection_keywords(topic)
     context = {
         "topic_id": topic.id,
         "name": topic.name,
         "description": topic.description or "",
         "semantic_instruction": semantic_prompt or topic.description_prompt or "",
         "keywords": [str(value) for value in keywords if value],
+        "exclude_keywords": [
+            str(value) for value in (topic.exclude_keywords or []) if value
+        ],
     }
     return {
         **context,

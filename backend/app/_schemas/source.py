@@ -98,6 +98,9 @@ class SourceOut(BaseModel):
     verified_at: IsoDT = None
     compliance_reviewed_by: str | None = None
     compliance_snapshot: dict | None = None
+    collection_profile: dict | None = None
+    cooldown_until: IsoDT = None
+    consecutive_failures: int = 0
     last_sync_at: IsoDT = None
     last_error: str | None = None
     items_collected: int = 0

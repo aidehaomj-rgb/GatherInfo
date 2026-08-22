@@ -1,0 +1,29 @@
+{
+  "suffixes": ["official notice", "latest update", "implementation details", "cross-border impact", "published this week"],
+  "topics": {
+    "item-56adc0": {
+      "positive": ["China dual-use export control licence", "entity list sanctions on Chinese exporter", "controlled technology end-user restriction", "export ban evasion through third country", "extraterritorial export control affecting China", "customs enforcement of controlled goods"],
+      "negative": ["domestic school admissions", "football match results", "local weather forecast", "restaurant opening review", "mobile game release", "residential property decoration"]
+    },
+    "global-trade": {
+      "positive": ["tariff schedule adjustment", "anti-dumping duty investigation", "countervailing measure notice", "safeguard tariff implementation", "rules of origin change", "customs de minimis procedure"],
+      "negative": ["celebrity interview", "hospital appointment guide", "concert ticket sale", "city park renovation", "consumer phone wallpaper", "fiction book review"]
+    },
+    "foreign-trade-forum-risk-monitoring": {
+      "positive": ["forum post offers undervalued customs declaration", "double clearance tax included shipping route", "false exporter name used for customs procedure", "origin certificate evasion discussion", "licence-free restricted goods clearance", "abnormal transshipment route to avoid tariff"],
+      "negative": ["legitimate warehouse rental", "standard product photography", "office software tutorial", "language learning discussion", "holiday greeting thread", "sports equipment maintenance"]
+    },
+    "weekly-enforcement-intelligence": {
+      "positive": ["customs seizure and prosecution", "border agency detained undeclared cargo", "court forfeiture for export control breach", "customs penalty case number", "smuggling arrest at port", "sanctions evasion indictment shipment"],
+      "negative": ["police community fun run", "court building architecture", "museum collection opening", "airport restaurant menu", "port tourism brochure", "legal education scholarship"]
+    },
+    "tech-regulations": {
+      "positive": ["WTO TBT notification product standard", "SPS quarantine measure", "conformity assessment regulation", "product recall market notice", "battery carbon footprint requirement", "digital product passport implementation"],
+      "negative": ["software theme customization", "music chart ranking", "travel photo collection", "home cooking recipe", "online chess tournament", "office furniture catalogue"]
+    },
+    "weekly-trade-current-affairs": {
+      "positive": ["export ban changes shipping route", "tariff shock changes import prices", "customs procedure disrupts port logistics", "sanctions alter cross-border supply chain", "quarantine restriction affects food imports", "border seizure reveals new smuggling route"],
+      "negative": ["domestic film premiere", "school sports day", "personal fitness routine", "garden flower exhibition", "weather photography contest", "video game character update"]
+    }
+  }
+}

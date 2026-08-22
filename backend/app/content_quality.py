@@ -18,6 +18,7 @@ from app.llm_client import call_llm
 from app.language_quality import is_substantially_chinese
 from app.models import CollectedItem, ModelConfig
 from app.services.item_service import purge_item_references
+from app.topic_research_context import TopicResearchContext
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,10 @@ PROMOTION_MARKERS = (
     "五星大站", "四星大站", "ebpay", "side1", "side2",
 )
 LISTING_PATHS = ("/tag/", "/tags/", "/category/", "/search", "/archive/")
+INFORMATION_TYPES = frozenset({"政策监管", "市场中断", "供应链风险", "执法事件", "贸易路线变化", "其他"})
+RELEVANCE_TIERS = frozenset({"china_direct", "china_transmission", "global_reference"})
+EVIDENCE_GRADES = frozenset({"A", "B", "C"})
+CUSTOMS_VALUES = frozenset({"直接监管价值", "风险监测价值", "一般参考价值"})
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,18 @@ def rule_rejection_reason(item: FetchItem) -> str | None:
     return None
 
 
+def normalize_score(value: Any) -> float:
+    """Normalize current 0..1 and legacy 0..100 scores to the unit interval."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(score):
+        return 0.0
+    normalized = score / 100 if score > 1 else score
+    return round(max(0.0, min(1.0, normalized)), 4)
+
+
 async def curate_article_candidates(
     items: list[FetchItem],
     model: ModelConfig | Any | None,
@@ -89,7 +106,7 @@ async def curate_article_candidates(
     candidates: list[FetchItem] = []
     rejected: list[RejectedArticle] = []
     for item in items:
-        reason = rule_rejection_reason(item)
+        reason = _context_exclusion_reason(item, topic_context) or rule_rejection_reason(item)
         if reason:
             rejected.append(RejectedArticle(item=item, reason=reason))
         else:
@@ -114,6 +131,13 @@ async def curate_article_candidates(
         return [], rejected
 
     approved: list[FetchItem] = []
+    context_policy = _context_payload(topic_context).get("policy", {})
+    minimum_quality = float(
+        (context_policy or {}).get("minimum_quality", 0.70) or 0.70
+    ) * 100
+    minimum_relevance = float(
+        (context_policy or {}).get("minimum_relevance", 0.70) or 0.70
+    ) * 100
     for offset in range(0, len(candidates), REVIEW_BATCH_SIZE):
         batch = candidates[offset:offset + REVIEW_BATCH_SIZE]
         try:
@@ -139,7 +163,11 @@ async def curate_article_candidates(
             )
             curated = (
                 None if temporal_reason else
-                _curate_approved_item(item, decision, bool(topic_context), _is_customs_hotspot_topic(topic_context))
+                _curate_approved_item(
+                    item, decision, bool(topic_context),
+                    _is_customs_hotspot_topic(topic_context),
+                    minimum_quality, minimum_relevance,
+                )
             )
             if curated:
                 approved.append(curated)
@@ -174,7 +202,8 @@ async def review_persisted_items(
     if item_ids:
         query = query.filter(CollectedItem.id.in_(item_ids))
     if topic_id:
-        query = query.filter(CollectedItem.topic_id == topic_id)
+        from app.services.topic_item_query import filter_items_by_topic
+        query = filter_items_by_topic(query, topic_id)
     if source_id:
         query = query.filter(CollectedItem.source_id == source_id)
     if category:
@@ -294,6 +323,21 @@ def _can_use_model(model: ModelConfig | Any | None) -> bool:
     return bool(model and getattr(model, "is_active", False) and getattr(model, "model_name", ""))
 
 
+def _context_payload(topic_context: Any) -> dict[str, Any]:
+    if isinstance(topic_context, TopicResearchContext):
+        return topic_context.to_dict()
+    return dict(topic_context) if isinstance(topic_context, dict) else {}
+
+
+def _context_exclusion_reason(item: FetchItem, topic_context: Any) -> str | None:
+    exclusions = _context_payload(topic_context).get("exclude_keywords", [])
+    if not isinstance(exclusions, list):
+        return None
+    text = _meaningful_text(" ".join((item.title or "", item.summary or "", item.content or ""))).casefold()
+    matched = next((str(term).strip() for term in exclusions if str(term).strip().casefold() in text), "")
+    return f"命中主题排除词：{matched}" if matched else None
+
+
 async def _review_batch(
     items: list[FetchItem],
     model: ModelConfig | Any,
@@ -310,7 +354,7 @@ async def _review_batch(
     if topic_context:
         topic_block = (
             "\n本次采集主题（按语义相关而非逐字匹配）：\n"
-            + json.dumps(topic_context, ensure_ascii=False)
+            + json.dumps(_context_payload(topic_context), ensure_ascii=False)
             + "\n候选信息必须与主题方向较密切相关；同义词、近义事件、翻译词和上下位概念均可视为相关。"
         )
     prompt = """你是服务海关关员的贸易与监管情报编辑。审核下列候选信息，并且只保留一篇可独立阅读、事实完整、对海关岗位有参考价值的文章、政策原文或权威介绍。
@@ -320,7 +364,7 @@ async def _review_batch(
 拒绝以下内容：标签页、栏目页、搜索结果页、广告/博彩/导流页、多个标题或链接堆叠页、无法辨认原始来源的转载拼贴、正文过短、不能说明主体/行为/对象/时间或影响的片段。不得根据常识补充原文没有的事实。
 
 对每条候选仅返回 JSON：
-{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"china_customs_score":0-100,"transmission_evidence_score":0-100,"executable_check_score":0-100,"foreign_enforcement_only":false,"china_customs_stage":"中国进境|中国出境|中外陆路边境|中国港口与舱单|保税监管|中国出口管制|中国检验检疫|跨境电商|无直接落点","transmission_chain":"境外事件→供需/价差/物流/政策变化→具体对华贸易路线或主体→中国海关监管风险","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","facts":"仅依据原文概括的事实","customs_risk":"明确落在中国海关监管环节的风险，使用可能、或等研判措辞","data_checks":"至少包括数据表或单证、商品/国别/路线范围、异常指标和下一步核查动作","risk_level":"高|中高|中"}]}。
+{"reviews":[{"index":0,"decision":"approve|reject","confidence":0-100,"independence_score":0-100,"completeness_score":0-100,"customs_value_score":0-100,"topic_relevance_score":0-100,"information_type":"政策监管|市场中断|供应链风险|执法事件|贸易路线变化|其他","relevance_tier":"china_direct|china_transmission|global_reference","evidence_grade":"A|B|C","customs_value":"直接监管价值|风险监测价值|一般参考价值","policy_stage":"提议/征求意见|正式公布|生效/实施|延期/暂停/终止|执行/争端|不适用","measure_stage":"通报/预告|征求意见|正式发布|实施|过渡期/延期|不适用","authority":"执法或发布机关","case_number":"案号或公告编号，没有则空","goods":"涉事商品或受影响产品","route":"起运地、目的地、口岸或路线","facts":"仅依据原文概括的事实","analysis_judgement":"与事实分开的分析判断，使用可能、或、需核验等措辞","analysis_basis":"支持分析判断的原文事实或客观传导依据","china_customs_score":0-100,"transmission_evidence_score":0-100,"executable_check_score":0-100,"foreign_enforcement_only":false,"china_customs_stage":"中国进境|中国出境|中外陆路边境|中国港口与舱单|保税监管|中国出口管制|中国检验检疫|跨境电商|无直接落点","transmission_chain":"境外事件→供需/价差/物流/政策变化→具体对华贸易路线或主体→中国海关监管风险","topic_relevance_reason":"中文简短理由","reason":"中文简短理由","title_zh":"精确中文标题","summary_zh":"80-160字中文摘要","content_zh":"180-700字中文整理稿","business_category":"业务分类","risk_type":"风险类型","countries":["国家或地区"],"products":["产品或对象"],"actors":["相关主体"],"routes":["贸易或物流路径"],"china_relevance":0-100,"priority":"high|medium|low","key_facts":["原文支持的关键事实"],"evidence_quotes":["原文中的短证据摘录"],"publishability":0-100,"original_language":"原文语言代码","artifact_type":"single_event|policy_document|timeline|roundup|other","primary_event_date":"YYYY-MM-DD或空字符串","source_type":"政府公告|官方执法通报|通讯社报道|行业数据报道|研究材料|其他","customs_risk":"明确落在中国海关监管环节的风险，使用可能、或等研判措辞","data_checks":"至少包括数据表或单证、商品/国别/路线范围、异常指标和下一步动作","risk_level":"高|中高|中"}]}。
 
 只有在 independence_score、completeness_score 均不低于70，且能写出不臆测的完整中文整理稿时才允许 approve。对于"涉进出口时政热点"主题另须同时满足：customs_value_score、topic_relevance_score、china_customs_score、transmission_evidence_score、executable_check_score均不低于75；china_customs_stage不能是"无直接落点"；transmission_chain必须说明风险如何落到中国进境、出境、陆路边境、港口舱单、保税、出口管制、检验检疫或跨境电商监管；data_checks必须明确数据表或单证、商品/国别/路线范围、异常指标及下一步动作。原文不必出现中国，但从境外事件到中国海关风险的传导必须有贸易方向、地理邻接、价差、现有航线、管制对象或供应依赖等客观依据。仅影响外国海关征税、外国贸易救济、外国市场准入或外国进口商合规，foreign_enforcement_only应为true并必须拒绝；不得把一般性的"可能影响中国"作为入选理由。整理稿必须区分原文事实与分析推演。整理稿须区分页面发布日期与主事件日期：时间线、综述、月度汇编等页面用 artifact_type=timeline/roundup，并把该条情报所述核心事件真实发生日期写入 primary_event_date；不得把页面更新时间当成旧事件的新发生日期。只输出 JSON，不要 Markdown。
 
@@ -341,10 +385,14 @@ def _curate_approved_item(
     decision: dict[str, Any],
     require_topic_relevance: bool,
     require_china_customs_value: bool = False,
+    minimum_quality: float = MIN_CORE_REVIEW_SCORE,
+    minimum_relevance: float = MIN_WEEKLY_PUBLICATION_SCORE,
 ) -> FetchItem | None:
     if str(decision.get("decision", "")).lower() != "approve":
         return None
-    if _quality_score_rejection_reason(decision, require_topic_relevance):
+    if _quality_score_rejection_reason(
+        decision, require_topic_relevance, minimum_quality, minimum_relevance,
+    ):
         return None
     if require_china_customs_value:
         if bool(decision.get("foreign_enforcement_only")):
@@ -397,6 +445,7 @@ def _curate_approved_item(
         "title_zh": title, "summary_zh": summary,
         "content_zh": content, "status": "curated",
     }
+    metadata["trade_assessment"] = _build_trade_assessment(decision)
     metadata["customs_hotspot_review"] = {
         "method": "llm",
         "source_type": _clean_text(decision.get("source_type"))[:100],
@@ -444,9 +493,57 @@ def _curate_approved_item(
     return replace(
         item, language="zh",
         category=business_category, entities=entities,
-        quality_score=max(float(item.quality_score or 0), quality),
-        relevance_score=relevance_score, raw_metadata=metadata,
+        quality_score=max(normalize_score(item.quality_score), normalize_score(quality)),
+        relevance_score=normalize_score(relevance_score), raw_metadata=metadata,
     )
+
+
+def _build_trade_assessment(decision: dict[str, Any]) -> dict[str, str]:
+    """Keep facts and inference separate in a small, stable metadata contract."""
+    information_type = _enum_value(decision.get("information_type"), INFORMATION_TYPES, "其他")
+    relevance_tier = _enum_value(decision.get("relevance_tier"), RELEVANCE_TIERS, "global_reference")
+    evidence_grade = _enum_value(decision.get("evidence_grade"), EVIDENCE_GRADES, _infer_evidence_grade(decision))
+    customs_value = _enum_value(decision.get("customs_value"), CUSTOMS_VALUES, _infer_customs_value(decision))
+    base = {
+        "information_type": information_type,
+        "relevance_tier": relevance_tier,
+        "evidence_grade": evidence_grade,
+        "customs_value": customs_value,
+        "facts": _clean_text(decision.get("facts"))[:2000],
+        "analysis_judgement": _clean_text(decision.get("analysis_judgement") or decision.get("customs_risk"))[:2000],
+        "analysis_basis": _clean_text(decision.get("analysis_basis") or decision.get("transmission_chain"))[:2000],
+    }
+    optional_limits = {
+        "policy_stage": 80, "measure_stage": 80, "authority": 300,
+        "case_number": 200, "goods": 500, "route": 800,
+    }
+    optional = {
+        field: value[:limit]
+        for field, limit in optional_limits.items()
+        if (value := _clean_text(decision.get(field)))
+    }
+    return {**base, **optional}
+
+
+def _enum_value(value: Any, allowed: frozenset[str], fallback: str) -> str:
+    cleaned = _clean_text(value)
+    return cleaned if cleaned in allowed else fallback
+
+
+def _infer_evidence_grade(decision: dict[str, Any]) -> str:
+    source_type = _clean_text(decision.get("source_type"))
+    if any(marker in source_type for marker in ("政府", "官方", "法院", "国际组织")):
+        return "A"
+    if any(marker in source_type for marker in ("论坛", "社区", "市场主体")):
+        return "C"
+    return "B"
+
+
+def _infer_customs_value(decision: dict[str, Any]) -> str:
+    score = _score(decision, "customs_value_score")
+    if score >= 80:
+        return "直接监管价值"
+    return "风险监测价值" if score >= 60 else "一般参考价值"
 
 
 def _decision_rejection_reason(
@@ -466,13 +563,15 @@ def _decision_rejection_reason(
 def _quality_score_rejection_reason(
     decision: dict[str, Any],
     require_weekly_readiness: bool,
+    minimum_quality: float = MIN_CORE_REVIEW_SCORE,
+    minimum_relevance: float = MIN_WEEKLY_PUBLICATION_SCORE,
 ) -> str | None:
     core_scores = (
         _score(decision, "confidence"),
         _score(decision, "independence_score"),
         _score(decision, "completeness_score"),
     )
-    if min(core_scores) < MIN_CORE_REVIEW_SCORE:
+    if min(core_scores) < minimum_quality:
         return "大模型未确认文章完整性或海关业务价值"
     customs_minimum = (
         MIN_WEEKLY_PUBLICATION_SCORE
@@ -482,7 +581,7 @@ def _quality_score_rejection_reason(
         return "海关业务价值评分低于入库门槛"
     if not require_weekly_readiness:
         return None
-    if _score(decision, "topic_relevance_score") < MIN_WEEKLY_PUBLICATION_SCORE:
+    if _score(decision, "topic_relevance_score") < minimum_relevance:
         return "候选信息与主题语义方向关联不足"
     if "publishability" in decision and _score(decision, "publishability") < MIN_WEEKLY_PUBLICATION_SCORE:
         return "发布适用性评分低于周报门槛"
@@ -496,7 +595,7 @@ def _temporal_rejection_reason(
 ) -> str | None:
     if str(decision.get("decision", "")).casefold() != "approve":
         return None
-    context = topic_context if isinstance(topic_context, dict) else {}
+    context = _context_payload(topic_context)
     start = _parse_iso_datetime(context.get("collection_window_start"))
     end = _parse_iso_datetime(context.get("collection_window_end"))
     if start is None or end is None:
@@ -651,7 +750,7 @@ def _clean_text(value: Any) -> str:
 
 
 def _is_customs_hotspot_topic(topic_context: dict[str, Any] | None) -> bool:
-    return bool(topic_context and topic_context.get("topic_id") == "weekly-trade-current-affairs")
+    return _context_payload(topic_context).get("topic_id") == "weekly-trade-current-affairs"
 
 
 def _rule_curate_customs_hotspot(item: FetchItem) -> FetchItem | None:
@@ -740,8 +839,8 @@ def _rule_curate_customs_hotspot(item: FetchItem) -> FetchItem | None:
     return replace(
         item,
         summary=(item.summary or risk_type),
-        quality_score=max(float(item.quality_score or 0), 0.72),
-        relevance_score=max(float(item.relevance_score or 0), 0.78),
+        quality_score=max(normalize_score(item.quality_score), 0.72),
+        relevance_score=max(normalize_score(item.relevance_score), 0.78),
         raw_metadata=metadata,
     )
 
@@ -754,4 +853,3 @@ def _china_nexus_evidence(text: str) -> str:
         if cleaned and any(marker in cleaned.casefold() for marker in markers):
             return cleaned[:800]
     return "原文明确涉及中国相关主体、货物、贸易方向或跨境路线。"
-    return _meaningful_text(str(value or ""))

@@ -18,6 +18,8 @@ from app.web_content_extractor import extract_article_text
 from app.safe_fetch import fetch_public_html, public_async_client
 
 logger = logging.getLogger(__name__)
+EXPLICIT_TARGET_TIMEOUT_SECONDS = 12.0
+EXPLICIT_TARGET_PHASE_BUDGET_SECONDS = 30.0
 
 
 @register_collector("web_scrape")
@@ -41,6 +43,14 @@ class WebScrapeCollector(BaseCollector):
             timeout=cfg.timeout_seconds,
             headers=_scrape_headers(),
         ) as client:
+            target_items, target_errors = await _fetch_explicit_targets(
+                client, cfg, self.target_urls, keywords, max_items,
+            )
+            items = [*items, *target_items]
+            errors = [*errors, *target_errors]
+            seen = seen | {item.url for item in target_items if item.url}
+            if ac.get("target_only") or self.target_urls_mode == "explicit":
+                return _collect_result(cfg, items, errors)
             for url in urls:
                 if len(items) >= max_items:
                     break
@@ -145,17 +155,9 @@ class WebScrapeCollector(BaseCollector):
                     logger.error("Web scrape error for source %s url %s: %s",
                                  self.config.id, url[:80], exc)
 
-        status = JobStatus.COMPLETED if not errors else JobStatus.PARTIAL
-        if not items and errors:
-            status = JobStatus.FAILED
-
         logger.info("WebScrape: %d items, %d errors for source %s",
                      len(items), len(errors), self.config.id)
-        return CollectResult(
-            run_id=self._new_run_id(), source_id=cfg.id,
-            status=status, items=items, items_new=len(items),
-            items_failed=len(errors), error_log=errors if errors else None,
-        )
+        return _collect_result(cfg, items, errors, run_id=self._new_run_id())
 
     def _error(self, msg: str) -> CollectResult:
         return CollectResult(
@@ -217,6 +219,73 @@ def _scrape_headers() -> dict:
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
+
+
+async def _fetch_explicit_targets(client, cfg, target_urls, keywords, max_items):
+    items: list[FetchItem] = []
+    errors: list[str] = []
+    deadline = asyncio.get_running_loop().time() + EXPLICIT_TARGET_PHASE_BUDGET_SECONDS
+    allowed_roots = tuple(url for url in (
+        getattr(cfg, "base_url", None), getattr(cfg, "homepage_url", None),
+    ) if url)
+    for url in target_urls:
+        if len(items) >= max_items:
+            break
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            errors.append("显式目标页读取达到本轮 30 秒预算")
+            break
+        if not any(_same_origin(root, url) for root in allowed_roots):
+            continue
+        try:
+            timeout_seconds = min(
+                max(float(cfg.timeout_seconds or 1), 1.0),
+                EXPLICIT_TARGET_TIMEOUT_SECONDS,
+                remaining,
+            )
+            response = await asyncio.wait_for(
+                fetch_public_html(
+                    client, url, timeout_seconds=timeout_seconds,
+                    minimum_interval_seconds=_minimum_request_interval(cfg),
+                ),
+                timeout=timeout_seconds,
+            )
+            if response is None:
+                raise ValueError("目标详情页未通过公网 HTML 安全校验")
+            extracted = extract_article_text(response.text, response.url)
+            title = str(extracted.get("title") or "").strip()
+            content = str(extracted.get("content") or "").strip()
+            if not title or len(content) < 180:
+                raise ValueError("目标详情页缺少可理解的独立正文")
+            if not _matches(title, content, keywords):
+                continue
+            items.append(FetchItem(
+                title=title, content=content, url=response.url,
+                summary=str(extracted.get("summary") or content[:500]),
+                published_at=extracted.get("published_at"),
+                language=detect_lang(f"{title} {content}"),
+                category=infer_category(title, content),
+                suggested_tags=build_tags(title, content),
+                quality_score=0.8, relevance_score=0.7,
+                raw_metadata={
+                    "source_url": response.url,
+                    "collection_method": "explicit_target",
+                },
+            ))
+        except Exception as exc:
+            errors.append(f"{url[:80]}: {exc}")
+    return items, errors
+
+
+def _collect_result(cfg, items, errors, run_id=None):
+    status = JobStatus.COMPLETED if not errors else JobStatus.PARTIAL
+    if not items and errors:
+        status = JobStatus.FAILED
+    return CollectResult(
+        run_id=run_id or f"target-{cfg.id}", source_id=cfg.id,
+        status=status, items=items, items_new=len(items),
+        items_failed=len(errors), error_log=errors if errors else None,
+    )
 
 
 def _minimum_request_interval(config: SourceConfig) -> float:

@@ -97,7 +97,6 @@ class GDELTSearchCollector(BaseCollector):
                                 "gdelt_seen_at": seen_at,
                                 "date_verification": "search_index_only",
                                 "allow_undated_results": False,
-                                "allow_unfiltered_results": True,
                             },
                         ))
                 if index < len(queries) - 1:
